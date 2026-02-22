@@ -103,6 +103,8 @@ class Comparison:
     col_b: str
     swapped: bool
     messages: list[dict[str, Any]]
+    text_a: str = ""
+    text_b: str = ""
 
 
 def build_prompt(text_a: str, text_b: str, swapped: bool) -> tuple[str, bool]:
@@ -187,6 +189,8 @@ def build_comparisons(
                     col_b=col_b,
                     swapped=swapped,
                     messages=messages,
+                    text_a=text_a,
+                    text_b=text_b,
                 )
             )
 

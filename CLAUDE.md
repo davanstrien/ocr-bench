@@ -90,23 +90,91 @@ Decentralized eval results on Hub: benchmark datasets define `eval.yaml`, model 
 ### Phase 1: Foundation
 - [x] Investigate Inspect AI — **NO-GO** (2026-02-20). Build standalone.
 - [x] Init uv project with `src/ocr_bench/` layout (2026-02-20)
-- [ ] Port shared foundations: `elo.py` (Bradley-Terry, K=32), `judge.py` (prompt template, Comparison, structured output schema, image utils)
-- [ ] Port dataset loading: `dataset.py` (flat, config-per-model, PR-based, OCR column discovery)
-- [ ] Port judge backends: `backends.py` (vLLM offline + API via HF Inference Providers / OpenAI-compatible)
-- [ ] Port Hub publishing: `publish.py` (comparisons, leaderboard, metadata configs)
-- [ ] CLI entrypoint: `ocr-bench judge` (offline vLLM) / `ocr-bench jury` (API-based)
+- [x] Port `elo.py` (Bradley-Terry, K=32) + tests (2026-02-20)
+- [x] Port `judge.py` (prompt template, Comparison, structured output schema, image utils) + tests (2026-02-20)
+- [x] Port `dataset.py` (flat, config-per-model, PR-based, OCR column discovery) + tests (2026-02-20)
+- [x] Port `backends.py` (API only: InferenceProvider + OpenAI-compatible) + tests (2026-02-20)
+- [x] Port `publish.py` (comparisons, leaderboard, metadata configs) + tests (2026-02-20)
+- [x] CLI entrypoint: `ocr-bench judge` with auto jury mode (2026-02-20)
+- [x] **86 tests passing**, ruff clean, ty clean (2026-02-20)
 - [ ] Write README — key finding ("no single best model") as the headline
 - [ ] Adapt `OCR-BENCHMARK.md` methodology section for README
 
-### Phase 2: Customization + Hub Publishing
+#### Design decisions made in Phase 1
+- **API-only backends** for Phase 1. vLLM offline stays as standalone UV script for HF Jobs.
+- **Single `ocr-bench judge` command**. Auto-detects jury mode when multiple `--model` flags given.
+- **Default judge**: `novita:moonshotai/Kimi-K2.5` (was `Kimi-K2.5-Instruct`, model ID changed on Hub).
+- **stamina** for retry (exponential backoff + jitter), **structlog** for structured logging.
+- **`DatasetError`** instead of `sys.exit()` — CLI catches and prints.
+
+#### Smoke test results (2026-02-20)
+
+**Rubenstein manuscript cards** (`davanstrien/ocr-bench-rubenstein --from-prs --max-samples 5`):
+- 4 models, 30 comparisons, 30/30 valid, **all ties**
+- Correct result: these are short index cards, all 4 models produce near-identical output
+- Validates the prompt's "only pick a winner when there is a clear quality difference" instruction
+
+**UFO-ColPali diverse docs** (`davanstrien/ocr-bench-ufo --from-prs --max-samples 5`):
+- 4 models, 30 comparisons, 28/30 valid (2 truncated by max_tokens=300)
+- Clear ranking differentiation:
+
+| Rank | Model | ELO | Win% |
+|------|-------|-----|------|
+| 1 | DeepSeek-OCR | 1539 | 64% |
+| 2 | LightOnOCR-2-1B | 1530 | 57% |
+| 3 | dots.ocr | 1481 | 43% |
+| 4 | GLM-OCR | 1449 | 36% |
+
+Confirms core finding: **rankings change by document type** (all-tie on cards, clear winners on diverse docs).
+
+#### Issues found in smoke test
+- **Judge response truncation**: `max_tokens=300` too low for some comparisons — 2/30 parse failures on UFO. Should bump default or make configurable.
+- **BPL dataset** (`davanstrien/bpl-card-catalog-glm-ocr-bench`) has 500 samples but only 2 unique models (GLM-OCR + DeepSeek-OCR-2 x2 columns). No PRs. Works with flat mode but less interesting for benchmarking.
+
+#### Available test datasets
+
+| Dataset | Models | Shape | Samples | Notes |
+|---------|--------|-------|---------|-------|
+| `davanstrien/ocr-bench-rubenstein` | 4 (GLM, DeepSeek, dots, LightOn) | PRs | 50 | Index cards, all models tie |
+| `davanstrien/ocr-bench-ufo` | 4 (same) | PRs | 50 | Diverse docs, clear differentiation |
+| `davanstrien/bpl-card-catalog-glm-ocr-bench` | 2 unique (GLM, DeepSeek-OCR-2) | Flat | 500 | Card catalog, only 2 models |
+
+### Phase 2: Customization + Polish
+- [x] Fix `max_tokens` truncation — bumped default to 512, added `--max-tokens` CLI flag (2026-02-20)
+- [x] Enrich comparison data with OCR texts — `text_a`, `text_b`, `col_a`, `col_b` in published comparisons (2026-02-22)
+- [x] Gradio results viewer — `ocr-bench browse <repo_id>` with leaderboard + comparison browser tabs (2026-02-22)
 - [ ] Judge prompt presets for GLAM document types
 - [ ] Custom prompt and ignore list support
-- [ ] `--publish` flag — pushes evaluation to Hub with standardized schema + metadata
-- [ ] Define leaderboard dataset schema
+- [ ] Define leaderboard dataset schema (publishing already works via `--save-results`)
 
-### Phase 3: Leaderboard Viewer
-- [ ] Viewer on Hub that reads any evaluation dataset matching the schema
-- [ ] Approach TBD
+#### Design decisions made in Phase 2
+- **Gradio as optional dep** — `pip install ocr-bench[viewer]`. Core judge pipeline stays lightweight.
+- **Viewer reads from Hub** — no local data needed, any published results dataset works.
+- **Text-only for now** — image display deferred (requires join back to source dataset by sample_idx).
+
+### Phase 3: Results Visibility
+Three related pieces that make results credible and shareable:
+
+**Leaderboard viewer** — DONE (2026-02-22)
+- `ocr-bench browse` reads any result dataset matching our schema
+- Two tabs: leaderboard table + comparison browser with filter by winner/model
+- Tested against `davanstrien/ocr-bench-rubenstein-judge` — works with old data (texts empty), will show full OCR when re-published
+
+**What's next for the viewer**
+- [ ] Re-run judge with `--save-results` to publish enriched data (texts + column names)
+- [ ] Add document image display (join comparisons back to source dataset by sample_idx)
+- [ ] Deploy as HF Space for public access
+- [ ] Clean up model name display when col_a/col_b are empty (hide empty parens)
+
+**Human validation integration**
+- `ocr-human-eval.py` exists as standalone Gradio blind A/B app (not ported)
+- Prior data: 30 blind comparisons showed Kimi K2.5 matches human rankings best
+- Goal: run VLM judge → spot-check with human eval → publish agreement rate alongside leaderboard
+- This is what makes the benchmark credible ("our VLM judge agrees with humans X% of the time")
+
+**Side-by-side comparison browser** — DONE (2026-02-22, part of `ocr-bench browse`)
+
+These all feed into each other — the README/blog become much more powerful with a live leaderboard, human validation scores, and browsable comparisons.
 
 ### Before Shipping
 - [ ] Choose a project name — "ocr-bench" is placeholder. Want something that captures "rankings depend on your documents"
@@ -130,7 +198,7 @@ Decentralized eval results on Hub: benchmark datasets define `eval.yaml`, model 
 Bradley-Terry, K=32, initial 1500. Position-bias randomization.
 
 ### Judge Models
-- **Kimi K2.5 (170B, API via Novita)** — best human agreement, default for API
+- **Kimi K2.5 (`novita:moonshotai/Kimi-K2.5`)** — best human agreement, default for API
 - **Qwen3-VL-30B-A3B (offline vLLM)** — best offline judge
 - **7B/8B** — biased toward verbose output, not recommended as primary
 

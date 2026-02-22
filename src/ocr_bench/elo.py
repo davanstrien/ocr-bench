@@ -39,6 +39,10 @@ class ComparisonResult:
     reason: str = ""
     agreement: str = "1/1"
     swapped: bool = False
+    text_a: str = ""
+    text_b: str = ""
+    col_a: str = ""
+    col_b: str = ""
 
 
 @dataclass
@@ -117,6 +121,10 @@ def compute_elo(
                 "winner": winner,
                 "reason": r.reason,
                 "agreement": r.agreement,
+                "text_a": r.text_a,
+                "text_b": r.text_b,
+                "col_a": r.col_a,
+                "col_b": r.col_b,
             }
         )
 

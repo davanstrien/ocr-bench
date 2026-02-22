@@ -5,6 +5,8 @@ import json
 from PIL import Image
 
 from ocr_bench.judge import (
+    Comparison,
+    build_comparisons,
     build_messages,
     build_prompt,
     image_to_base64,
@@ -123,3 +125,77 @@ class TestParseJudgeOutput:
         result = parse_judge_output('{"winner": "A"}')
         assert result["winner"] == "A"
         assert result["reason"] == ""
+
+
+class TestComparison:
+    def test_text_fields_default_empty(self):
+        comp = Comparison(
+            sample_idx=0,
+            model_a="a",
+            model_b="b",
+            col_a="col_a",
+            col_b="col_b",
+            swapped=False,
+            messages=[],
+        )
+        assert comp.text_a == ""
+        assert comp.text_b == ""
+
+    def test_text_fields_set(self):
+        comp = Comparison(
+            sample_idx=0,
+            model_a="a",
+            model_b="b",
+            col_a="col_a",
+            col_b="col_b",
+            swapped=False,
+            messages=[],
+            text_a="hello",
+            text_b="world",
+        )
+        assert comp.text_a == "hello"
+        assert comp.text_b == "world"
+
+
+class TestBuildComparisons:
+    def _make_dataset(self):
+        """Create a minimal fake dataset (list of dicts with PIL images)."""
+        return [
+            {
+                "image": Image.new("RGB", (100, 100), color="red"),
+                "ocr_model_a": "text from model A",
+                "ocr_model_b": "text from model B",
+            },
+        ]
+
+    def test_comparisons_have_text_fields(self):
+        ds = self._make_dataset()
+        ocr_columns = {"ocr_model_a": "ModelA", "ocr_model_b": "ModelB"}
+        comps = build_comparisons(ds, ocr_columns)
+        assert len(comps) == 1
+        comp = comps[0]
+        assert comp.text_a == "text from model A"
+        assert comp.text_b == "text from model B"
+
+    def test_skips_empty_text(self):
+        ds = [
+            {
+                "image": Image.new("RGB", (100, 100)),
+                "ocr_a": "",
+                "ocr_b": "has text",
+            },
+        ]
+        comps = build_comparisons(ds, {"ocr_a": "A", "ocr_b": "B"})
+        assert len(comps) == 0
+
+    def test_max_samples(self):
+        ds = [
+            {
+                "image": Image.new("RGB", (50, 50)),
+                "col_a": f"text {i}",
+                "col_b": f"text {i}",
+            }
+            for i in range(10)
+        ]
+        comps = build_comparisons(ds, {"col_a": "A", "col_b": "B"}, max_samples=3)
+        assert len(comps) == 3

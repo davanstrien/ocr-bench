@@ -86,6 +86,37 @@ class TestComputeElo:
         # After unswap, B→A
         assert board.comparison_log[0]["winner"] == "A"
 
+    def test_comparison_log_includes_text_and_col_fields(self):
+        results = [
+            ComparisonResult(
+                sample_idx=0,
+                model_a="alpha",
+                model_b="beta",
+                winner="A",
+                text_a="ocr output A",
+                text_b="ocr output B",
+                col_a="col_alpha",
+                col_b="col_beta",
+            ),
+        ]
+        board = compute_elo(results, ["alpha", "beta"])
+        log = board.comparison_log[0]
+        assert log["text_a"] == "ocr output A"
+        assert log["text_b"] == "ocr output B"
+        assert log["col_a"] == "col_alpha"
+        assert log["col_b"] == "col_beta"
+
+    def test_comparison_log_text_fields_default_empty(self):
+        results = [
+            ComparisonResult(sample_idx=0, model_a="alpha", model_b="beta", winner="tie"),
+        ]
+        board = compute_elo(results, ["alpha", "beta"])
+        log = board.comparison_log[0]
+        assert log["text_a"] == ""
+        assert log["text_b"] == ""
+        assert log["col_a"] == ""
+        assert log["col_b"] == ""
+
     def test_multiple_models(self):
         results = [
             ComparisonResult(sample_idx=0, model_a="a", model_b="b", winner="A"),
