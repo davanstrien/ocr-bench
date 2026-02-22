@@ -53,6 +53,52 @@ def _winner_badge(winner: str) -> str:
         return "Tie"
 
 
+def _model_label(model: str, col: str) -> str:
+    """Format model name with optional column name. Avoids empty parens."""
+    if col:
+        return f"{model} ({col})"
+    return model
+
+
+def _build_pair_summary(comparisons: list[dict[str, Any]]) -> str:
+    """Build a win/loss summary string for each model pair."""
+    from collections import Counter
+
+    pair_counts: dict[tuple[str, str], Counter[str]] = {}
+    for c in comparisons:
+        ma = c.get("model_a", "")
+        mb = c.get("model_b", "")
+        winner = c.get("winner", "tie")
+        key = (ma, mb) if ma <= mb else (mb, ma)
+        if key not in pair_counts:
+            pair_counts[key] = Counter()
+        # Track from perspective of first model in sorted pair
+        if winner == "A":
+            actual_winner = ma
+        elif winner == "B":
+            actual_winner = mb
+        else:
+            actual_winner = "tie"
+
+        if actual_winner == key[0]:
+            pair_counts[key]["W"] += 1
+        elif actual_winner == key[1]:
+            pair_counts[key]["L"] += 1
+        else:
+            pair_counts[key]["T"] += 1
+
+    if not pair_counts:
+        return ""
+
+    parts = []
+    for (ma, mb), counts in sorted(pair_counts.items()):
+        short_a = ma.split("/")[-1] if "/" in ma else ma
+        short_b = mb.split("/")[-1] if "/" in mb else mb
+        wins, losses, ties = counts["W"], counts["L"], counts["T"]
+        parts.append(f"**{short_a}** vs **{short_b}**: {wins}W {losses}L {ties}T")
+    return " | ".join(parts)
+
+
 def build_viewer(repo_id: str) -> gr.Blocks:
     """Build the Gradio app with leaderboard and comparison browser tabs."""
     import gradio as gr
@@ -80,8 +126,12 @@ def build_viewer(repo_id: str) -> gr.Blocks:
         with gr.Tab("Browse Comparisons"):
             # Pre-compute initial display from first comparison
             first = comparison_rows[0] if comparison_rows else {}
-            init_model_a = f"{first.get('model_a', '')} ({first.get('col_a', '')})" if first else ""
-            init_model_b = f"{first.get('model_b', '')} ({first.get('col_b', '')})" if first else ""
+            if first:
+                init_model_a = _model_label(first.get("model_a", ""), first.get("col_a", ""))
+                init_model_b = _model_label(first.get("model_b", ""), first.get("col_b", ""))
+            else:
+                init_model_a = ""
+                init_model_b = ""
 
             with gr.Row():
                 winner_dd = gr.Dropdown(
@@ -95,6 +145,10 @@ def build_viewer(repo_id: str) -> gr.Blocks:
                     label="Filter by model",
                 )
 
+            pair_summary = _build_pair_summary(comparison_rows)
+            if pair_summary:
+                gr.Markdown(pair_summary)
+
             status_text = gr.Markdown(f"**{len(comparison_rows)} comparisons**")
             comp_slider = gr.Slider(
                 minimum=0,
@@ -105,12 +159,8 @@ def build_viewer(repo_id: str) -> gr.Blocks:
             )
 
             with gr.Row():
-                model_a_label = gr.Textbox(
-                    label="Model A", value=init_model_a, interactive=False
-                )
-                model_b_label = gr.Textbox(
-                    label="Model B", value=init_model_b, interactive=False
-                )
+                model_a_label = gr.Textbox(label="Model A", value=init_model_a, interactive=False)
+                model_b_label = gr.Textbox(label="Model B", value=init_model_b, interactive=False)
 
             with gr.Row():
                 text_a_box = gr.Textbox(
@@ -166,8 +216,8 @@ def build_viewer(repo_id: str) -> gr.Blocks:
                     filtered,
                     gr.Slider(maximum=n - 1, value=0),
                     f"**{n} comparisons**",
-                    f"{first.get('model_a', '')} ({first.get('col_a', '')})",
-                    f"{first.get('model_b', '')} ({first.get('col_b', '')})",
+                    _model_label(first.get("model_a", ""), first.get("col_a", "")),
+                    _model_label(first.get("model_b", ""), first.get("col_b", "")),
                     first.get("text_a", ""),
                     first.get("text_b", ""),
                     _winner_badge(first.get("winner", "tie")),
@@ -181,8 +231,8 @@ def build_viewer(repo_id: str) -> gr.Blocks:
                     return "", "", "", "", "", "", ""
                 c = filtered[idx]
                 return (
-                    f"{c.get('model_a', '')} ({c.get('col_a', '')})",
-                    f"{c.get('model_b', '')} ({c.get('col_b', '')})",
+                    _model_label(c.get("model_a", ""), c.get("col_a", "")),
+                    _model_label(c.get("model_b", ""), c.get("col_b", "")),
                     c.get("text_a", ""),
                     c.get("text_b", ""),
                     _winner_badge(c.get("winner", "tie")),

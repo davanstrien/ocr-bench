@@ -71,11 +71,45 @@ def build_parser() -> argparse.ArgumentParser:
     # Output
     judge.add_argument("--save-results", default=None, help="HF repo id to publish results to")
 
+    # --- run subcommand ---
+    run = sub.add_parser("run", help="Launch OCR models on a dataset via HF Jobs")
+    run.add_argument("input_dataset", help="HF dataset repo id with images")
+    run.add_argument("output_repo", help="Output dataset repo (all models push here)")
+    run.add_argument(
+        "--models", nargs="+", default=None, help="Model slugs to run (default: all 4 core)"
+    )
+    run.add_argument("--max-samples", type=int, default=None, help="Per-model sample limit")
+    run.add_argument("--split", default="train", help="Dataset split (default: train)")
+    run.add_argument("--flavor", default=None, help="Override GPU flavor for all models")
+    run.add_argument("--timeout", default="4h", help="Per-job timeout (default: 4h)")
+    run.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
+    run.add_argument("--shuffle", action="store_true", help="Shuffle source dataset")
+    run.add_argument("--list-models", action="store_true", help="Print available models and exit")
+    run.add_argument(
+        "--dry-run", action="store_true", help="Show what would launch without launching"
+    )
+    run.add_argument(
+        "--no-wait", action="store_true", help="Launch and exit without polling (default: wait)"
+    )
+
     # --- browse subcommand ---
     browse = sub.add_parser("browse", help="Browse evaluation results in a web UI")
     browse.add_argument("results", help="HF dataset repo id with published results")
     browse.add_argument("--port", type=int, default=7860, help="Port for Gradio server")
     browse.add_argument("--share", action="store_true", help="Create a public Gradio link")
+
+    # --- validate subcommand ---
+    validate = sub.add_parser("validate", help="Blind human A/B validation of judge quality")
+    validate.add_argument("results", help="HF dataset repo id with published judge results")
+    validate.add_argument("--n", type=int, default=30, help="Number of comparisons to validate")
+    validate.add_argument("--output", default=None, help="Path to save annotations JSON")
+    validate.add_argument("--port", type=int, default=7860, help="Port for Gradio server")
+    validate.add_argument("--share", action="store_true", help="Create a public Gradio link")
+    validate.add_argument(
+        "--no-prioritize-splits",
+        action="store_true",
+        help="Don't show split-jury cases first",
+    )
 
     return parser
 
@@ -206,6 +240,110 @@ def cmd_judge(args: argparse.Namespace) -> None:
         console.print(f"\nResults published to [bold]{args.save_results}[/bold]")
 
 
+def cmd_run(args: argparse.Namespace) -> None:
+    """Launch OCR models on a dataset via HF Jobs."""
+    from ocr_bench.run import (
+        DEFAULT_MODELS,
+        MODEL_REGISTRY,
+        build_script_args,
+        launch_ocr_jobs,
+        poll_jobs,
+    )
+
+    # --list-models
+    if args.list_models:
+        table = Table(title="Available OCR Models", show_lines=True)
+        table.add_column("Slug", style="cyan bold")
+        table.add_column("Model ID")
+        table.add_column("Size", justify="right")
+        table.add_column("Default GPU", justify="center")
+
+        for slug in sorted(MODEL_REGISTRY):
+            cfg = MODEL_REGISTRY[slug]
+            default = " (default)" if slug in DEFAULT_MODELS else ""
+            table.add_row(slug + default, cfg.model_id, cfg.size, cfg.default_flavor)
+
+        console.print(table)
+        console.print(f"\nDefault set: {', '.join(DEFAULT_MODELS)}")
+        return
+
+    selected = args.models or DEFAULT_MODELS
+    for slug in selected:
+        if slug not in MODEL_REGISTRY:
+            console.print(f"[red]Unknown model: {slug}[/red]")
+            console.print(f"Available: {', '.join(MODEL_REGISTRY.keys())}")
+            sys.exit(1)
+
+    console.print("\n[bold]OCR Benchmark Run[/bold]")
+    console.print(f"  Source:  {args.input_dataset}")
+    console.print(f"  Output:  {args.output_repo}")
+    console.print(f"  Models:  {', '.join(selected)}")
+    if args.max_samples:
+        console.print(f"  Samples: {args.max_samples} per model")
+    console.print()
+
+    # Dry run
+    if args.dry_run:
+        console.print("[bold yellow]DRY RUN[/bold yellow] — no jobs will be launched\n")
+        for slug in selected:
+            cfg = MODEL_REGISTRY[slug]
+            flavor = args.flavor or cfg.default_flavor
+            script_args = build_script_args(
+                args.input_dataset,
+                args.output_repo,
+                slug,
+                max_samples=args.max_samples,
+                shuffle=args.shuffle,
+                seed=args.seed,
+                extra_args=cfg.default_args or None,
+            )
+            console.print(f"[cyan]{slug}[/cyan] ({cfg.model_id})")
+            console.print(f"  Flavor:  {flavor}")
+            console.print(f"  Timeout: {args.timeout}")
+            console.print(f"  Script:  {cfg.script}")
+            console.print(f"  Args:    {' '.join(script_args)}")
+            console.print()
+        console.print("Remove --dry-run to launch these jobs.")
+        return
+
+    # Launch
+    jobs = launch_ocr_jobs(
+        args.input_dataset,
+        args.output_repo,
+        models=selected,
+        max_samples=args.max_samples,
+        split=args.split,
+        shuffle=args.shuffle,
+        seed=args.seed,
+        flavor_override=args.flavor,
+        timeout=args.timeout,
+    )
+
+    console.print(f"\n[green]{len(jobs)} jobs launched.[/green]")
+    for job in jobs:
+        console.print(f"  [cyan]{job.model_slug}[/cyan]: {job.job_url}")
+
+    if not args.no_wait:
+        console.print("\n[bold]Waiting for jobs to complete...[/bold]")
+        poll_jobs(jobs)
+        console.print("\n[bold green]All jobs finished![/bold green]")
+        console.print(
+            f"\nMerge PRs at: https://huggingface.co/datasets/{args.output_repo}/community"
+        )
+        console.print("\nThen evaluate:")
+        console.print(
+            f"  ocr-bench judge {args.output_repo} --from-prs "
+            f"--save-results {args.output_repo}-results"
+        )
+    else:
+        console.print("\nJobs running in background.")
+        console.print("Check status at: https://huggingface.co/settings/jobs")
+        console.print(
+            f"When complete, merge PRs at: "
+            f"https://huggingface.co/datasets/{args.output_repo}/community"
+        )
+
+
 def cmd_browse(args: argparse.Namespace) -> None:
     """Launch the Gradio results viewer."""
     try:
@@ -220,6 +358,27 @@ def cmd_browse(args: argparse.Namespace) -> None:
     launch_viewer(args.results, server_port=args.port, share=args.share)
 
 
+def cmd_validate(args: argparse.Namespace) -> None:
+    """Launch the blind human validation UI."""
+    try:
+        from ocr_bench.validate import launch_validation
+    except ImportError:
+        console.print(
+            "[red]Error:[/red] Gradio is not installed. "
+            "Install the viewer extra: [bold]pip install ocr-bench\\[viewer][/bold]"
+        )
+        sys.exit(1)
+
+    launch_validation(
+        args.results,
+        n=args.n,
+        output_path=args.output,
+        prioritize_splits=not args.no_prioritize_splits,
+        server_port=args.port,
+        share=args.share,
+    )
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -231,8 +390,12 @@ def main() -> None:
     try:
         if args.command == "judge":
             cmd_judge(args)
+        elif args.command == "run":
+            cmd_run(args)
         elif args.command == "browse":
             cmd_browse(args)
+        elif args.command == "validate":
+            cmd_validate(args)
     except DatasetError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(1)

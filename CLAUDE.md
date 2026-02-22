@@ -143,6 +143,10 @@ Confirms core finding: **rankings change by document type** (all-tie on cards, c
 - [x] Fix `max_tokens` truncation — bumped default to 512, added `--max-tokens` CLI flag (2026-02-20)
 - [x] Enrich comparison data with OCR texts — `text_a`, `text_b`, `col_a`, `col_b` in published comparisons (2026-02-22)
 - [x] Gradio results viewer — `ocr-bench browse <repo_id>` with leaderboard + comparison browser tabs (2026-02-22)
+- [x] `ocr-bench run` — orchestrator to launch N OCR models via HF Jobs (2026-02-22)
+- [x] Viewer: fix empty col_a/col_b display (no empty parens), add model-pair win/loss summary (2026-02-22)
+- [x] `ocr-bench validate` — blind human A/B validation with judge agreement tracking (2026-02-22)
+- [x] **162 tests passing**, ruff clean (2026-02-22)
 - [ ] Judge prompt presets for GLAM document types
 - [ ] Custom prompt and ignore list support
 - [ ] Define leaderboard dataset schema (publishing already works via `--save-results`)
@@ -151,6 +155,9 @@ Confirms core finding: **rankings change by document type** (all-tie on cards, c
 - **Gradio as optional dep** — `pip install ocr-bench[viewer]`. Core judge pipeline stays lightweight.
 - **Viewer reads from Hub** — no local data needed, any published results dataset works.
 - **Text-only for now** — image display deferred (requires join back to source dataset by sample_idx).
+- **`run.py` references scripts on Hub** — no local copies. MODEL_REGISTRY maps slugs to script URLs + GPU flavors.
+- **`validate.py` reads enriched comparisons** — uses `text_a`/`text_b` from published results, no need to join back to source dataset.
+- **AgreementStats** tracks agree/soft-disagree/hard-disagree. Hard disagree rate > 25% flags judge as miscalibrated.
 
 ### Phase 3: Results Visibility
 Three related pieces that make results credible and shareable:
@@ -164,13 +171,17 @@ Three related pieces that make results credible and shareable:
 - [ ] Re-run judge with `--save-results` to publish enriched data (texts + column names)
 - [ ] Add document image display (join comparisons back to source dataset by sample_idx)
 - [ ] Deploy as HF Space for public access
-- [ ] Clean up model name display when col_a/col_b are empty (hide empty parens)
+- [x] Clean up model name display when col_a/col_b are empty (hide empty parens) (2026-02-22)
+- [x] Model-pair win/loss summary above comparison slider (2026-02-22)
 
-**Human validation integration**
-- `ocr-human-eval.py` exists as standalone Gradio blind A/B app (not ported)
+**Human validation integration** — DONE (2026-02-22)
+- `ocr-bench validate <results-repo>` — blind A/B Gradio app ported from `ocr-human-eval.py`
+- Reads enriched comparisons from Hub (text_a, text_b already available)
+- Split-jury cases shown first (most informative for validation)
+- AgreementStats: agree/soft-disagree/hard-disagree with confidence thresholds
+- Live agreement banner during annotation, Results tab with summary
+- JSON persistence with atomic writes, supports resume
 - Prior data: 30 blind comparisons showed Kimi K2.5 matches human rankings best
-- Goal: run VLM judge → spot-check with human eval → publish agreement rate alongside leaderboard
-- This is what makes the benchmark credible ("our VLM judge agrees with humans X% of the time")
 
 **Side-by-side comparison browser** — DONE (2026-02-22, part of `ocr-bench browse`)
 
@@ -183,7 +194,17 @@ These all feed into each other — the README/blog become much more powerful wit
 - [ ] "There Is No Best OCR Model" blog post
 - [ ] Cross-link repo ↔ viewer ↔ Hub datasets ↔ blog
 
-### Phase 5: Flagship Run
+### Phase 5: Flagship Run (E2E pipeline ready)
+
+Full pipeline now works:
+```
+ocr-bench run <input-ds> <output-repo> --max-samples 50
+ocr-bench judge <output-repo> --from-prs --save-results <results-repo>
+ocr-bench browse <results-repo>
+ocr-bench validate <results-repo> --n 30
+```
+
+- [ ] BPL card catalog run (50 samples, 4 models) — first real E2E test
 - [ ] Large-scale run on Britannica, NLS index cards, or BPL catalog
 
 ### If project gets traction
