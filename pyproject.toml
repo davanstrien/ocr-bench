@@ -10,9 +10,11 @@ requires-python = ">=3.11"
 dependencies = [
     "datasets>=4.0.0",
     "huggingface-hub",
+    "numpy",
     "openai",
     "pillow",
     "rich",
+    "scipy",
     "stamina",
     "structlog",
     "tqdm",

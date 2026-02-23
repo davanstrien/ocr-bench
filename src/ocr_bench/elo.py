@@ -1,31 +1,19 @@
-"""Bradley-Terry ELO rating computation for pairwise comparisons."""
+"""Bradley-Terry MLE rating computation for pairwise comparisons."""
 
 from __future__ import annotations
 
+import math
+import random
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Literal
 
+import numpy as np
+from scipy.optimize import minimize
+
 INITIAL_ELO: float = 1500.0
-K: float = 32.0
 
 Winner = Literal["A", "B", "tie"]
-
-
-def update_elo(elo_a: float, elo_b: float, winner: Winner) -> tuple[float, float]:
-    """Update ELO ratings for a single pairwise comparison.
-
-    Bradley-Terry model: expected score = 1 / (1 + 10^((elo_b - elo_a) / 400)).
-    """
-    expected_a = 1.0 / (1.0 + 10.0 ** ((elo_b - elo_a) / 400.0))
-    if winner == "A":
-        score_a = 1.0
-    elif winner == "B":
-        score_a = 0.0
-    else:
-        score_a = 0.5
-    new_a = elo_a + K * (score_a - expected_a)
-    new_b = elo_b + K * ((1.0 - score_a) - (1.0 - expected_a))
-    return new_a, new_b
 
 
 @dataclass
@@ -54,6 +42,7 @@ class Leaderboard:
     losses: dict[str, int] = field(default_factory=dict)
     ties: dict[str, int] = field(default_factory=dict)
     comparison_log: list[dict[str, object]] = field(default_factory=list)
+    elo_ci: dict[str, tuple[float, float]] = field(default_factory=dict)
 
     @property
     def ranked(self) -> list[tuple[str, float]]:
@@ -68,48 +57,204 @@ class Leaderboard:
         return self.wins[model] / total * 100
 
 
+def _unswap_winner(winner: Winner, swapped: bool) -> Winner:
+    """Unswap winner if positions were randomized."""
+    if swapped:
+        if winner == "A":
+            return "B"
+        elif winner == "B":
+            return "A"
+    return winner
+
+
+def _build_win_matrix(
+    results: list[ComparisonResult],
+) -> tuple[dict[tuple[str, str], float], set[str]]:
+    """Count wins per ordered pair. Ties count as 0.5 for each side.
+
+    Returns (win_counts, models_seen) where win_counts[(i, j)] = fractional
+    wins of i over j.
+    """
+    win_counts: dict[tuple[str, str], float] = defaultdict(float)
+    models_seen: set[str] = set()
+
+    for r in results:
+        winner = _unswap_winner(r.winner, r.swapped)
+        models_seen.add(r.model_a)
+        models_seen.add(r.model_b)
+
+        if winner == "A":
+            win_counts[(r.model_a, r.model_b)] += 1.0
+        elif winner == "B":
+            win_counts[(r.model_b, r.model_a)] += 1.0
+        else:
+            win_counts[(r.model_a, r.model_b)] += 0.5
+            win_counts[(r.model_b, r.model_a)] += 0.5
+
+    return win_counts, models_seen
+
+
+def _bt_mle(
+    win_counts: dict[tuple[str, str], float],
+    model_names: list[str],
+) -> dict[str, float]:
+    """Fit Bradley-Terry model via maximum likelihood estimation.
+
+    Returns theta (strength) per model. Uses scipy L-BFGS-B on the
+    negative log-likelihood with log-parameterization for positivity.
+    """
+    n = len(model_names)
+    if n == 0:
+        return {}
+    if n == 1:
+        return {model_names[0]: 1.0}
+
+    idx = {name: i for i, name in enumerate(model_names)}
+
+    # Collect all pairs with nonzero games
+    pairs: list[tuple[int, int, float, float]] = []
+    for i_name in model_names:
+        for j_name in model_names:
+            if i_name >= j_name:
+                continue
+            w_ij = win_counts.get((i_name, j_name), 0.0)
+            w_ji = win_counts.get((j_name, i_name), 0.0)
+            if w_ij + w_ji > 0:
+                pairs.append((idx[i_name], idx[j_name], w_ij, w_ji))
+
+    if not pairs:
+        return {name: 1.0 for name in model_names}
+
+    def neg_log_likelihood(log_theta: np.ndarray) -> float:
+        nll = 0.0
+        for i, j, w_ij, w_ji in pairs:
+            diff = log_theta[i] - log_theta[j]
+            # log(theta_i / (theta_i + theta_j)) = diff - log(1 + exp(diff))
+            # log(theta_j / (theta_i + theta_j)) = -diff - log(1 + exp(-diff))
+            # Use log-sum-exp for numerical stability
+            log_p_ij = diff - np.logaddexp(0.0, diff)
+            log_p_ji = -diff - np.logaddexp(0.0, -diff)
+            nll -= w_ij * log_p_ij + w_ji * log_p_ji
+        return nll
+
+    def gradient(log_theta: np.ndarray) -> np.ndarray:
+        grad = np.zeros(n)
+        for i, j, w_ij, w_ji in pairs:
+            diff = log_theta[i] - log_theta[j]
+            p_ij = 1.0 / (1.0 + np.exp(-diff))  # sigmoid(diff)
+            total = w_ij + w_ji
+            # d(NLL)/d(log_theta_i)
+            grad[i] -= w_ij - total * p_ij
+            grad[j] -= w_ji - total * (1.0 - p_ij)
+        return grad
+
+    # Pin first model at 0 to fix the scale
+    x0 = np.zeros(n)
+    result = minimize(
+        neg_log_likelihood,
+        x0,
+        jac=gradient,
+        method="L-BFGS-B",
+    )
+
+    log_theta = result.x
+    # Center: subtract geometric mean (= mean of log_theta)
+    log_theta -= log_theta.mean()
+    theta = np.exp(log_theta)
+
+    return {name: float(theta[idx[name]]) for name in model_names}
+
+
+def _theta_to_elo(theta: dict[str, float], center: float = 1500.0) -> dict[str, float]:
+    """Convert BT theta values to ELO scale.
+
+    ELO_i = 400 * log10(theta_i / theta_ref) + center
+    where theta_ref is the geometric mean of all theta values.
+    """
+    if not theta:
+        return {}
+
+    values = list(theta.values())
+    log_geo_mean = sum(math.log(v) for v in values) / len(values)
+    geo_mean = math.exp(log_geo_mean)
+
+    return {
+        name: 400.0 * math.log10(t / geo_mean) + center
+        for name, t in theta.items()
+    }
+
+
+def _bootstrap_ci(
+    results: list[ComparisonResult],
+    model_names: list[str],
+    n_bootstrap: int = 1000,
+    ci: float = 0.95,
+    seed: int = 42,
+) -> dict[str, tuple[float, float]]:
+    """Compute bootstrap confidence intervals for ELO ratings.
+
+    Resamples comparisons with replacement, fits BT-MLE each time,
+    returns percentile-based CIs.
+    """
+    if not results or not model_names:
+        return {}
+
+    rng = random.Random(seed)
+    n = len(results)
+    elo_samples: dict[str, list[float]] = {name: [] for name in model_names}
+
+    for _ in range(n_bootstrap):
+        boot = rng.choices(results, k=n)
+        win_counts, _ = _build_win_matrix(boot)
+        theta = _bt_mle(win_counts, model_names)
+        elos = _theta_to_elo(theta)
+        for name in model_names:
+            elo_samples[name].append(elos.get(name, 1500.0))
+
+    alpha = (1.0 - ci) / 2.0
+    lo_pct = alpha * 100
+    hi_pct = (1.0 - alpha) * 100
+
+    cis: dict[str, tuple[float, float]] = {}
+    for name in model_names:
+        samples = sorted(elo_samples[name])
+        lo_idx = int(len(samples) * lo_pct / 100)
+        hi_idx = min(int(len(samples) * hi_pct / 100), len(samples) - 1)
+        cis[name] = (samples[lo_idx], samples[hi_idx])
+
+    return cis
+
+
 def compute_elo(
     results: list[ComparisonResult],
     model_names: list[str],
-    initial_elo: float = INITIAL_ELO,
+    n_bootstrap: int = 1000,
 ) -> Leaderboard:
-    """Compute ELO ratings from pairwise comparison results.
+    """Compute ELO ratings from pairwise comparison results using Bradley-Terry MLE.
 
     Handles position-bias unswapping: if a result has swapped=True,
     the winner is flipped before updating ratings.
+
+    Bootstrap confidence intervals are computed when n_bootstrap > 0.
     """
     board = Leaderboard(
-        elo={m: initial_elo for m in model_names},
+        elo={m: INITIAL_ELO for m in model_names},
         wins={m: 0 for m in model_names},
         losses={m: 0 for m in model_names},
         ties={m: 0 for m in model_names},
     )
 
+    # Tally wins/losses/ties and build comparison log
     for r in results:
-        # Unswap if positions were randomized
-        winner = r.winner
-        if r.swapped:
-            if winner == "A":
-                winner = "B"
-            elif winner == "B":
-                winner = "A"
+        winner = _unswap_winner(r.winner, r.swapped)
 
         if winner == "A":
-            board.elo[r.model_a], board.elo[r.model_b] = update_elo(
-                board.elo[r.model_a], board.elo[r.model_b], "A"
-            )
             board.wins[r.model_a] += 1
             board.losses[r.model_b] += 1
         elif winner == "B":
-            board.elo[r.model_a], board.elo[r.model_b] = update_elo(
-                board.elo[r.model_a], board.elo[r.model_b], "B"
-            )
             board.losses[r.model_a] += 1
             board.wins[r.model_b] += 1
         else:
-            board.elo[r.model_a], board.elo[r.model_b] = update_elo(
-                board.elo[r.model_a], board.elo[r.model_b], "tie"
-            )
             board.ties[r.model_a] += 1
             board.ties[r.model_b] += 1
 
@@ -127,5 +272,14 @@ def compute_elo(
                 "col_b": r.col_b,
             }
         )
+
+    # Fit BT-MLE
+    win_counts, _ = _build_win_matrix(results)
+    theta = _bt_mle(win_counts, model_names)
+    board.elo = _theta_to_elo(theta)
+
+    # Bootstrap CIs
+    if n_bootstrap > 0 and results:
+        board.elo_ci = _bootstrap_ci(results, model_names, n_bootstrap=n_bootstrap)
 
     return board

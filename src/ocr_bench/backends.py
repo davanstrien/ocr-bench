@@ -55,7 +55,7 @@ class InferenceProviderJudge(JudgeBackend):
             results.append(result)
         return results
 
-    @stamina.retry(on=_RETRYABLE, attempts=3)
+    @stamina.retry(on=_RETRYABLE, attempts=6)
     def _call_single(self, comp: Comparison) -> dict[str, str]:
         response = self.client.chat_completion(  # type: ignore[no-matching-overload]
             messages=comp.messages,

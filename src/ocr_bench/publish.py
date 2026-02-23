@@ -37,14 +37,19 @@ def build_leaderboard_rows(board: Leaderboard) -> list[dict]:
     rows = []
     for model, elo in board.ranked:
         total = board.wins[model] + board.losses[model] + board.ties[model]
-        rows.append({
+        row = {
             "model": model,
             "elo": round(elo),
             "wins": board.wins[model],
             "losses": board.losses[model],
             "ties": board.ties[model],
             "win_pct": round(board.wins[model] / total * 100) if total > 0 else 0,
-        })
+        }
+        if board.elo_ci and model in board.elo_ci:
+            lo, hi = board.elo_ci[model]
+            row["elo_low"] = round(lo)
+            row["elo_high"] = round(hi)
+        rows.append(row)
     return rows
 
 

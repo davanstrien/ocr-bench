@@ -325,6 +325,8 @@ def create_app(
                 "model": model,
                 "model_short": short,
                 "elo": round(row.get("elo", 0)),
+                "elo_low": row.get("elo_low"),
+                "elo_high": row.get("elo_high"),
                 "wins": row.get("wins", 0),
                 "losses": row.get("losses", 0),
                 "ties": row.get("ties", 0),
@@ -333,10 +335,12 @@ def create_app(
                 "human_win_pct": human_win_pct,
             })
 
+        has_ci = any(r.get("elo_low") is not None for r in rows)
         return templates.TemplateResponse(request, "leaderboard.html", {
             "active_tab": "leaderboard",
             "repo_id": state.repo_id,
             "rows": rows,
+            "has_ci": has_ci,
             "has_human_elo": human_board is not None,
         })
 
@@ -429,6 +433,17 @@ def create_app(
             human_vote=winner,
             winner_filter=winner_filter,
             model_filter=model_filter,
+        )
+        # Auto-advance: tell template this was a fresh vote
+        next_nav = nav_idx + 1 if nav_idx + 1 < len(state.filtered_indices) else None
+        ctx["just_voted"] = True
+        ctx["next_nav_idx"] = next_nav
+        ctx["next_url"] = (
+            f"/comparisons/{next_nav}"
+            + (f"?winner={winner_filter}" if winner_filter != "All" else "")
+            + (f"{'&' if winner_filter != 'All' else '?'}model={model_filter}" if model_filter != "All" else "")
+            if next_nav is not None
+            else None
         )
         response = templates.TemplateResponse(request, "comparison_card.html", ctx)
         response.headers["HX-Trigger"] = "vote-recorded"

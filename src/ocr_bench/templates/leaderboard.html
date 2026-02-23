@@ -10,6 +10,7 @@
       <th>#</th>
       <th>Model</th>
       <th class="num">Judge ELO</th>
+      {% if has_ci %}<th class="num">95% CI</th>{% endif %}
       <th class="num">Wins</th>
       <th class="num">Losses</th>
       <th class="num">Ties</th>
@@ -26,6 +27,7 @@
       <td>{{ loop.index }}</td>
       <td class="model">{{ row.model_short }}</td>
       <td class="num">{{ row.elo }}</td>
+      {% if has_ci %}<td class="num">{{ row.elo_low }}&ndash;{{ row.elo_high }}</td>{% endif %}
       <td class="num">{{ row.wins }}</td>
       <td class="num">{{ row.losses }}</td>
       <td class="num">{{ row.ties }}</td>

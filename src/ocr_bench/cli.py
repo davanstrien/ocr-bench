@@ -107,7 +107,11 @@ def print_leaderboard(board: Leaderboard) -> None:
     table = Table(title="OCR Model Leaderboard")
     table.add_column("Rank", style="bold")
     table.add_column("Model")
-    table.add_column("ELO", justify="right")
+    has_ci = bool(board.elo_ci)
+    if has_ci:
+        table.add_column("ELO (95% CI)", justify="right")
+    else:
+        table.add_column("ELO", justify="right")
     table.add_column("Wins", justify="right")
     table.add_column("Losses", justify="right")
     table.add_column("Ties", justify="right")
@@ -116,10 +120,15 @@ def print_leaderboard(board: Leaderboard) -> None:
     for rank, (model, elo) in enumerate(board.ranked, 1):
         pct = board.win_pct(model)
         pct_str = f"{pct:.0f}%" if pct is not None else "-"
+        if has_ci and model in board.elo_ci:
+            lo, hi = board.elo_ci[model]
+            elo_str = f"{round(elo)} ({round(lo)}\u2013{round(hi)})"
+        else:
+            elo_str = str(round(elo))
         table.add_row(
             str(rank),
             model,
-            str(round(elo)),
+            elo_str,
             str(board.wins[model]),
             str(board.losses[model]),
             str(board.ties[model]),
