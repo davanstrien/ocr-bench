@@ -24,7 +24,7 @@ ocr-bench view <results-repo>
 
 | Module | What it does |
 |--------|-------------|
-| `elo.py` | Bradley-Terry ELO (K=32, initial 1500, position-bias randomization) |
+| `elo.py` | Bradley-Terry MLE via scipy, bootstrap 95% CIs, ELO scale |
 | `judge.py` | VLM-as-judge prompt, Comparison dataclass, structured output schema |
 | `dataset.py` | Flat, config-per-model, PR-based dataset loading, OCR column discovery |
 | `backends.py` | API backends: InferenceProvider + OpenAI-compatible |
@@ -46,9 +46,10 @@ FastAPI + HTMX, Tufte-inspired. Keyboard-first (`←`/`→` navigate, `a`/`b`/`t
 
 ## Next Steps
 
-### Immediate
-- [ ] Re-run BPL judge after `_find_text_column()` fix
-- [ ] Re-run judge with `--save-results` to publish enriched data
+### Immediate — Incremental judging + publication workflow
+- [ ] Incremental judge mode: load existing comparisons from results repo, diff which model pairs are missing, judge only new pairs, merge and refit BT-MLE. Key for "new model released → update leaderboard" without re-judging everything.
+- [ ] Results repo structure: default config = leaderboard (overwritten each run), `comparisons` = append-only log across runs, `metadata` = list of all eval runs (append). One results repo per source dataset.
+- [ ] Re-run BPL judge with `--save-results` using new publication workflow
 - [ ] Write README — "no single best model" as headline
 - [ ] Choose a project name (captures "rankings depend on your documents")
 
@@ -61,6 +62,9 @@ FastAPI + HTMX, Tufte-inspired. Keyboard-first (`←`/`→` navigate, `a`/`b`/`t
 - [ ] Judge prompt presets for GLAM document types
 - [ ] Custom prompt and ignore list support
 - [ ] Define leaderboard dataset schema
+- [ ] Adaptive stopping (`--adaptive` flag): run batches, compute BT-MLE + CIs, stop when adjacent-rank CIs don't overlap (ranking is statistically resolved). Avoids wasting judge calls when rankings are already clear.
+- [ ] Judge comparison: run same dataset through different judges (e.g. Kimi K2.5 vs Qwen3.5-397B), compare BT-MLE ratings + CIs to see where judges agree/disagree. Overlapping CIs = single judge is fine; non-overlapping = jury mode adds value. Test on diverse document types — jury may only matter for ambiguous collections (e.g. index cards where everything ties).
+- [ ] `--focus-pairs` for human validation: prioritize showing pairs with overlapping CIs in the vote UI, since those are the only ones where human input changes the ranking.
 
 ### If project gets traction
 - [ ] Consolidate OCR model scripts into this repo + hub-sync
