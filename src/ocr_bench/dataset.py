@@ -212,11 +212,34 @@ def load_config_dataset(
 
 
 def _find_text_column(ds: Dataset) -> str | None:
-    """Find the likely OCR text column in a dataset."""
-    for col in ds.column_names:
-        lower = col.lower()
-        if "markdown" in lower or "ocr" in lower or col == "text":
-            return col
+    """Find the likely OCR text column in a dataset.
+
+    Priority:
+      1. ``inference_info[0]["column_name"]`` if present and exists in dataset.
+      2. First column matching ``markdown`` (case-insensitive).
+      3. First column matching ``ocr`` (case-insensitive).
+      4. Column named exactly ``text``.
+    """
+    # Try inference_info first
+    try:
+        info_raw = ds[0].get("inference_info")
+        if info_raw:
+            info = json.loads(info_raw)
+            if isinstance(info, list):
+                info = info[0]
+            col_name = info.get("column_name", "")
+            if col_name and col_name in ds.column_names:
+                return col_name
+    except (json.JSONDecodeError, TypeError, KeyError, IndexError):
+        pass
+
+    # Prioritized heuristic: markdown > ocr > text
+    for pattern in ["markdown", "ocr"]:
+        for col in ds.column_names:
+            if pattern in col.lower():
+                return col
+    if "text" in ds.column_names:
+        return "text"
     return None
 
 

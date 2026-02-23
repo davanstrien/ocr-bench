@@ -72,13 +72,21 @@ class InferenceProviderJudge(JudgeBackend):
 
 
 class OpenAICompatibleJudge(JudgeBackend):
-    """OpenAI-compatible endpoint (local vLLM server, Ollama, etc.)."""
+    """OpenAI-compatible endpoint (local vLLM server, Ollama, HF IE, etc.)."""
 
-    def __init__(self, base_url: str, model: str = "default", max_tokens: int = DEFAULT_MAX_TOKENS):
+    def __init__(
+        self,
+        base_url: str,
+        model: str = "default",
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        api_key: str = "not-needed",
+        extra_body: dict | None = None,
+    ):
         self.name = f"openai@{base_url}"
         self.model = model
         self.max_tokens = max_tokens
-        self.client = OpenAI(base_url=base_url, api_key="not-needed")
+        self.extra_body = extra_body if extra_body is not None else {"guided_json": JUDGE_SCHEMA}
+        self.client = OpenAI(base_url=base_url, api_key=api_key)
 
     def judge(self, comparisons: list[Comparison]) -> list[dict[str, str]]:
         results: list[dict[str, str]] = []
@@ -94,7 +102,7 @@ class OpenAICompatibleJudge(JudgeBackend):
             messages=comp.messages,  # type: ignore[invalid-argument-type]
             max_tokens=self.max_tokens,
             temperature=0.0,
-            extra_body={"guided_json": JUDGE_SCHEMA},
+            extra_body=self.extra_body,
         )
         raw = response.choices[0].message.content.strip()
         result = parse_judge_output(raw)
@@ -114,11 +122,27 @@ def parse_judge_spec(spec: str, max_tokens: int = DEFAULT_MAX_TOKENS) -> JudgeBa
     """Parse a judge specification string into a backend.
 
     Formats:
-      - ``"http://..."`` or ``"https://..."`` → :class:`OpenAICompatibleJudge`
+      - ``"https://xxx.endpoints.huggingface.cloud"`` → :class:`OpenAICompatibleJudge`
+        (HF Inference Endpoints, OpenAI-compatible with HF token auth)
+      - ``"http://..."`` or ``"https://..."`` (other) → :class:`OpenAICompatibleJudge`
       - ``"provider:org/model"`` (colon before first ``/``) → :class:`InferenceProviderJudge`
       - anything else → :class:`InferenceProviderJudge` (no provider)
     """
     if spec.startswith("http://") or spec.startswith("https://"):
+        # HF Inference Endpoints — OpenAI-compatible, auth via HF token
+        if ".endpoints.huggingface." in spec:
+            from huggingface_hub import get_token
+
+            base_url = spec.rstrip("/")
+            if not base_url.endswith("/v1"):
+                base_url += "/v1"
+            token = get_token() or "not-needed"
+            return OpenAICompatibleJudge(
+                base_url=base_url,
+                api_key=token,
+                max_tokens=max_tokens,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+            )
         return OpenAICompatibleJudge(base_url=spec, max_tokens=max_tokens)
 
     if ":" in spec:

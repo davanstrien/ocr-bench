@@ -10,6 +10,7 @@ from datasets import Dataset
 
 from ocr_bench.dataset import (
     DatasetError,
+    _find_text_column,
     discover_ocr_columns,
     discover_pr_configs,
     load_config_dataset,
@@ -101,6 +102,69 @@ class TestDiscoverOcrColumns:
         result = discover_ocr_columns(ds)
         # Falls back to heuristic since inference_info column didn't match
         assert "ocr_output" in result
+
+
+# ---------------------------------------------------------------------------
+# _find_text_column
+# ---------------------------------------------------------------------------
+
+
+class TestFindTextColumn:
+    def test_prefers_markdown_over_text(self):
+        """BPL bug: text appears before markdown in column order, should pick markdown."""
+        ds = Dataset.from_dict({
+            "image": [None],
+            "text": ["tesseract baseline"],
+            "markdown": ["model output"],
+        })
+        assert _find_text_column(ds) == "markdown"
+
+    def test_prefers_inference_info_column_name(self):
+        """inference_info column_name should take highest priority."""
+        info = json.dumps({"column_name": "markdown", "model_id": "model-a"})
+        ds = Dataset.from_dict({
+            "image": [None],
+            "text": ["baseline"],
+            "markdown": ["model output"],
+            "inference_info": [info],
+        })
+        assert _find_text_column(ds) == "markdown"
+
+    def test_inference_info_missing_column_falls_back(self):
+        """If inference_info references a missing column, fall back to heuristic."""
+        info = json.dumps({"column_name": "nonexistent", "model_id": "model-a"})
+        ds = Dataset.from_dict({
+            "image": [None],
+            "ocr_output": ["text"],
+            "inference_info": [info],
+        })
+        assert _find_text_column(ds) == "ocr_output"
+
+    def test_prefers_ocr_over_text(self):
+        ds = Dataset.from_dict({
+            "image": [None],
+            "text": ["baseline"],
+            "ocr_output": ["model output"],
+        })
+        assert _find_text_column(ds) == "ocr_output"
+
+    def test_returns_text_as_last_resort(self):
+        ds = Dataset.from_dict({"image": [None], "text": ["hello"]})
+        assert _find_text_column(ds) == "text"
+
+    def test_returns_none_when_no_match(self):
+        ds = Dataset.from_dict({"image": [None], "something_else": ["data"]})
+        assert _find_text_column(ds) is None
+
+    def test_inference_info_list_format(self):
+        info = json.dumps([{"column_name": "markdown", "model_id": "model-a"}])
+        ds = Dataset.from_dict({
+            "image": [None],
+            "text": ["baseline"],
+            "markdown": ["output"],
+            "inference_info": [info],
+        })
+        assert _find_text_column(ds) == "markdown"
 
 
 # ---------------------------------------------------------------------------

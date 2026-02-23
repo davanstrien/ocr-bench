@@ -52,6 +52,20 @@ class TestParseJudgeSpec:
         backend = parse_judge_spec("https://api.example.com/v1")
         assert isinstance(backend, OpenAICompatibleJudge)
 
+    @patch("huggingface_hub.get_token", return_value="hf_test_token")
+    def test_hf_endpoint_url(self, mock_get_token):
+        """HF Inference Endpoint URLs route to OpenAICompatibleJudge with /v1 suffix."""
+        url = "https://wv8ln6va8cfzxkde.us-east-1.aws.endpoints.huggingface.cloud"
+        backend = parse_judge_spec(url)
+        assert isinstance(backend, OpenAICompatibleJudge)
+        assert "endpoints.huggingface" in backend.name
+        assert backend.name.endswith("/v1")
+
+    def test_non_hf_url_still_openai(self):
+        """Non-HF URLs still route to OpenAICompatibleJudge."""
+        backend = parse_judge_spec("https://my-vllm-server.example.com/v1")
+        assert isinstance(backend, OpenAICompatibleJudge)
+
 
 # ---------------------------------------------------------------------------
 # aggregate_jury_votes

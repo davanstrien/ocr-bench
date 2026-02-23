@@ -146,7 +146,6 @@ def launch_ocr_jobs(
             flavor=flavor,
             secrets={"HF_TOKEN": token},
             timeout=timeout,
-            labels={"benchmark": output_repo.replace("/", "_"), "model": slug},
         )
         jobs.append(JobRun(model_slug=slug, job_id=job.id, job_url=job.url))
         logger.info("job_launched", model=slug, job_id=job.id, url=job.url)
@@ -173,7 +172,7 @@ def poll_jobs(
         time.sleep(interval)
         still_running: dict[str, JobRun] = {}
         for job_id, job_run in pending.items():
-            info = api.inspect_job(job_id)
+            info = api.inspect_job(job_id=job_id)
             stage = info.status.stage
             if stage in _TERMINAL_STAGES:
                 job_run.status = stage.lower()
