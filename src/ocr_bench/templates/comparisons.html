@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Comparisons — OCR Bench{% endblock %}
+{% block content %}
+<div class="filters">
+  <label>Winner
+    <select name="winner"
+            hx-get="/comparisons/filter"
+            hx-target="#comparison-container"
+            hx-include="[name='model']">
+      <option value="All" {% if winner_filter == "All" %}selected{% endif %}>All</option>
+      <option value="A" {% if winner_filter == "A" %}selected{% endif %}>A</option>
+      <option value="B" {% if winner_filter == "B" %}selected{% endif %}>B</option>
+      <option value="tie" {% if winner_filter == "tie" %}selected{% endif %}>tie</option>
+    </select>
+  </label>
+  <label>Model
+    <select name="model"
+            hx-get="/comparisons/filter"
+            hx-target="#comparison-container"
+            hx-include="[name='winner']">
+      <option value="All" {% if model_filter == "All" %}selected{% endif %}>All</option>
+      {% for m in models %}
+      <option value="{{ m }}" {% if model_filter == m %}selected{% endif %}>{{ m }}</option>
+      {% endfor %}
+    </select>
+  </label>
+</div>
+
+{% if pair_summary %}
+<div class="pair-summary">{{ pair_summary | safe }}</div>
+{% endif %}
+
+<div id="comparison-container">
+  {% include "comparison_card.html" %}
+</div>
+
+<div id="stats-panel" hx-get="/stats" hx-trigger="vote-recorded from:body" hx-swap="innerHTML">
+  {% include "stats_panel.html" %}
+</div>
+{% endblock %}

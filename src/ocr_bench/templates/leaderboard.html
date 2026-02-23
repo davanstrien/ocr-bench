@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Leaderboard — OCR Bench{% endblock %}
+{% block content %}
+<h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.25rem;">Leaderboard</h2>
+<p style="font-size: 0.8rem; color: #888; margin-top: 0;">{{ repo_id }}</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Model</th>
+      <th class="num">Judge ELO</th>
+      <th class="num">Wins</th>
+      <th class="num">Losses</th>
+      <th class="num">Ties</th>
+      <th class="num">Win%</th>
+      {% if has_human_elo %}
+      <th class="num">Human ELO</th>
+      <th class="num">H-Win%</th>
+      {% endif %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td class="model">{{ row.model_short }}</td>
+      <td class="num">{{ row.elo }}</td>
+      <td class="num">{{ row.wins }}</td>
+      <td class="num">{{ row.losses }}</td>
+      <td class="num">{{ row.ties }}</td>
+      <td class="num">{{ row.win_pct }}%</td>
+      {% if has_human_elo %}
+      <td class="num">{{ row.human_elo if row.human_elo is not none else "—" }}</td>
+      <td class="num">{{ row.human_win_pct if row.human_win_pct is not none else "—" }}</td>
+      {% endif %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

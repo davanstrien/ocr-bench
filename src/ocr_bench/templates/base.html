@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}OCR Bench{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+</head>
+<body>
+  <div class="container">
+    <nav>
+      <a href="/" class="brand">ocr-bench</a>
+      <a href="/leaderboard" {% if active_tab == "leaderboard" %}class="active"{% endif %}>Leaderboard</a>
+      <a href="/comparisons" {% if active_tab == "comparisons" %}class="active"{% endif %}>Comparisons</a>
+    </nav>
+    {% block content %}{% endblock %}
+  </div>
+
+  <script>
+    document.addEventListener("keydown", function(e) {
+      // Ignore when focus is in input/select/textarea
+      var tag = document.activeElement.tagName.toLowerCase();
+      if (tag === "input" || tag === "select" || tag === "textarea") return;
+
+      if (e.key === "ArrowLeft") {
+        var prev = document.querySelector("[data-nav='prev']");
+        if (prev) { prev.click(); e.preventDefault(); }
+      } else if (e.key === "ArrowRight") {
+        var next = document.querySelector("[data-nav='next']");
+        if (next) { next.click(); e.preventDefault(); }
+      } else if (e.key === "a" || e.key === "A") {
+        var voteA = document.querySelector("[data-vote='A']");
+        if (voteA) { voteA.click(); e.preventDefault(); }
+      } else if (e.key === "b" || e.key === "B") {
+        var voteB = document.querySelector("[data-vote='B']");
+        if (voteB) { voteB.click(); e.preventDefault(); }
+      } else if (e.key === "t" || e.key === "T") {
+        var voteTie = document.querySelector("[data-vote='tie']");
+        if (voteTie) { voteTie.click(); e.preventDefault(); }
+      } else if (e.key === "r" || e.key === "R") {
+        var reveal = document.querySelector("[data-action='reveal']");
+        if (reveal) { reveal.click(); e.preventDefault(); }
+      }
+    });
+  </script>
+</body>
+</html>

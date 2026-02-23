@@ -22,7 +22,7 @@ dependencies = [
 ocr-bench = "ocr_bench.cli:main"
 
 [project.optional-dependencies]
-viewer = ["gradio>=5.0"]
+viewer = ["fastapi>=0.115", "uvicorn[standard]>=0.32", "jinja2>=3.1", "python-multipart>=0.0.9"]
 
 [build-system]
 requires = ["uv_build>=0.9.27,<0.10.0"]

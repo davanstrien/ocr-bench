@@ -1,13 +1,16 @@
-"""Gradio results viewer — browse leaderboard and pairwise comparisons."""
+"""Results viewer — data loading and helpers for OCR bench results."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import structlog
 from datasets import load_dataset
 
 if TYPE_CHECKING:
-    import gradio as gr
+    from PIL import Image
+
+logger = structlog.get_logger()
 
 
 def load_results(repo_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -23,6 +26,93 @@ def load_results(repo_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any
     comparison_rows = [dict(row) for row in comparisons_ds]
 
     return leaderboard_rows, comparison_rows
+
+
+def _load_source_metadata(repo_id: str) -> dict[str, Any]:
+    """Load metadata config from results repo to find the source dataset."""
+    try:
+        meta_ds = load_dataset(repo_id, name="metadata", split="train")
+        if len(meta_ds) > 0:
+            return dict(meta_ds[0])
+    except Exception as exc:
+        logger.warning("could_not_load_metadata", repo=repo_id, error=str(exc))
+    return {}
+
+
+class ImageLoader:
+    """Lazy image loader — fetches images from source dataset by sample_idx."""
+
+    def __init__(self, source_dataset: str, from_prs: bool = False):
+        self._source = source_dataset
+        self._from_prs = from_prs
+        self._cache: dict[int, Any] = {}
+        self._image_col: str | None = None
+        self._pr_revision: str | None = None
+        self._available = True
+        self._init_done = False
+
+    def _init_source(self) -> None:
+        """Lazy init: discover image column and PR revision on first call."""
+        if self._init_done:
+            return
+        self._init_done = True
+
+        try:
+            if self._from_prs:
+                from ocr_bench.dataset import discover_pr_configs
+
+                _, revisions = discover_pr_configs(self._source)
+                if revisions:
+                    # Use the first PR revision to get images
+                    first_config = next(iter(revisions))
+                    self._pr_revision = revisions[first_config]
+
+            # Probe for image column by loading 1 row
+            kwargs: dict[str, Any] = {"path": self._source, "split": "train[:1]"}
+            if self._pr_revision:
+                # Load from the first PR config
+                first_config = next(iter(revisions))
+                kwargs["name"] = first_config
+                kwargs["revision"] = self._pr_revision
+            probe = load_dataset(**kwargs)
+            for col in probe.column_names:
+                if col == "image" or "image" in col.lower():
+                    self._image_col = col
+                    break
+            if not self._image_col:
+                logger.info("no_image_column_in_source", source=self._source)
+                self._available = False
+        except Exception as exc:
+            logger.warning("image_loader_init_failed", source=self._source, error=str(exc))
+            self._available = False
+
+    def get(self, sample_idx: int) -> Image.Image | None:
+        """Fetch image for a sample index. Returns None on failure."""
+        self._init_source()
+        if not self._available or self._image_col is None:
+            return None
+        if sample_idx in self._cache:
+            return self._cache[sample_idx]
+        try:
+            kwargs: dict[str, Any] = {
+                "path": self._source,
+                "split": f"train[{sample_idx}:{sample_idx + 1}]",
+            }
+            if self._pr_revision:
+                from ocr_bench.dataset import discover_pr_configs
+
+                _, revisions = discover_pr_configs(self._source)
+                if revisions:
+                    first_config = next(iter(revisions))
+                    kwargs["name"] = first_config
+                    kwargs["revision"] = revisions[first_config]
+            row = load_dataset(**kwargs)
+            img = row[0][self._image_col]
+            self._cache[sample_idx] = img
+            return img
+        except Exception as exc:
+            logger.debug("image_load_failed", sample_idx=sample_idx, error=str(exc))
+            return None
 
 
 def _filter_comparisons(
@@ -99,188 +189,3 @@ def _build_pair_summary(comparisons: list[dict[str, Any]]) -> str:
     return " | ".join(parts)
 
 
-def build_viewer(repo_id: str) -> gr.Blocks:
-    """Build the Gradio app with leaderboard and comparison browser tabs."""
-    import gradio as gr
-
-    leaderboard_rows, comparison_rows = load_results(repo_id)
-
-    # Extract unique models for filter dropdown
-    models = sorted(
-        {c.get("model_a", "") for c in comparison_rows}
-        | {c.get("model_b", "") for c in comparison_rows}
-    )
-
-    with gr.Blocks(title=f"OCR Bench — {repo_id}") as app:
-        gr.Markdown(f"# OCR Bench Results\n**Dataset**: `{repo_id}`")
-
-        with gr.Tab("Leaderboard"):
-            headers = ["model", "elo", "wins", "losses", "ties", "win_pct"]
-            table_data = [[row.get(h, "") for h in headers] for row in leaderboard_rows]
-            gr.Dataframe(
-                value=table_data,
-                headers=["Model", "ELO", "Wins", "Losses", "Ties", "Win%"],
-                interactive=False,
-            )
-
-        with gr.Tab("Browse Comparisons"):
-            # Pre-compute initial display from first comparison
-            first = comparison_rows[0] if comparison_rows else {}
-            if first:
-                init_model_a = _model_label(first.get("model_a", ""), first.get("col_a", ""))
-                init_model_b = _model_label(first.get("model_b", ""), first.get("col_b", ""))
-            else:
-                init_model_a = ""
-                init_model_b = ""
-
-            with gr.Row():
-                winner_dd = gr.Dropdown(
-                    choices=["All", "A", "B", "tie"],
-                    value="All",
-                    label="Filter by winner",
-                )
-                model_dd = gr.Dropdown(
-                    choices=["All", *models],
-                    value="All",
-                    label="Filter by model",
-                )
-
-            pair_summary = _build_pair_summary(comparison_rows)
-            if pair_summary:
-                gr.Markdown(pair_summary)
-
-            status_text = gr.Markdown(f"**{len(comparison_rows)} comparisons**")
-            comp_slider = gr.Slider(
-                minimum=0,
-                maximum=max(len(comparison_rows) - 1, 0),
-                step=1,
-                value=0,
-                label="Comparison index",
-            )
-
-            with gr.Row():
-                model_a_label = gr.Textbox(label="Model A", value=init_model_a, interactive=False)
-                model_b_label = gr.Textbox(label="Model B", value=init_model_b, interactive=False)
-
-            with gr.Row():
-                text_a_box = gr.Textbox(
-                    label="OCR Output A",
-                    value=first.get("text_a", ""),
-                    lines=12,
-                    interactive=False,
-                )
-                text_b_box = gr.Textbox(
-                    label="OCR Output B",
-                    value=first.get("text_b", ""),
-                    lines=12,
-                    interactive=False,
-                )
-
-            with gr.Row():
-                winner_box = gr.Textbox(
-                    label="Verdict",
-                    value=_winner_badge(first.get("winner", "tie")) if first else "",
-                    interactive=False,
-                )
-                agreement_box = gr.Textbox(
-                    label="Agreement",
-                    value=first.get("agreement", ""),
-                    interactive=False,
-                )
-
-            reason_box = gr.Textbox(
-                label="Reason", value=first.get("reason", ""), lines=3, interactive=False
-            )
-
-            # State to hold filtered list
-            filtered_state = gr.State(comparison_rows)
-
-            def apply_filters(winner_filter: str, model_filter: str):
-                filtered = _filter_comparisons(comparison_rows, winner_filter, model_filter)
-                n = len(filtered)
-                if n == 0:
-                    return (
-                        filtered,
-                        gr.Slider(maximum=0, value=0),
-                        "**0 comparisons** (no matches)",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                    )
-                first = filtered[0]
-                return (
-                    filtered,
-                    gr.Slider(maximum=n - 1, value=0),
-                    f"**{n} comparisons**",
-                    _model_label(first.get("model_a", ""), first.get("col_a", "")),
-                    _model_label(first.get("model_b", ""), first.get("col_b", "")),
-                    first.get("text_a", ""),
-                    first.get("text_b", ""),
-                    _winner_badge(first.get("winner", "tie")),
-                    first.get("agreement", ""),
-                    first.get("reason", ""),
-                )
-
-            def show_comparison(idx: int, filtered: list[dict]):
-                idx = int(idx)
-                if not filtered or idx >= len(filtered):
-                    return "", "", "", "", "", "", ""
-                c = filtered[idx]
-                return (
-                    _model_label(c.get("model_a", ""), c.get("col_a", "")),
-                    _model_label(c.get("model_b", ""), c.get("col_b", "")),
-                    c.get("text_a", ""),
-                    c.get("text_b", ""),
-                    _winner_badge(c.get("winner", "tie")),
-                    c.get("agreement", ""),
-                    c.get("reason", ""),
-                )
-
-            for dd in [winner_dd, model_dd]:
-                dd.change(
-                    fn=apply_filters,
-                    inputs=[winner_dd, model_dd],
-                    outputs=[
-                        filtered_state,
-                        comp_slider,
-                        status_text,
-                        model_a_label,
-                        model_b_label,
-                        text_a_box,
-                        text_b_box,
-                        winner_box,
-                        agreement_box,
-                        reason_box,
-                    ],
-                )
-
-            comp_slider.change(
-                fn=show_comparison,
-                inputs=[comp_slider, filtered_state],
-                outputs=[
-                    model_a_label,
-                    model_b_label,
-                    text_a_box,
-                    text_b_box,
-                    winner_box,
-                    agreement_box,
-                    reason_box,
-                ],
-            )
-
-    return app
-
-
-def launch_viewer(repo_id: str, **kwargs) -> None:
-    """Launch the Gradio app.
-
-    Args:
-        repo_id: HF dataset repo id with published results.
-        **kwargs: Passed to ``gr.Blocks.launch()`` (e.g. server_port, share).
-    """
-    app = build_viewer(repo_id)
-    app.launch(**kwargs)

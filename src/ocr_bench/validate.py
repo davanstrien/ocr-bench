@@ -7,14 +7,9 @@ import os
 import random
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
-from datasets import load_dataset
-
-if TYPE_CHECKING:
-    import gradio as gr
 
 logger = structlog.get_logger()
 
@@ -215,6 +210,50 @@ def compute_agreement(
     return stats
 
 
+def compute_human_elo(
+    annotations: list[dict[str, Any]],
+    comparisons: list[ValidationComparison],
+) -> Any:
+    """Compute ELO leaderboard from human annotations.
+
+    Returns a ``Leaderboard`` from ``elo.py``, or None if no annotations.
+    """
+    from ocr_bench.elo import ComparisonResult, compute_elo
+
+    comp_by_id = {c.comparison_id: c for c in comparisons}
+    model_set: set[str] = set()
+    results: list[ComparisonResult] = []
+
+    for ann in annotations:
+        comp = comp_by_id.get(ann.get("comparison_id"))
+        if not comp:
+            continue
+
+        # Unswap human vote to get canonical winner
+        human_winner = ann["winner"]
+        if comp.swapped:
+            if human_winner == "A":
+                human_winner = "B"
+            elif human_winner == "B":
+                human_winner = "A"
+
+        model_set.add(comp.model_a)
+        model_set.add(comp.model_b)
+        results.append(
+            ComparisonResult(
+                sample_idx=comp.sample_idx,
+                model_a=comp.model_a,
+                model_b=comp.model_b,
+                winner=human_winner,
+            )
+        )
+
+    if not results:
+        return None
+
+    return compute_elo(results, sorted(model_set))
+
+
 def save_annotations(
     path: str,
     metadata: dict[str, Any],
@@ -270,371 +309,3 @@ def _agreement_banner(stats: AgreementStats) -> str:
     return f"Judge: {' | '.join(parts)}{confidence}"
 
 
-def build_validation_app(
-    results_repo: str,
-    *,
-    n: int = 30,
-    output_path: str | None = None,
-    prioritize_splits: bool = True,
-) -> gr.Blocks:
-    """Build the Gradio validation app.
-
-    Args:
-        results_repo: HF dataset repo with published judge results.
-        n: Number of comparisons to validate.
-        output_path: Path to save annotations JSON.
-        prioritize_splits: Show split-jury cases first.
-    """
-    import gradio as gr
-
-    # Load results from Hub
-    comparisons_ds = load_dataset(results_repo, name="comparisons", split="train")
-    comparison_rows = [dict(row) for row in comparisons_ds]
-
-    comps = build_validation_comparisons(comparison_rows, n=n, prioritize_splits=prioritize_splits)
-
-    if not comps:
-        raise ValueError("No comparisons found in results dataset")
-
-    model_names = sorted({c.model_a for c in comps} | {c.model_b for c in comps})
-
-    slug = results_repo.replace("/", "-")
-    save_path = output_path or f"human-eval-{slug}.json"
-
-    metadata = {
-        "results_repo": results_repo,
-        "n_comparisons": len(comps),
-        "prioritize_splits": prioritize_splits,
-        "models": model_names,
-        "started_at": datetime.now(UTC).isoformat(),
-    }
-
-    # Resume from existing annotations
-    _, existing_annotations = load_annotations(save_path)
-    initial_completed = {ann["comparison_id"] for ann in existing_annotations}
-    initial_idx = 0
-    while initial_idx < len(comps) and initial_idx in initial_completed:
-        initial_idx += 1
-
-    if existing_annotations:
-        logger.info(
-            "resuming_validation",
-            n_existing=len(existing_annotations),
-            starting_at=initial_idx,
-        )
-
-    n_splits = sum(1 for c in comps if _is_split_jury(c.agreement))
-    initial_stats = compute_agreement(existing_annotations, comps)
-    initial_banner = _agreement_banner(initial_stats)
-
-    with gr.Blocks(title=f"OCR Validation — {results_repo}") as app:
-        # State
-        current_idx = gr.State(initial_idx)
-        annotations_state = gr.State(existing_annotations)
-        completed_ids_state = gr.State(initial_completed)
-
-        gr.Markdown("# OCR Blind Human Validation")
-        header = (
-            f"**Results**: `{results_repo}` | "
-            f"**Comparisons**: {len(comps)} | "
-            f"**Models**: {len(model_names)}"
-        )
-        if n_splits:
-            header += f" | **Split-jury first**: {n_splits}"
-        gr.Markdown(header)
-
-        with gr.Tab("Evaluate"):
-            progress = gr.Markdown(f"Comparison {initial_idx + 1} / {len(comps)}")
-
-            with gr.Row():
-                feedback_display = gr.Markdown("")
-                agreement_display = gr.Markdown(initial_banner)
-
-            jury_hint_display = gr.Markdown("")
-
-            with gr.Row():
-                text_a_box = gr.Textbox(
-                    label="Output A",
-                    value=comps[initial_idx].display_text_a if initial_idx < len(comps) else "",
-                    lines=20,
-                    interactive=False,
-                )
-                text_b_box = gr.Textbox(
-                    label="Output B",
-                    value=comps[initial_idx].display_text_b if initial_idx < len(comps) else "",
-                    lines=20,
-                    interactive=False,
-                )
-
-            with gr.Row():
-                btn_a = gr.Button("A is Better", variant="primary", scale=2)
-                btn_tie = gr.Button("Tie", scale=1)
-                btn_b = gr.Button("B is Better", variant="primary", scale=2)
-
-            with gr.Row():
-                btn_skip = gr.Button("Skip", scale=1)
-                btn_undo = gr.Button("Undo Last", scale=1)
-
-            def _load_comparison(idx: int) -> tuple[str, str, str, str]:
-                """Return (text_a, text_b, progress, jury_hint)."""
-                if idx >= len(comps):
-                    return (
-                        "All comparisons complete!",
-                        "",
-                        f"Done! {len(comps)}/{len(comps)} completed",
-                        "",
-                    )
-                c = comps[idx]
-                hint = "Jury was split on this one" if _is_split_jury(c.agreement) else ""
-                return (
-                    c.display_text_a,
-                    c.display_text_b,
-                    f"Comparison {idx + 1} / {len(comps)}",
-                    hint,
-                )
-
-            def _find_next(idx: int, done: set[int]) -> int:
-                while idx < len(comps) and idx in done:
-                    idx += 1
-                return idx
-
-            def record_vote(
-                winner: str,
-                idx: int,
-                anns: list[dict],
-                done: set[int],
-            ) -> tuple:
-                if idx >= len(comps):
-                    ta, tb, prog, hint = _load_comparison(idx)
-                    return (
-                        idx,
-                        anns,
-                        done,
-                        ta,
-                        tb,
-                        prog,
-                        hint,
-                        "",
-                        _agreement_banner(compute_agreement(anns, comps)),
-                    )
-
-                comp = comps[idx]
-
-                # Unswap for storage
-                winner_unswapped = winner
-                if comp.swapped:
-                    if winner == "A":
-                        winner_unswapped = "B"
-                    elif winner == "B":
-                        winner_unswapped = "A"
-
-                if winner_unswapped == "A":
-                    winner_model = comp.model_a
-                elif winner_unswapped == "B":
-                    winner_model = comp.model_b
-                else:
-                    winner_model = "tie"
-
-                ann = {
-                    "comparison_id": comp.comparison_id,
-                    "sample_idx": comp.sample_idx,
-                    "model_a": comp.model_a,
-                    "model_b": comp.model_b,
-                    "swapped": comp.swapped,
-                    "winner": winner,
-                    "winner_model": winner_model,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                }
-
-                anns = anns + [ann]
-                done = done | {idx}
-
-                # Check agreement
-                judge_winner = comp.winner
-                human_winner = winner_unswapped
-                # Map to same perspective
-                if comp.swapped:
-                    pass  # already unswapped above
-                if human_winner == judge_winner:
-                    feedback = "Judge agreed"
-                elif human_winner == "tie" or judge_winner == "tie":
-                    feedback = "Judge: soft disagree (tie vs winner)"
-                else:
-                    feedback = "Judge: **hard disagree** (opposite winners)"
-
-                save_annotations(save_path, metadata, anns)
-
-                next_idx = _find_next(idx + 1, done)
-                ta, tb, prog, hint = _load_comparison(next_idx)
-                stats = compute_agreement(anns, comps)
-                return (
-                    next_idx,
-                    anns,
-                    done,
-                    ta,
-                    tb,
-                    prog,
-                    hint,
-                    feedback,
-                    _agreement_banner(stats),
-                )
-
-            def skip_current(
-                idx: int,
-                anns: list[dict],
-                done: set[int],
-            ) -> tuple:
-                next_idx = min(idx + 1, len(comps))
-                ta, tb, prog, hint = _load_comparison(next_idx)
-                return (
-                    next_idx,
-                    anns,
-                    done,
-                    ta,
-                    tb,
-                    prog,
-                    hint,
-                    "",
-                    _agreement_banner(compute_agreement(anns, comps)),
-                )
-
-            def undo_last(
-                idx: int,
-                anns: list[dict],
-                done: set[int],
-            ) -> tuple:
-                if not anns:
-                    ta, tb, prog, hint = _load_comparison(idx)
-                    return (
-                        idx,
-                        anns,
-                        done,
-                        ta,
-                        tb,
-                        prog,
-                        hint,
-                        "",
-                        _agreement_banner(compute_agreement(anns, comps)),
-                    )
-
-                last = anns[-1]
-                anns = anns[:-1]
-                done = done - {last["comparison_id"]}
-                back_idx = last["comparison_id"]
-                save_annotations(save_path, metadata, anns)
-                ta, tb, prog, hint = _load_comparison(back_idx)
-                return (
-                    back_idx,
-                    anns,
-                    done,
-                    ta,
-                    tb,
-                    prog,
-                    hint,
-                    "Undid last annotation",
-                    _agreement_banner(compute_agreement(anns, comps)),
-                )
-
-            outputs = [
-                current_idx,
-                annotations_state,
-                completed_ids_state,
-                text_a_box,
-                text_b_box,
-                progress,
-                jury_hint_display,
-                feedback_display,
-                agreement_display,
-            ]
-
-            btn_a.click(
-                fn=lambda idx, anns, done: record_vote("A", idx, anns, done),
-                inputs=[current_idx, annotations_state, completed_ids_state],
-                outputs=outputs,
-            )
-            btn_b.click(
-                fn=lambda idx, anns, done: record_vote("B", idx, anns, done),
-                inputs=[current_idx, annotations_state, completed_ids_state],
-                outputs=outputs,
-            )
-            btn_tie.click(
-                fn=lambda idx, anns, done: record_vote("tie", idx, anns, done),
-                inputs=[current_idx, annotations_state, completed_ids_state],
-                outputs=outputs,
-            )
-            btn_skip.click(
-                fn=skip_current,
-                inputs=[current_idx, annotations_state, completed_ids_state],
-                outputs=outputs,
-            )
-            btn_undo.click(
-                fn=undo_last,
-                inputs=[current_idx, annotations_state, completed_ids_state],
-                outputs=outputs,
-            )
-
-        with gr.Tab("Results"):
-            gr.Markdown(
-                "Click **Compute Results** to see agreement stats. "
-                "Model identities are revealed here."
-            )
-            btn_compute = gr.Button("Compute Results", variant="primary")
-            results_display = gr.Markdown("")
-
-            def show_results(anns: list[dict]) -> str:
-                if not anns:
-                    return "No annotations yet."
-                stats = compute_agreement(anns, comps)
-                lines = [
-                    f"### Agreement Summary ({stats.total} comparisons)\n",
-                    "| | Count | % |",
-                    "|---|---|---|",
-                    f"| Agree | {stats.agree} | {stats.agree / stats.total:.0%} |"
-                    if stats.total
-                    else "",
-                    (
-                        f"| Soft disagree | {stats.soft_disagree}"
-                        f" | {stats.soft_disagree / stats.total:.0%} |"
-                    )
-                    if stats.total
-                    else "",
-                    (
-                        f"| **Hard disagree** | **{stats.hard_disagree}**"
-                        f" | **{stats.hard_disagree / stats.total:.0%}** |"
-                    )
-                    if stats.total
-                    else "",
-                    "",
-                    f"**Agreement rate**: {stats.agreement_rate:.0%}",
-                ]
-                if stats.hard_disagree_rate > 0.25:
-                    lines.append(
-                        "\n**Warning**: High hard disagreement rate. "
-                        "Judge may not be well-calibrated for this document type."
-                    )
-                elif stats.total >= MIN_ANNOTATIONS_FOR_CONFIDENCE:
-                    lines.append("\n**Judge appears well-calibrated** for this document type.")
-                return "\n".join(lines)
-
-            btn_compute.click(
-                fn=show_results,
-                inputs=[annotations_state],
-                outputs=[results_display],
-            )
-
-    return app
-
-
-def launch_validation(results_repo: str, **kwargs) -> None:
-    """Launch the validation app.
-
-    Args:
-        results_repo: HF dataset repo with published results.
-        **kwargs: n, output_path, prioritize_splits, server_port, share.
-    """
-    app_kwargs = {}
-    for k in ("n", "output_path", "prioritize_splits"):
-        if k in kwargs:
-            app_kwargs[k] = kwargs.pop(k)
-    app = build_validation_app(results_repo, **app_kwargs)
-    app.launch(**kwargs)

@@ -237,11 +237,3 @@ class TestCLIParser:
         args = parser.parse_args(["run", "in", "out", "--models", "glm-ocr", "dots-ocr"])
         assert args.models == ["glm-ocr", "dots-ocr"]
 
-    def test_validate_subcommand_parses(self):
-        from ocr_bench.cli import build_parser
-
-        parser = build_parser()
-        args = parser.parse_args(["validate", "results/repo", "--n", "20"])
-        assert args.command == "validate"
-        assert args.results == "results/repo"
-        assert args.n == 20

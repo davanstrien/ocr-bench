@@ -1,0 +1,10 @@
+{% if vote_count > 0 %}
+<span>{{ vote_count }} vote{{ "s" if vote_count != 1 else "" }}</span>
+&middot;
+<span>{{ agreement_pct }}% agree</span>
+{% if hard_disagree_rate > 25 %}
+&middot; <span class="warning">judge may be miscalibrated</span>
+{% elif vote_count >= 15 %}
+&middot; <span class="calibrated">judge well-calibrated</span>
+{% endif %}
+{% endif %}

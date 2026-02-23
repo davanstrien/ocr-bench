@@ -1,21 +1,10 @@
-"""Tests for the Gradio results viewer."""
+"""Tests for the results viewer data layer."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from ocr_bench.viewer import _filter_comparisons, _winner_badge, load_results
-
-
-def _has_gradio() -> bool:
-    try:
-        import gradio  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
 
 
 SAMPLE_LEADERBOARD = [
@@ -126,16 +115,3 @@ class TestWinnerBadge:
 
     def test_tie(self):
         assert _winner_badge("tie") == "Tie"
-
-
-class TestBuildViewer:
-    @pytest.mark.skipif(not _has_gradio(), reason="gradio not installed")
-    @patch("ocr_bench.viewer.load_results")
-    def test_returns_blocks_instance(self, mock_load):
-        mock_load.return_value = (SAMPLE_LEADERBOARD, SAMPLE_COMPARISONS)
-        from ocr_bench.viewer import build_viewer
-
-        app = build_viewer("user/results")
-        import gradio as gr
-
-        assert isinstance(app, gr.Blocks)

@@ -92,24 +92,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-wait", action="store_true", help="Launch and exit without polling (default: wait)"
     )
 
-    # --- browse subcommand ---
-    browse = sub.add_parser("browse", help="Browse evaluation results in a web UI")
-    browse.add_argument("results", help="HF dataset repo id with published results")
-    browse.add_argument("--port", type=int, default=7860, help="Port for Gradio server")
-    browse.add_argument("--share", action="store_true", help="Create a public Gradio link")
-
-    # --- validate subcommand ---
-    validate = sub.add_parser("validate", help="Blind human A/B validation of judge quality")
-    validate.add_argument("results", help="HF dataset repo id with published judge results")
-    validate.add_argument("--n", type=int, default=30, help="Number of comparisons to validate")
-    validate.add_argument("--output", default=None, help="Path to save annotations JSON")
-    validate.add_argument("--port", type=int, default=7860, help="Port for Gradio server")
-    validate.add_argument("--share", action="store_true", help="Create a public Gradio link")
-    validate.add_argument(
-        "--no-prioritize-splits",
-        action="store_true",
-        help="Don't show split-jury cases first",
-    )
+    # --- view subcommand ---
+    view = sub.add_parser("view", help="Browse and validate results in a web UI")
+    view.add_argument("results", help="HF dataset repo id with published results")
+    view.add_argument("--port", type=int, default=7860, help="Port (default: 7860)")
+    view.add_argument("--host", default="127.0.0.1", help="Host (default: 127.0.0.1)")
+    view.add_argument("--output", default=None, help="Path to save annotations JSON")
 
     return parser
 
@@ -344,39 +332,23 @@ def cmd_run(args: argparse.Namespace) -> None:
         )
 
 
-def cmd_browse(args: argparse.Namespace) -> None:
-    """Launch the Gradio results viewer."""
+def cmd_view(args: argparse.Namespace) -> None:
+    """Launch the FastAPI + HTMX results viewer."""
     try:
-        from ocr_bench.viewer import launch_viewer
+        import uvicorn
+
+        from ocr_bench.web import create_app
     except ImportError:
         console.print(
-            "[red]Error:[/red] Gradio is not installed. "
+            "[red]Error:[/red] FastAPI/uvicorn not installed. "
             "Install the viewer extra: [bold]pip install ocr-bench\\[viewer][/bold]"
         )
         sys.exit(1)
 
-    launch_viewer(args.results, server_port=args.port, share=args.share)
-
-
-def cmd_validate(args: argparse.Namespace) -> None:
-    """Launch the blind human validation UI."""
-    try:
-        from ocr_bench.validate import launch_validation
-    except ImportError:
-        console.print(
-            "[red]Error:[/red] Gradio is not installed. "
-            "Install the viewer extra: [bold]pip install ocr-bench\\[viewer][/bold]"
-        )
-        sys.exit(1)
-
-    launch_validation(
-        args.results,
-        n=args.n,
-        output_path=args.output,
-        prioritize_splits=not args.no_prioritize_splits,
-        server_port=args.port,
-        share=args.share,
-    )
+    console.print(f"Loading results from [bold]{args.results}[/bold]...")
+    app = create_app(args.results, output_path=args.output)
+    console.print(f"Starting viewer at [bold]http://{args.host}:{args.port}[/bold]")
+    uvicorn.run(app, host=args.host, port=args.port)
 
 
 def main() -> None:
@@ -392,10 +364,8 @@ def main() -> None:
             cmd_judge(args)
         elif args.command == "run":
             cmd_run(args)
-        elif args.command == "browse":
-            cmd_browse(args)
-        elif args.command == "validate":
-            cmd_validate(args)
+        elif args.command == "view":
+            cmd_view(args)
     except DatasetError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(1)

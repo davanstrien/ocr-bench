@@ -81,22 +81,3 @@ class TestBuildParser:
             parser.parse_args(["judge", "--help"])
         assert exc_info.value.code == 0
 
-    def test_browse_subcommand_defaults(self):
-        parser = build_parser()
-        args = parser.parse_args(["browse", "user/results"])
-        assert args.command == "browse"
-        assert args.results == "user/results"
-        assert args.port == 7860
-        assert args.share is False
-
-    def test_browse_with_options(self):
-        parser = build_parser()
-        args = parser.parse_args(["browse", "user/results", "--port", "8080", "--share"])
-        assert args.port == 8080
-        assert args.share is True
-
-    def test_browse_help_exits(self):
-        parser = build_parser()
-        with pytest.raises(SystemExit) as exc_info:
-            parser.parse_args(["browse", "--help"])
-        assert exc_info.value.code == 0

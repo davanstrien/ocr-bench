@@ -1,0 +1,85 @@
+{% if comp %}
+<div class="comp-nav">
+  <span>{{ nav_idx + 1 }} of {{ nav_total }}</span>
+  {% if nav_idx > 0 %}
+  <a href="#" data-nav="prev"
+     hx-get="/comparisons/{{ nav_idx - 1 }}{% if winner_filter and winner_filter != 'All' %}?winner={{ winner_filter }}{% endif %}{% if model_filter and model_filter != 'All' %}{{ '&' if winner_filter and winner_filter != 'All' else '?' }}model={{ model_filter }}{% endif %}"
+     hx-target="#comparison-container">&larr;</a>
+  {% endif %}
+  {% if nav_idx < nav_total - 1 %}
+  <a href="#" data-nav="next"
+     hx-get="/comparisons/{{ nav_idx + 1 }}{% if winner_filter and winner_filter != 'All' %}?winner={{ winner_filter }}{% endif %}{% if model_filter and model_filter != 'All' %}{{ '&' if winner_filter and winner_filter != 'All' else '?' }}model={{ model_filter }}{% endif %}"
+     hx-target="#comparison-container">&rarr;</a>
+  {% endif %}
+</div>
+
+<div class="comparison-columns">
+  <div class="ocr-column">
+    {% if revealed %}
+    <h3 class="revealed">{{ model_a_name }}</h3>
+    {% else %}
+    <h3>A</h3>
+    {% endif %}
+    <div class="ocr-text">{{ display_text_a }}</div>
+  </div>
+  <div class="ocr-column">
+    {% if revealed %}
+    <h3 class="revealed">{{ model_b_name }}</h3>
+    {% else %}
+    <h3>B</h3>
+    {% endif %}
+    <div class="ocr-text">{{ display_text_b }}</div>
+  </div>
+</div>
+
+{% if not voted %}
+<div class="vote-prompt">Which OCR output is better?</div>
+<div class="vote-row">
+  <a href="#" data-vote="A" class="vote-btn"
+     hx-post="/vote/{{ comp_idx }}"
+     hx-vals='{"winner": "A"}'
+     hx-target="#comparison-container">A is better</a>
+  <a href="#" data-vote="tie" class="vote-btn vote-tie"
+     hx-post="/vote/{{ comp_idx }}"
+     hx-vals='{"winner": "tie"}'
+     hx-target="#comparison-container">Tie</a>
+  <a href="#" data-vote="B" class="vote-btn"
+     hx-post="/vote/{{ comp_idx }}"
+     hx-vals='{"winner": "B"}'
+     hx-target="#comparison-container">B is better</a>
+</div>
+<div class="vote-hints">
+  {% if not revealed %}
+  <a href="#" data-action="reveal"
+     hx-get="/reveal/{{ comp_idx }}"
+     hx-target="#comparison-container">show judge verdict</a>
+  <span class="separator">&middot;</span>
+  {% endif %}
+  <span class="keys">keys: <kbd>a</kbd> <kbd>t</kbd> <kbd>b</kbd> vote &middot; <kbd>&larr;</kbd> <kbd>&rarr;</kbd> navigate{% if not revealed %} &middot; <kbd>r</kbd> reveal{% endif %}</span>
+</div>
+{% endif %}
+
+{% if revealed %}
+<div class="verdict">
+  {% if voted %}
+  Judge: {{ judge_verdict }}
+  &middot; You: {{ human_vote }}
+  &middot; <span class="agreement {{ agreement_class }}">{{ agreement_word }}</span>
+  {% else %}
+  Judge: {{ judge_verdict }}
+  {% endif %}
+  {% if reason %}
+  <span class="reason">"{{ reason }}"</span>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if has_image %}
+<div class="doc-image">
+  <img src="/image/{{ sample_idx }}" alt="Document image" loading="lazy">
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty">No comparisons match the current filters.</div>
+{% endif %}
