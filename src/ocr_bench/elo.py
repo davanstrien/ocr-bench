@@ -225,6 +225,30 @@ def _bootstrap_ci(
     return cis
 
 
+def rankings_resolved(board: Leaderboard) -> bool:
+    """Check if all adjacent ranks have non-overlapping 95% CIs.
+
+    Returns True when the ranking order is statistically resolved — i.e. for
+    every pair of adjacent models in the ranking, the higher-ranked model's
+    CI lower bound exceeds the lower-ranked model's CI upper bound.
+    """
+    if not board.elo_ci:
+        return False
+    ranked = board.ranked
+    if len(ranked) < 2:
+        return False
+    for i in range(len(ranked) - 1):
+        model_hi, _ = ranked[i]
+        model_lo, _ = ranked[i + 1]
+        if model_hi not in board.elo_ci or model_lo not in board.elo_ci:
+            return False
+        lo_of_higher, _ = board.elo_ci[model_hi]
+        _, hi_of_lower = board.elo_ci[model_lo]
+        if hi_of_lower >= lo_of_higher:
+            return False  # CIs overlap
+    return True
+
+
 def compute_elo(
     results: list[ComparisonResult],
     model_names: list[str],

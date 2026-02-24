@@ -91,3 +91,13 @@ class TestBuildParser:
         args = parser.parse_args(["judge", "user/dataset"])
         assert args.full_rejudge is False
 
+    def test_adaptive_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset", "--adaptive"])
+        assert args.adaptive is True
+
+    def test_adaptive_defaults_false(self):
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset"])
+        assert args.adaptive is False
+

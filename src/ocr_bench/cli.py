@@ -21,8 +21,8 @@ from ocr_bench.dataset import (
     load_config_dataset,
     load_flat_dataset,
 )
-from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo
-from ocr_bench.judge import _normalize_pair, build_comparisons
+from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo, rankings_resolved
+from ocr_bench.judge import Comparison, _normalize_pair, build_comparisons, sample_indices
 from ocr_bench.publish import (
     EvalMetadata,
     load_existing_comparisons,
@@ -79,6 +79,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--full-rejudge",
         action="store_true",
         help="Re-judge all pairs, ignoring existing comparisons in --save-results repo",
+    )
+    judge.add_argument(
+        "--adaptive",
+        action="store_true",
+        help="Stop early when rankings are statistically resolved (non-overlapping CIs)",
     )
 
     # --- run subcommand ---
@@ -148,6 +153,32 @@ def print_leaderboard(board: Leaderboard) -> None:
     console.print(table)
 
 
+def _convert_results(
+    comparisons: list[Comparison], aggregated: list[dict]
+) -> list[ComparisonResult]:
+    """Convert judged comparisons + aggregated outputs into ComparisonResult list."""
+    results: list[ComparisonResult] = []
+    for comp, result in zip(comparisons, aggregated):
+        if not result:
+            continue
+        results.append(
+            ComparisonResult(
+                sample_idx=comp.sample_idx,
+                model_a=comp.model_a,
+                model_b=comp.model_b,
+                winner=result.get("winner", "tie"),
+                reason=result.get("reason", ""),
+                agreement=result.get("agreement", "1/1"),
+                swapped=comp.swapped,
+                text_a=comp.text_a,
+                text_b=comp.text_b,
+                col_a=comp.col_a,
+                col_b=comp.col_b,
+            )
+        )
+    return results
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Orchestrate: load → compare → judge → elo → print → publish."""
     # --- Load dataset ---
@@ -194,82 +225,140 @@ def cmd_judge(args: argparse.Namespace) -> None:
         else:
             console.print("\nNo existing comparisons found — full judge run.")
 
-    # --- Build comparisons ---
-    comparisons = build_comparisons(
-        ds, ocr_columns, max_samples=args.max_samples, seed=args.seed, skip_pairs=skip_pairs
-    )
-    console.print(f"\nBuilt {len(comparisons)} new pairwise comparisons")
-
-    if not comparisons and not existing_results:
-        console.print("[yellow]No valid comparisons — check that OCR columns have text.[/yellow]")
-        return
-
-    # --- No new pairs: refit and republish from existing ---
     model_names = list(set(ocr_columns.values()))
-    if not comparisons:
-        console.print("[green]All pairs already judged — refitting leaderboard.[/green]")
-        board = compute_elo(existing_results, model_names)
-        console.print()
-        print_leaderboard(board)
-        if args.save_results:
-            metadata = EvalMetadata(
-                source_dataset=args.dataset,
-                judge_models=[],
-                seed=args.seed,
-                max_samples=args.max_samples or len(ds),
-                total_comparisons=0,
-                valid_comparisons=0,
-                from_prs=args.from_prs,
-            )
-            publish_results(
-                args.save_results, board, metadata, existing_metadata=existing_meta_rows
-            )
-            console.print(f"\nResults published to [bold]{args.save_results}[/bold]")
-        return
 
-    # --- Run judge(s) ---
+    # --- Judge setup (shared by both paths) ---
     model_specs = args.models or [DEFAULT_JUDGE]
     judges = [parse_judge_spec(spec, max_tokens=args.max_tokens) for spec in model_specs]
     is_jury = len(judges) > 1
 
-    if is_jury:
-        console.print(f"\nJury mode: {len(judges)} judges")
+    def _judge_batch(batch_comps: list[Comparison]) -> list[ComparisonResult]:
+        """Run judge(s) on a batch of comparisons and return ComparisonResults."""
+        all_judge_outputs: list[list[dict]] = []
+        for judge in judges:
+            results = judge.judge(batch_comps)
+            all_judge_outputs.append(results)
+        if is_jury:
+            judge_names = [j.name for j in judges]
+            aggregated = aggregate_jury_votes(all_judge_outputs, judge_names)
+        else:
+            aggregated = all_judge_outputs[0]
+        return _convert_results(batch_comps, aggregated)
 
-    all_judge_outputs: list[list[dict]] = []
-    for judge in judges:
-        console.print(f"\nRunning judge: {judge.name}")
-        results = judge.judge(comparisons)
-        all_judge_outputs.append(results)
+    if args.adaptive:
+        # --- Adaptive stopping: batch-by-batch with convergence check ---
+        from itertools import combinations as _combs
 
-    # --- Aggregate ---
-    if is_jury:
-        judge_names = [j.name for j in judges]
-        aggregated = aggregate_jury_votes(all_judge_outputs, judge_names)
-    else:
-        aggregated = all_judge_outputs[0]
+        all_indices = sample_indices(len(ds), args.max_samples, args.seed)
+        n_pairs = len(list(_combs(model_names, 2)))
+        batch_samples = 5
+        min_before_check = max(3 * n_pairs, 20)
 
-    # --- Convert to ComparisonResult ---
-    new_results: list[ComparisonResult] = []
-    for comp, result in zip(comparisons, aggregated):
-        if not result:
-            continue
-        new_results.append(
-            ComparisonResult(
-                sample_idx=comp.sample_idx,
-                model_a=comp.model_a,
-                model_b=comp.model_b,
-                winner=result.get("winner", "tie"),
-                reason=result.get("reason", ""),
-                agreement=result.get("agreement", "1/1"),
-                swapped=comp.swapped,
-                text_a=comp.text_a,
-                text_b=comp.text_b,
-                col_a=comp.col_a,
-                col_b=comp.col_b,
-            )
+        if is_jury:
+            console.print(f"\nJury mode: {len(judges)} judges")
+        console.print(
+            f"\n[bold]Adaptive mode[/bold]: {len(all_indices)} samples, "
+            f"{n_pairs} pairs, batch size {batch_samples}, "
+            f"checking after {min_before_check} comparisons"
         )
 
-    console.print(f"\n{len(new_results)}/{len(comparisons)} valid comparisons")
+        new_results: list[ComparisonResult] = []
+        total_comparisons = 0
+        for batch_num, batch_start in enumerate(
+            range(0, len(all_indices), batch_samples)
+        ):
+            batch_indices = all_indices[batch_start : batch_start + batch_samples]
+            batch_comps = build_comparisons(
+                ds,
+                ocr_columns,
+                skip_pairs=skip_pairs,
+                indices=batch_indices,
+                seed=args.seed,
+            )
+            if not batch_comps:
+                continue
+
+            batch_results = _judge_batch(batch_comps)
+            new_results.extend(batch_results)
+            total_comparisons += len(batch_comps)
+            # batch_comps goes out of scope → GC can free images
+
+            total = len(existing_results) + len(new_results)
+            console.print(
+                f"  Batch {batch_num + 1}: {len(batch_results)} new, {total} total"
+            )
+
+            if total >= min_before_check:
+                board = compute_elo(
+                    existing_results + new_results, model_names
+                )
+                if rankings_resolved(board):
+                    remaining = len(all_indices) - batch_start - len(batch_indices)
+                    console.print(
+                        f"[green]Rankings converged after {total} comparisons! "
+                        f"Skipped ~{remaining * n_pairs} remaining.[/green]"
+                    )
+                    break
+
+        console.print(
+            f"\n{len(new_results)}/{total_comparisons} valid comparisons"
+        )
+    else:
+        # --- Standard single-pass flow ---
+        comparisons = build_comparisons(
+            ds,
+            ocr_columns,
+            max_samples=args.max_samples,
+            seed=args.seed,
+            skip_pairs=skip_pairs,
+        )
+        console.print(f"\nBuilt {len(comparisons)} new pairwise comparisons")
+
+        if not comparisons and not existing_results:
+            console.print(
+                "[yellow]No valid comparisons — check that OCR columns have text.[/yellow]"
+            )
+            return
+
+        if not comparisons:
+            console.print(
+                "[green]All pairs already judged — refitting leaderboard.[/green]"
+            )
+            board = compute_elo(existing_results, model_names)
+            console.print()
+            print_leaderboard(board)
+            if args.save_results:
+                metadata = EvalMetadata(
+                    source_dataset=args.dataset,
+                    judge_models=[],
+                    seed=args.seed,
+                    max_samples=args.max_samples or len(ds),
+                    total_comparisons=0,
+                    valid_comparisons=0,
+                    from_prs=args.from_prs,
+                )
+                publish_results(
+                    args.save_results,
+                    board,
+                    metadata,
+                    existing_metadata=existing_meta_rows,
+                )
+                console.print(
+                    f"\nResults published to [bold]{args.save_results}[/bold]"
+                )
+            return
+
+        if is_jury:
+            console.print(f"\nJury mode: {len(judges)} judges")
+
+        for judge in judges:
+            console.print(f"\nRunning judge: {judge.name}")
+
+        new_results = _judge_batch(comparisons)
+        total_comparisons = len(comparisons)
+        console.print(
+            f"\n{len(new_results)}/{total_comparisons} valid comparisons"
+        )
 
     # --- Merge existing + new, compute ELO ---
     all_results = existing_results + new_results
@@ -284,7 +373,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             judge_models=[j.name for j in judges],
             seed=args.seed,
             max_samples=args.max_samples or len(ds),
-            total_comparisons=len(comparisons),
+            total_comparisons=total_comparisons,
             valid_comparisons=len(new_results),
             from_prs=args.from_prs,
         )

@@ -7,6 +7,7 @@ from ocr_bench.elo import (
     ComparisonResult,
     Leaderboard,
     compute_elo,
+    rankings_resolved,
 )
 
 
@@ -215,3 +216,61 @@ class TestLeaderboard:
     def test_elo_ci_default_empty(self):
         board = Leaderboard()
         assert board.elo_ci == {}
+
+
+class TestRankingsResolved:
+    def test_non_overlapping_cis(self):
+        """Non-overlapping CIs → resolved."""
+        board = Leaderboard(
+            elo={"a": 1600.0, "b": 1500.0, "c": 1400.0},
+            elo_ci={
+                "a": (1580.0, 1620.0),
+                "b": (1480.0, 1520.0),
+                "c": (1380.0, 1420.0),
+            },
+        )
+        assert rankings_resolved(board) is True
+
+    def test_overlapping_cis(self):
+        """Overlapping CIs between adjacent ranks → not resolved."""
+        board = Leaderboard(
+            elo={"a": 1550.0, "b": 1500.0, "c": 1400.0},
+            elo_ci={
+                "a": (1490.0, 1610.0),  # overlaps with b's upper
+                "b": (1480.0, 1520.0),
+                "c": (1380.0, 1420.0),
+            },
+        )
+        assert rankings_resolved(board) is False
+
+    def test_no_cis(self):
+        """No CIs → not resolved."""
+        board = Leaderboard(elo={"a": 1600.0, "b": 1500.0})
+        assert rankings_resolved(board) is False
+
+    def test_single_model(self):
+        """Single model → not resolved (fewer than 2 models)."""
+        board = Leaderboard(
+            elo={"a": 1500.0},
+            elo_ci={"a": (1480.0, 1520.0)},
+        )
+        assert rankings_resolved(board) is False
+
+    def test_missing_ci_for_model(self):
+        """CI missing for one model → not resolved."""
+        board = Leaderboard(
+            elo={"a": 1600.0, "b": 1500.0},
+            elo_ci={"a": (1580.0, 1620.0)},  # b missing
+        )
+        assert rankings_resolved(board) is False
+
+    def test_exact_boundary(self):
+        """CIs touching exactly (hi_of_lower == lo_of_higher) → not resolved."""
+        board = Leaderboard(
+            elo={"a": 1600.0, "b": 1500.0},
+            elo_ci={
+                "a": (1550.0, 1650.0),
+                "b": (1450.0, 1550.0),  # upper == lower of a
+            },
+        )
+        assert rankings_resolved(board) is False

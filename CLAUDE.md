@@ -65,7 +65,7 @@ FastAPI + HTMX, Tufte-inspired. Keyboard-first (`←`/`→` navigate, `a`/`b`/`t
 - [ ] Judge prompt presets for GLAM document types
 - [ ] Custom prompt and ignore list support
 - [ ] Define leaderboard dataset schema
-- [ ] Adaptive stopping (`--adaptive` flag): run batches, compute BT-MLE + CIs, stop when adjacent-rank CIs don't overlap (ranking is statistically resolved). Avoids wasting judge calls when rankings are already clear.
+- [x] Adaptive stopping (`--adaptive` flag): run batches, compute BT-MLE + CIs, stop when adjacent-rank CIs don't overlap (ranking is statistically resolved). Avoids wasting judge calls when rankings are already clear.
 - [ ] Judge comparison: run same dataset through different judges (e.g. Kimi K2.5 vs Qwen3.5-397B), compare BT-MLE ratings + CIs to see where judges agree/disagree. Overlapping CIs = single judge is fine; non-overlapping = jury mode adds value. Test on diverse document types — jury may only matter for ambiguous collections (e.g. index cards where everything ties).
 - [ ] `--focus-pairs` for human validation: prioritize showing pairs with overlapping CIs in the vote UI, since those are the only ones where human input changes the ranking.
 

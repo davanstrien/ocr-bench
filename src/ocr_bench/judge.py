@@ -140,23 +140,48 @@ def _normalize_pair(a: str, b: str) -> tuple[str, str]:
     return (a, b) if a <= b else (b, a)
 
 
+def sample_indices(
+    dataset_len: int, max_samples: int | None = None, seed: int = 42
+) -> list[int]:
+    """Compute shuffled sample indices (cheap — no image loading).
+
+    Args:
+        dataset_len: Total number of rows in the dataset.
+        max_samples: If set, randomly sample this many indices.
+        seed: Random seed for reproducible sampling.
+
+    Returns:
+        List of integer indices into the dataset.
+    """
+    indices = list(range(dataset_len))
+    if max_samples and max_samples < len(indices):
+        random.seed(seed)
+        indices = random.sample(indices, max_samples)
+    return indices
+
+
 def build_comparisons(
     dataset: Any,
     ocr_columns: dict[str, str],
     max_samples: int | None = None,
     seed: int = 42,
     skip_pairs: set[tuple[str, str]] | None = None,
+    indices: list[int] | None = None,
 ) -> list[Comparison]:
     """Build pairwise comparison prompts from a dataset.
 
     Args:
         dataset: HF dataset with an "image" column and OCR output columns.
         ocr_columns: Mapping of column_name -> model_name.
-        max_samples: If set, randomly sample this many rows.
+        max_samples: If set, randomly sample this many rows. Ignored when
+            ``indices`` is provided.
         seed: Random seed for sampling and position-bias randomization.
         skip_pairs: Set of (model_a, model_b) pairs to exclude. Pairs are
             normalized so (a, b) and (b, a) are treated identically.
             If None, all pairs are included.
+        indices: Explicit row indices to use. When provided, ``max_samples``
+            and ``seed`` are not used for index selection (seed is still used
+            for position-bias randomization).
 
     Returns:
         List of Comparison objects with pre-built chat messages.
@@ -170,10 +195,8 @@ def build_comparisons(
     if skip_pairs:
         normalized_skip = {_normalize_pair(a, b) for a, b in skip_pairs}
 
-    indices = list(range(len(dataset)))
-    if max_samples and max_samples < len(indices):
-        random.seed(seed)
-        indices = random.sample(indices, max_samples)
+    if indices is None:
+        indices = sample_indices(len(dataset), max_samples, seed)
 
     rng = random.Random(seed)
     comparisons: list[Comparison] = []
