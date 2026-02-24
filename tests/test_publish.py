@@ -104,8 +104,9 @@ class TestBuildMetadataRow:
 
 
 class TestPublishResults:
+    @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.Dataset")
-    def test_publishes_four_configs(self, mock_ds_cls):
+    def test_publishes_four_configs(self, mock_ds_cls, mock_api_cls):
         mock_ds = mock_ds_cls.from_list.return_value
         board = _make_board()
         meta = EvalMetadata(
@@ -129,10 +130,13 @@ class TestPublishResults:
         assert calls[2].kwargs["config_name"] == "leaderboard"
         # metadata
         assert calls[3].kwargs["config_name"] == "metadata"
+        # README uploaded
+        mock_api_cls.return_value.upload_file.assert_called_once()
 
+    @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.Dataset")
-    def test_skips_comparisons_if_empty(self, mock_ds_cls):
-        mock_ds = mock_ds_cls.from_list.return_value
+    def test_skips_comparisons_if_empty(self, mock_ds_cls, mock_api_cls):
+        mock_ds_cls.from_list.return_value
         board = Leaderboard(
             elo={"m": 1500.0},
             wins={"m": 0},
@@ -151,10 +155,11 @@ class TestPublishResults:
         publish_results("user/results", board, meta)
 
         # default leaderboard + named leaderboard + metadata = 3
-        assert mock_ds.push_to_hub.call_count == 3
+        assert mock_ds_cls.from_list.return_value.push_to_hub.call_count == 3
 
+    @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.Dataset")
-    def test_appends_existing_metadata(self, mock_ds_cls):
+    def test_appends_existing_metadata(self, mock_ds_cls, mock_api_cls):
         mock_ds_cls.from_list.return_value  # noqa: F841
         board = _make_board()
         meta = EvalMetadata(
