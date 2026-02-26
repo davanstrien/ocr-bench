@@ -132,6 +132,14 @@ def build_parser() -> argparse.ArgumentParser:
     view.add_argument("--host", default="127.0.0.1", help="Host (default: 127.0.0.1)")
     view.add_argument("--output", default=None, help="Path to save annotations JSON")
 
+    # --- publish subcommand ---
+    publish = sub.add_parser("publish", help="Deploy results viewer as a Hugging Face Space")
+    publish.add_argument("results", help="HF results dataset repo id to view in the Space")
+    publish.add_argument(
+        "--space", default=None, help="Space repo id (default: {results}-viewer)"
+    )
+    publish.add_argument("--private", action="store_true", help="Make the Space private")
+
     return parser
 
 
@@ -569,6 +577,34 @@ def cmd_view(args: argparse.Namespace) -> None:
     uvicorn.run(app, host=args.host, port=args.port)
 
 
+SPACE_TEMPLATE = "davanstrien/ocr-bench-space-template"
+
+
+def cmd_publish(args: argparse.Namespace) -> None:
+    """Deploy results viewer as a Hugging Face Space."""
+    from huggingface_hub import HfApi
+
+    api = HfApi()
+    results = args.results
+    space_id = args.space or f"{results}-viewer"
+
+    console.print(f"Deploying viewer for [bold]{results}[/bold] to [bold]{space_id}[/bold]...")
+
+    api.duplicate_space(
+        from_id=SPACE_TEMPLATE,
+        to_id=space_id,
+        private=args.private if args.private else None,
+        hardware="cpu-basic",
+        exist_ok=True,
+        variables=[{"key": "REPOS", "value": results}],
+    )
+
+    api.add_space_variable(repo_id=space_id, key="REPOS", value=results)
+
+    url = f"https://huggingface.co/spaces/{space_id}"
+    console.print(f"[green]Space published![/green] {url}")
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -584,6 +620,8 @@ def main() -> None:
             cmd_run(args)
         elif args.command == "view":
             cmd_view(args)
+        elif args.command == "publish":
+            cmd_publish(args)
     except DatasetError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(1)
