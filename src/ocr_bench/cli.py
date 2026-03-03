@@ -145,9 +145,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def print_leaderboard(board: Leaderboard) -> None:
     """Print leaderboard as a Rich table."""
+    from ocr_bench.publish import _get_model_sizes
+
+    sizes = _get_model_sizes()
     table = Table(title="OCR Model Leaderboard")
     table.add_column("Rank", style="bold")
     table.add_column("Model")
+    table.add_column("Params", justify="right")
     has_ci = bool(board.elo_ci)
     if has_ci:
         table.add_column("ELO (95% CI)", justify="right")
@@ -169,6 +173,7 @@ def print_leaderboard(board: Leaderboard) -> None:
         table.add_row(
             str(rank),
             model,
+            sizes.get(model, ""),
             elo_str,
             str(board.wins[model]),
             str(board.losses[model]),

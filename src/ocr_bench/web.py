@@ -310,8 +310,11 @@ def create_app(
 
     @app.get("/leaderboard", response_class=HTMLResponse)
     async def leaderboard(request: Request):
+        from ocr_bench.publish import _get_model_sizes
+
         # Build human ELO if we have annotations
         human_board = compute_human_elo(state.annotations, state.validation_comps)
+        sizes = _get_model_sizes()
 
         rows = []
         for row in sorted(state.leaderboard_rows, key=lambda r: r.get("elo", 0), reverse=True):
@@ -327,6 +330,7 @@ def create_app(
             rows.append({
                 "model": model,
                 "model_short": short,
+                "params": row.get("params") or sizes.get(model, ""),
                 "elo": round(row.get("elo", 0)),
                 "elo_low": row.get("elo_low"),
                 "elo_high": row.get("elo_high"),
@@ -339,12 +343,32 @@ def create_app(
             })
 
         has_ci = any(r.get("elo_low") is not None for r in rows)
+
+        # Build chart data — params (numeric) vs win%
+        chart_points = []
+        for r in rows:
+            params_str = r.get("params", "")
+            if params_str:
+                try:
+                    params_num = float(params_str.rstrip("B"))
+                except ValueError:
+                    continue
+                chart_points.append({
+                    "name": r["model_short"],
+                    "params": params_num,
+                    "win_pct": r["win_pct"],
+                    "elo": r["elo"],
+                    "elo_low": r.get("elo_low"),
+                    "elo_high": r.get("elo_high"),
+                })
+
         return templates.TemplateResponse(request, "leaderboard.html", {
             "active_tab": "leaderboard",
             "repo_id": state.repo_id,
             "rows": rows,
             "has_ci": has_ci,
             "has_human_elo": human_board is not None,
+            "chart_points": chart_points,
         })
 
     @app.get("/comparisons", response_class=HTMLResponse)

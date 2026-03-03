@@ -16,6 +16,7 @@
     <tr>
       <th>#</th>
       <th>Model</th>
+      <th class="num">Params</th>
       <th class="num">Judge ELO</th>
       {% if has_ci %}<th class="num">95% CI</th>{% endif %}
       <th class="num">Wins</th>
@@ -33,6 +34,7 @@
     <tr>
       <td>{{ loop.index }}</td>
       <td class="model">{{ row.model_short }}</td>
+      <td class="num">{{ row.params if row.params else "—" }}</td>
       <td class="num">{{ row.elo }}</td>
       {% if has_ci %}<td class="num">{{ row.elo_low }}&ndash;{{ row.elo_high }}</td>{% endif %}
       <td class="num">{{ row.wins }}</td>
@@ -47,4 +49,134 @@
     {% endfor %}
   </tbody>
 </table>
+
+{% if chart_points|length >= 2 %}
+<h3 style="font-size: 0.95rem; font-weight: 600; margin-top: 2rem; margin-bottom: 0.5rem;">
+  ELO vs Parameter Count
+</h3>
+<p style="font-size: 0.78rem; color: #888; margin-top: 0; margin-bottom: 0.75rem;">
+  Smaller models can win on the right documents. Error bars show 95% confidence intervals.
+</p>
+
+<div style="max-width: 560px; position: relative;">
+  <canvas id="paramsChart"></canvas>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+<script>
+(function() {
+  const points = {{ chart_points | tojson }};
+  const colors = ['#6fa8dc', '#93c47d', '#e06666', '#f6b26b', '#8e7cc3'];
+
+  const gridColor = 'rgba(255,255,255,0.1)';
+  const textColor = '#aaa';
+
+  const datasets = points.map((p, i) => ({
+    label: p.name,
+    data: [{
+      x: p.params,
+      y: p.elo,
+      elo_low: p.elo_low,
+      elo_high: p.elo_high,
+      win_pct: p.win_pct,
+    }],
+    backgroundColor: colors[i % colors.length],
+    borderColor: colors[i % colors.length],
+    pointRadius: 10,
+    pointHoverRadius: 13,
+  }));
+
+  // Custom plugin to draw error bars
+  const errorBarPlugin = {
+    id: 'errorBars',
+    afterDatasetsDraw(chart) {
+      const { ctx } = chart;
+      chart.data.datasets.forEach((ds, i) => {
+        const meta = chart.getDatasetMeta(i);
+        meta.data.forEach((point, j) => {
+          const d = ds.data[j];
+          if (d.elo_low == null || d.elo_high == null) return;
+          const xPx = point.x;
+          const yLo = chart.scales.y.getPixelForValue(d.elo_low);
+          const yHi = chart.scales.y.getPixelForValue(d.elo_high);
+          const capW = 5;
+          ctx.save();
+          ctx.strokeStyle = ds.borderColor;
+          ctx.lineWidth = 1.5;
+          ctx.globalAlpha = 0.6;
+          // Vertical line
+          ctx.beginPath();
+          ctx.moveTo(xPx, yLo);
+          ctx.lineTo(xPx, yHi);
+          ctx.stroke();
+          // Top cap
+          ctx.beginPath();
+          ctx.moveTo(xPx - capW, yHi);
+          ctx.lineTo(xPx + capW, yHi);
+          ctx.stroke();
+          // Bottom cap
+          ctx.beginPath();
+          ctx.moveTo(xPx - capW, yLo);
+          ctx.lineTo(xPx + capW, yLo);
+          ctx.stroke();
+          ctx.restore();
+        });
+      });
+    },
+  };
+
+  Chart.register(ChartDataLabels, errorBarPlugin);
+
+  new Chart(document.getElementById('paramsChart'), {
+    type: 'scatter',
+    data: { datasets },
+    options: {
+      responsive: true,
+      animation: { duration: 400 },
+      scales: {
+        x: {
+          title: { display: true, text: 'Parameters (B)', color: textColor },
+          grid: { color: gridColor },
+          ticks: { color: textColor, callback: v => v + 'B' },
+        },
+        y: {
+          title: { display: true, text: 'ELO', color: textColor },
+          grid: { color: gridColor },
+          ticks: { color: textColor },
+        },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const d = ctx.raw;
+              let s = `${ctx.dataset.label}: ${d.x}B, ELO ${d.y}`;
+              if (d.elo_low != null) s += ` (${d.elo_low}\u2013${d.elo_high})`;
+              s += `, ${d.win_pct}% wins`;
+              return s;
+            },
+          },
+        },
+        datalabels: {
+          align: function(ctx) {
+            const d = ctx.dataset.data[0];
+            const maxX = Math.max(...points.map(p => p.params));
+            // Rightmost point: label left. Otherwise label right.
+            if (d.x >= maxX) return 'left';
+            return 'right';
+          },
+          anchor: 'center',
+          offset: 12,
+          color: textColor,
+          font: { size: 11 },
+          formatter: (val, ctx) => ctx.dataset.label,
+        },
+      },
+    },
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}

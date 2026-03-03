@@ -11,6 +11,7 @@ from datasets import Dataset, load_dataset
 from huggingface_hub import HfApi
 
 from ocr_bench.elo import ComparisonResult, Leaderboard
+from ocr_bench.run import MODEL_REGISTRY
 
 logger = structlog.get_logger()
 
@@ -79,14 +80,21 @@ def load_existing_metadata(repo_id: str) -> list[dict]:
         return []
 
 
+def _get_model_sizes() -> dict[str, str]:
+    """Build model_id → size lookup from the model registry."""
+    return {cfg.model_id: cfg.size for cfg in MODEL_REGISTRY.values()}
+
+
 def build_leaderboard_rows(board: Leaderboard) -> list[dict]:
     """Convert a Leaderboard into rows suitable for a Hub dataset."""
+    sizes = _get_model_sizes()
     rows = []
     for model, elo in board.ranked:
         total = board.wins[model] + board.losses[model] + board.ties[model]
         row = {
             "model": model,
             "elo": round(elo),
+            "params": sizes.get(model, ""),
             "wins": board.wins[model],
             "losses": board.losses[model],
             "ties": board.ties[model],
@@ -215,25 +223,26 @@ def _build_readme(
 
     # Table header
     if has_ci:
-        lines.append("| Rank | Model | ELO | 95% CI | Wins | Losses | Ties | Win% |")
-        lines.append("|------|-------|-----|--------|------|--------|------|------|")
+        lines.append("| Rank | Model | Params | ELO | 95% CI | Wins | Losses | Ties | Win% |")
+        lines.append("|------|-------|--------|-----|--------|------|--------|------|------|")
     else:
-        lines.append("| Rank | Model | ELO | Wins | Losses | Ties | Win% |")
-        lines.append("|------|-------|-----|------|--------|------|------|")
+        lines.append("| Rank | Model | Params | ELO | Wins | Losses | Ties | Win% |")
+        lines.append("|------|-------|--------|-----|------|--------|------|------|")
 
     for rank, row in enumerate(rows, 1):
         model = row["model"]
         elo = row["elo"]
+        params = row.get("params", "")
         if has_ci and "elo_low" in row:
             ci = f"{row['elo_low']}\u2013{row['elo_high']}"
             lines.append(
-                f"| {rank} | {model} | {elo} | {ci} "
+                f"| {rank} | {model} | {params} | {elo} | {ci} "
                 f"| {row['wins']} | {row['losses']} | {row['ties']} "
                 f"| {row['win_pct']}% |"
             )
         else:
             lines.append(
-                f"| {rank} | {model} | {elo} "
+                f"| {rank} | {model} | {params} | {elo} "
                 f"| {row['wins']} | {row['losses']} | {row['ties']} "
                 f"| {row['win_pct']}% |"
             )
