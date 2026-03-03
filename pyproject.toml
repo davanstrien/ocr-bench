@@ -24,7 +24,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/davanstrien/ocr-bench"
 Repository = "https://github.com/davanstrien/ocr-bench"
-Demo = "https://huggingface.co/spaces/davanstrien/ocr-bench-viewer"
+Demo = "https://huggingface.co/spaces/davanstrien/ocr-bench-britannica-results-qwen35-viewer"
 
 [project.scripts]
 ocr-bench = "ocr_bench.cli:main"

@@ -468,7 +468,11 @@ def create_app(
         ctx["next_url"] = (
             f"/comparisons/{next_nav}"
             + (f"?winner={winner_filter}" if winner_filter != "All" else "")
-            + (f"{'&' if winner_filter != 'All' else '?'}model={model_filter}" if model_filter != "All" else "")
+            + (
+                f"{'&' if winner_filter != 'All' else '?'}model={model_filter}"
+                if model_filter != "All"
+                else ""
+            )
             if next_nav is not None
             else None
         )

@@ -62,7 +62,7 @@ FastAPI + HTMX, Tufte-inspired. Keyboard-first (`←`/`→` navigate, `a`/`b`/`t
 - [x] Fix `_extract_model_id()`: take last inference_info entry (not first) so inherited metadata doesn't shadow actual model
 - [ ] Write README — "no single best model" as headline
 - [ ] Choose a project name (captures "rankings depend on your documents")
-- [ ] Deploy viewer as HF Space (the key demo artifact for sharing)
+- [x] Deploy viewer as HF Space — https://huggingface.co/spaces/davanstrien/ocr-bench-britannica-results-qwen35-viewer
 - [ ] PyPI publishing workflow (GitHub Actions trusted publishing — almost ready)
 - [x] Switch default judge to Qwen3.5-35B-A3B (fastest, zero parse failures, same cluster rankings as 122B and 27B)
 

@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 from ocr_bench.viewer import _filter_comparisons, _winner_badge, load_results
 
-
 SAMPLE_LEADERBOARD = [
     {"model": "DeepSeek-OCR", "elo": 1539, "wins": 5, "losses": 2, "ties": 1, "win_pct": 63},
     {"model": "LightOnOCR-2", "elo": 1530, "wins": 4, "losses": 3, "ties": 1, "win_pct": 50},
