@@ -1,8 +1,10 @@
 # ocr-bench
 
-**There is no single best OCR model.** Rankings change depending on your documents — manuscript cards, printed books, and historical texts all produce different winners.
+**There is currently no single best OCR model.** Rankings change depending on your documents. Manuscript cards, printed books, historical texts all produce different winners.
 
-ocr-bench allows you to create **per-collection leaderboards** using a VLM-as-judge approach, so you can find what works best for _your_ documents rather than relying on generic benchmarks. You can validate the VLM's judgement with human votes, and share results via the Hugging Face Hub.
+`ocr-bench` allows you to create **per-collection leaderboards** using a VLM-as-judge approach, so you can find what works best for _your_ documents rather than relying on generic benchmarks. You can validate the VLM's judgement with human votes, and share results via the Hugging Face Hub.
+
+The underlying OCR model inference uv scripts are available at [uv-scripts/ocr](https://huggingface.co/datasets/uv-scripts/ocr). The majority of these use vLLM for efficient GPU inference, and are designed to run on a single consumer GPU (e.g. 24GB 3090/4090). The `ocr-bench` package orchestrates running these models at scale on the Hub, and judging outputs with a VLM. If you just want to run some OCR models on your data without the judging/leaderboard aspect, you can run the scripts directly.
 
 ## Why?
 
@@ -18,7 +20,7 @@ ocr-bench lets you run the same set of OCR models on a sample of _your_ collecti
 | DeepSeek-OCR (4B)  |    #4 (1452)     |    #4 (1437)    |
 | dots.ocr (1.7B)    |    #3 (1453)     |    #5 (945)     |
 
-Rankings flip completely between collections. The model that's #1 on BPL cards drops to #2 on Britannica, and dots.ocr goes from #3 to dead last.
+Rankings can flip completely between collections.
 
 ## Hub-native by design
 
@@ -35,7 +37,7 @@ No local GPU required. Everything is shareable via Hub URLs.
 ## Quickstart
 
 ```bash
-pip install ocr-bench[viewer]
+uv pip install ocr-bench[viewer]
 
 # 1. Run OCR models on your dataset
 ocr-bench run <input-dataset> <output-repo> --max-samples 50
@@ -59,13 +61,13 @@ ocr-bench view <output-repo>-results
 
 ocr-bench ships with 5 OCR models ready to run:
 
-| Model | Size | Best for | Notes |
-|-------|------|----------|-------|
-| `glm-ocr` | 0.9B | Historical printed text | Top performer on Britannica |
-| `lighton-ocr-2` | 1B | Card catalogs, manuscripts | Top performer on BPL |
-| `firered-ocr` | 2.1B | Clean printed text | Mid-pack on degraded docs |
-| `deepseek-ocr` | 4B | Diverse documents | Most consistent across types |
-| `dots-ocr` | 1.7B | General | Struggles on historical text |
+| Model           | Size | Best for                   | Notes                        |
+| --------------- | ---- | -------------------------- | ---------------------------- |
+| `glm-ocr`       | 0.9B | Historical printed text    | Top performer on Britannica  |
+| `lighton-ocr-2` | 1B   | Card catalogs, manuscripts | Top performer on BPL         |
+| `firered-ocr`   | 2.1B | Clean printed text         | Mid-pack on degraded docs    |
+| `deepseek-ocr`  | 4B   | Diverse documents          | Most consistent across types |
+| `dots-ocr`      | 1.7B | General                    | Struggles on historical text |
 
 All model scripts are available at [uv-scripts/ocr](https://huggingface.co/datasets/uv-scripts/ocr) on the Hub.
 
@@ -86,8 +88,8 @@ Browse these on the Hub:
 ## Install
 
 ```bash
-pip install ocr-bench            # Core (run + judge)
-pip install ocr-bench[viewer]    # With web UI
+uv pip install ocr-bench            # Core (run + judge)
+uv pip install ocr-bench[viewer]    # With web UI
 ```
 
 Or with [uv](https://docs.astral.sh/uv/):
@@ -100,4 +102,4 @@ Requires Python >= 3.11 and an [HF token](https://huggingface.co/settings/tokens
 
 ## Status
 
-Working proof of concept. The core pipeline (run → judge → view) is functional. Not polished production software — expect rough edges.
+Working proof of concept. The core pipeline (run → judge → view) is functional. Not polished production software — expect rough edges. This is an early-stage project to explore the idea of VLM-judged OCR leaderboards, and gather feedback on the concept and implementation!
