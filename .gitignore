@@ -6,6 +6,7 @@ dist/
 
 # Screenshots and temp files from dev/testing
 *.png
+!assets/*.png
 *.jpeg
 *.json
 !pyproject.toml
