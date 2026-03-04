@@ -1,6 +1,10 @@
 # CLAUDE.md — ocr-bench
 
-OCR model evaluation toolkit. VLM-as-judge with per-dataset leaderboards on Hugging Face Hub.
+OCR model evaluation toolkit. Answers: **"Which OCR model works best for MY documents?"**
+
+Rankings change by document type — the best model for manuscript cards is different from the best for printed books or historical texts. This tool creates per-collection leaderboards using pairwise VLM-as-judge comparisons, so users can find what works for their specific documents.
+
+**Pipeline**: `run` (launch OCR models via HF Jobs) → `judge` (pairwise VLM comparison → Bradley-Terry ELO) → `view` (leaderboard + human validation). Everything lives on the Hugging Face Hub — no local GPU needed.
 
 ## Architecture
 
