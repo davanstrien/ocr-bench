@@ -8,7 +8,7 @@ The underlying OCR model inference uv scripts are available at [uv-scripts/ocr](
 
 ## Why?
 
-Generic OCR benchmarks tell you which model wins _on average_. But if you're digitising 18th-century encyclopaedias, that average doesn't help — the best model for your documents might be the worst on someone else's.
+Generic OCR benchmarks tell you which model wins _on average_. But if you're digitising 18th-century encyclopaedias, that average doesn't help — the best model for your documents might be the worst on someone else's. Inspired by [Datalab's Benchmarks + Evals](https://www.datalab.to/blog/datalab-benchmarks-evals) approach — pairwise VLM-as-judge with Bradley-Terry scoring on your own documents — ocr-bench brings this idea to the Hugging Face Hub as an open-source, self-serve tool.
 
 ocr-bench lets you run the same set of OCR models on a sample of _your_ collection, then uses a vision-language model to judge which produces the best transcription for each document. The result is a leaderboard specific to your data.
 
@@ -23,6 +23,8 @@ ocr-bench lets you run the same set of OCR models on a sample of _your_ collecti
 Rankings can flip completely between collections.
 
 ![ELO vs Parameter Count — smaller models can win on the right documents](assets/elo-scatter.png)
+
+**[Try the live viewer](https://huggingface.co/spaces/davanstrien/ocr-bench-britannica-results-qwen35-viewer)** — browse the Britannica 1771 leaderboard, compare OCR outputs side-by-side, and vote on quality yourself.
 
 ## Hub-native by design
 
