@@ -4,6 +4,8 @@ OCR model evaluation toolkit. Answers: **"Which OCR model works best for MY docu
 
 Rankings change by document type — the best model for manuscript cards is different from the best for printed books or historical texts. This tool creates per-collection leaderboards using pairwise VLM-as-judge comparisons, so users can find what works for their specific documents.
 
+Inspired by [Datalab's Benchmarks + Evals](https://www.datalab.to/blog/datalab-benchmarks-evals) — pairwise VLM-as-judge with Bradley-Terry scoring per document class — but as an open-source, Hub-native tool anyone can run on their own collections.
+
 **Pipeline**: `run` (launch OCR models via HF Jobs) → `judge` (pairwise VLM comparison → Bradley-Terry ELO) → `view` (leaderboard + human validation). Everything lives on the Hugging Face Hub — no local GPU needed.
 
 ## Architecture
