@@ -74,10 +74,10 @@ def client(tmp_path):
 
 
 class TestIndex:
-    def test_redirects_to_comparisons(self, client):
+    def test_redirects_to_leaderboard(self, client):
         resp = client.get("/", follow_redirects=False)
         assert resp.status_code == 302
-        assert resp.headers["location"] == "/comparisons"
+        assert resp.headers["location"] == "/leaderboard"
 
 
 class TestLeaderboard:

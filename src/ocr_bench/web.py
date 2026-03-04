@@ -306,7 +306,7 @@ def create_app(
 
     @app.get("/", response_class=RedirectResponse)
     async def index():
-        return RedirectResponse(url="/comparisons", status_code=302)
+        return RedirectResponse(url="/leaderboard", status_code=302)
 
     @app.get("/leaderboard", response_class=HTMLResponse)
     async def leaderboard(request: Request):
