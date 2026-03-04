@@ -22,6 +22,8 @@ ocr-bench lets you run the same set of OCR models on a sample of _your_ collecti
 
 Rankings can flip completely between collections.
 
+![ELO vs Parameter Count — smaller models can win on the right documents](assets/elo-scatter.png)
+
 ## Hub-native by design
 
 The entire evaluation loop lives on the Hugging Face Hub:
@@ -78,6 +80,8 @@ ocr-bench run <dataset> <output> --models glm-ocr lighton-ocr-2
 ```
 
 ## Example results
+
+![Leaderboard viewer with ELO ratings, confidence intervals, and human validation](assets/leaderboard.png)
 
 Browse these on the Hub:
 
