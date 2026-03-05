@@ -606,6 +606,19 @@ def cmd_publish(args: argparse.Namespace) -> None:
 
     api.add_space_variable(repo_id=space_id, key="REPOS", value=results)
 
+    # Update Space metadata to link to results dataset
+    try:
+        from huggingface_hub import metadata_update
+
+        metadata_update(
+            space_id,
+            {"datasets": [results], "tags": ["ocr-bench"]},
+            repo_type="space",
+            overwrite=True,
+        )
+    except Exception as exc:
+        logger.warning("space_metadata_update_failed", error=str(exc))
+
     url = f"https://huggingface.co/spaces/{space_id}"
     console.print(f"[green]Space published![/green] {url}")
 

@@ -193,6 +193,8 @@ def _build_readme(
         "tags:",
         "  - ocr-bench",
         "  - leaderboard",
+        "source_datasets:",
+        f"  - {metadata.source_dataset}",
         "configs:",
         "  - config_name: default",
         "    data_files:",
