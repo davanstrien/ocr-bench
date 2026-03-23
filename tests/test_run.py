@@ -37,8 +37,8 @@ class TestModelConfig:
 
 
 class TestModelRegistry:
-    def test_has_five_core_models(self):
-        assert len(MODEL_REGISTRY) == 5
+    def test_has_core_models(self):
+        assert len(MODEL_REGISTRY) == 7
 
     def test_default_models_exist_in_registry(self):
         for slug in DEFAULT_MODELS:
