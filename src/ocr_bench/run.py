@@ -54,6 +54,18 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         size="2.1B",
         default_flavor="l4x1",
     ),
+    "qianfan-ocr": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/qianfan-ocr.py",
+        model_id="baidu/Qianfan-OCR",
+        size="4.7B",
+        default_flavor="l4x1",
+    ),
+    "dots-mocr": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/dots-mocr.py",
+        model_id="rednote-hilab/dots.mocr",
+        size="3B",
+        default_flavor="l4x1",
+    ),
 }
 
 DEFAULT_MODELS = ["glm-ocr", "deepseek-ocr", "lighton-ocr-2", "dots-ocr", "firered-ocr"]
