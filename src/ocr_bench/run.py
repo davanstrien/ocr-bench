@@ -1,4 +1,4 @@
-"""OCR model orchestration — launch HF Jobs for multiple OCR models."""
+"""VLM model orchestration — launch HF Jobs for metadata extraction models."""
 
 from __future__ import annotations
 
@@ -23,52 +23,49 @@ class ModelConfig:
 
 
 MODEL_REGISTRY: dict[str, ModelConfig] = {
-    "glm-ocr": ModelConfig(
-        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/glm-ocr.py",
-        model_id="zai-org/GLM-OCR",
-        size="0.9B",
-        default_flavor="l4x1",
-    ),
-    "deepseek-ocr": ModelConfig(
-        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/deepseek-ocr-vllm.py",
-        model_id="deepseek-ai/DeepSeek-OCR",
+    "qwen3-vl-4b-instruct": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/vlm-metadata-extraction.py",
+        model_id="Qwen/Qwen3-VL-4B-Instruct",
         size="4B",
         default_flavor="l4x1",
-        default_args=["--prompt-mode", "free"],
     ),
-    "lighton-ocr-2": ModelConfig(
-        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/lighton-ocr2.py",
-        model_id="lightonai/LightOnOCR-2-1B",
-        size="1B",
-        default_flavor="a100-large",
-    ),
-    "dots-ocr": ModelConfig(
-        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/dots-ocr.py",
-        model_id="rednote-hilab/dots.ocr",
-        size="1.7B",
-        default_flavor="l4x1",
-    ),
-    "firered-ocr": ModelConfig(
-        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/firered-ocr.py",
-        model_id="FireRedTeam/FireRed-OCR",
-        size="2.1B",
-        default_flavor="l4x1",
-    ),
-    "qianfan-ocr": ModelConfig(
-        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/qianfan-ocr.py",
-        model_id="baidu/Qianfan-OCR",
-        size="4.7B",
-        default_flavor="l4x1",
-    ),
-    "dots-mocr": ModelConfig(
-        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/dots-mocr.py",
-        model_id="rednote-hilab/dots.mocr",
+    "nanonets-ocr2-3b": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/vlm-metadata-extraction.py",
+        model_id="nanonets/Nanonets-OCR2-3B",
         size="3B",
+        default_flavor="l4x1",
+    ),
+    "gemma-4-e4b-it": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/vlm-metadata-extraction.py",
+        model_id="google/gemma-4-E4B-it",
+        size="4B",
         default_flavor="l4x1",
     ),
 }
 
-DEFAULT_MODELS = ["glm-ocr", "deepseek-ocr", "lighton-ocr-2", "dots-ocr", "firered-ocr"]
+DEFAULT_MODELS = ["qwen3-vl-4b-instruct", "nanonets-ocr2-3b", "gemma-4-e4b-it"]
+DEFAULT_SOURCE_DATASET = "Geraldine/humatheque-vlm-sudoc-grounded"
+
+THESIS_DEGREE_TYPE_VALUES = "<TODO_FILL_DEGREE_VALUES>"
+OAI_DISCIPLINE_VALUES = "<TODO_FILL_DISCIPLINE_VALUES>"
+DEFAULT_TASK_PROMPT = f"""Extract the document title from this cover page.
+Output ONLY valid JSON:
+{{
+  "title": "Main title of the thesis as it appears on the title page",
+  "subtitle": "Subtitle or remainder of the title, usually following a colon; null if not present",
+  "author": "Full name of the author (student) who wrote the thesis",
+  "degree_type": "Academic degree sought by the author. Possible values are {THESIS_DEGREE_TYPE_VALUES}",
+  "discipline": "Academic field or discipline of the thesis. Possible values are {OAI_DISCIPLINE_VALUES}",
+  "granting_institution": "Institution where the thesis was submitted and the degree is granted",
+  "doctoral_school": "Doctoral school or graduate program, if explicitly mentioned",
+  "defense_year": "Year the thesis was defended. Format yyyy",
+  "thesis_advisor": "Main thesis advisor or supervisor",
+  "jury_president": "President or chair of the thesis examination committee",
+  "reviewers": "Reviewers or rapporteurs of the thesis. Use | as separator",
+  "committee_members": "Other thesis committee or jury members. Use | as separator",
+  "language": "Language in ISO 639-3 codes. Example: fre, eng, ita..."
+}}
+"""
 
 
 @dataclass
@@ -103,6 +100,10 @@ def build_script_args(
         "--config",
         config_name,
         "--create-pr",
+        "--image-column",
+        "image_uri",
+        "--prompt",
+        DEFAULT_TASK_PROMPT,
     ]
     if max_samples is not None:
         args += ["--max-samples", str(max_samples)]

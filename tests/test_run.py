@@ -38,7 +38,7 @@ class TestModelConfig:
 
 class TestModelRegistry:
     def test_has_core_models(self):
-        assert len(MODEL_REGISTRY) == 7
+        assert len(MODEL_REGISTRY) == 3
 
     def test_default_models_exist_in_registry(self):
         for slug in DEFAULT_MODELS:
@@ -51,10 +51,9 @@ class TestModelRegistry:
             assert cfg.size, f"{slug} missing size"
             assert cfg.default_flavor, f"{slug} missing default_flavor"
 
-    def test_deepseek_has_prompt_mode_free(self):
-        cfg = MODEL_REGISTRY["deepseek-ocr"]
-        assert "--prompt-mode" in cfg.default_args
-        assert "free" in cfg.default_args
+    def test_qwen_model_exists(self):
+        cfg = MODEL_REGISTRY["qwen3-vl-4b-instruct"]
+        assert cfg.model_id == "Qwen/Qwen3-VL-4B-Instruct"
 
 
 class TestListModels:
@@ -67,7 +66,10 @@ class TestListModels:
 class TestBuildScriptArgs:
     def test_basic_args(self):
         args = build_script_args("input/ds", "output/repo", "glm-ocr")
-        assert args == ["input/ds", "output/repo", "--config", "glm-ocr", "--create-pr"]
+        assert args[:5] == ["input/ds", "output/repo", "--config", "glm-ocr", "--create-pr"]
+        assert "--image-column" in args
+        assert "image_uri" in args
+        assert "--prompt" in args
 
     def test_max_samples(self):
         args = build_script_args("in", "out", "x", max_samples=50)
@@ -121,12 +123,15 @@ class TestLaunchOcrJobs:
         mock_api.run_uv_job.return_value = mock_job
 
         jobs = launch_ocr_jobs(
-            "input/ds", "output/repo", models=["glm-ocr", "dots-ocr"], api=mock_api
+            "input/ds",
+            "output/repo",
+            models=["qwen3-vl-4b-instruct", "nanonets-ocr2-3b"],
+            api=mock_api,
         )
 
         assert len(jobs) == 2
-        assert jobs[0].model_slug == "glm-ocr"
-        assert jobs[1].model_slug == "dots-ocr"
+        assert jobs[0].model_slug == "qwen3-vl-4b-instruct"
+        assert jobs[1].model_slug == "nanonets-ocr2-3b"
 
     @patch("ocr_bench.run.get_token", return_value="fake-token")
     def test_unknown_model_raises(self, mock_token):
@@ -154,7 +159,13 @@ class TestLaunchOcrJobs:
         mock_job.url = "https://example.com"
         mock_api.run_uv_job.return_value = mock_job
 
-        launch_ocr_jobs("in", "out", models=["glm-ocr"], flavor_override="a100-large", api=mock_api)
+        launch_ocr_jobs(
+            "in",
+            "out",
+            models=["qwen3-vl-4b-instruct"],
+            flavor_override="a100-large",
+            api=mock_api,
+        )
 
         call_kwargs = mock_api.run_uv_job.call_args
         assert call_kwargs.kwargs["flavor"] == "a100-large"
@@ -169,8 +180,8 @@ class TestPollJobs:
         mock_api.inspect_job.return_value = mock_info
 
         jobs = [
-            JobRun(model_slug="glm-ocr", job_id="j1", job_url="url1"),
-            JobRun(model_slug="dots-ocr", job_id="j2", job_url="url2"),
+            JobRun(model_slug="qwen3-vl-4b-instruct", job_id="j1", job_url="url1"),
+            JobRun(model_slug="nanonets-ocr2-3b", job_id="j2", job_url="url2"),
         ]
 
         result = poll_jobs(jobs, interval=1, api=mock_api)
@@ -183,7 +194,7 @@ class TestPollJobs:
         mock_info.status.stage = "ERROR"
         mock_api.inspect_job.return_value = mock_info
 
-        jobs = [JobRun(model_slug="glm-ocr", job_id="j1", job_url="url1")]
+        jobs = [JobRun(model_slug="qwen3-vl-4b-instruct", job_id="j1", job_url="url1")]
         result = poll_jobs(jobs, interval=1, api=mock_api)
         assert result[0].status == "error"
 
@@ -199,7 +210,7 @@ class TestPollJobs:
         # First call returns running, second returns completed
         mock_api.inspect_job.side_effect = [running, done]
 
-        jobs = [JobRun(model_slug="glm-ocr", job_id="j1", job_url="url1")]
+        jobs = [JobRun(model_slug="qwen3-vl-4b-instruct", job_id="j1", job_url="url1")]
         result = poll_jobs(jobs, interval=1, api=mock_api)
         assert result[0].status == "completed"
         assert mock_sleep.call_count == 2
@@ -234,6 +245,7 @@ class TestCLIParser:
         from ocr_bench.cli import build_parser
 
         parser = build_parser()
-        args = parser.parse_args(["run", "in", "out", "--models", "glm-ocr", "dots-ocr"])
-        assert args.models == ["glm-ocr", "dots-ocr"]
-
+        args = parser.parse_args(
+            ["run", "in", "out", "--models", "qwen3-vl-4b-instruct", "gemma-4-e4b-it"]
+        )
+        assert args.models == ["qwen3-vl-4b-instruct", "gemma-4-e4b-it"]
