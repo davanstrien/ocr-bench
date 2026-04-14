@@ -300,14 +300,14 @@ def cmd_judge(args: argparse.Namespace) -> None:
         metrics_table = Table(title="Standard Evaluation (Dummy Scaffold)")
         metrics_table.add_column("Model")
         metrics_table.add_column("Samples", justify="right")
-        metrics_table.add_column("Exact match", justify="right")
-        metrics_table.add_column("Normalized overlap", justify="right")
+        metrics_table.add_column("Global F1", justify="right")
+        metrics_table.add_column("Jury global F1", justify="right")
         for metric in standard_metrics:
             metrics_table.add_row(
                 metric.model,
                 str(metric.samples),
-                f"{metric.exact_match:.3f}",
-                f"{metric.normalized_overlap:.3f}",
+                f"{metric.global_f1:.3f}",
+                f"{metric.jury_global_f1:.3f}",
             )
         console.print()
         console.print(metrics_table)
