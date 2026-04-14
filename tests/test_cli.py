@@ -14,6 +14,7 @@ class TestBuildParser:
         assert args.command == "judge"
         assert args.dataset == "user/dataset"
         assert args.split == "train"
+        assert args.ground_truth_column == "sudoc_record_templated"
         assert args.columns is None
         assert args.configs is None
         assert args.from_prs is False

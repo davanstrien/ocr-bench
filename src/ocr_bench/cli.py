@@ -30,6 +30,8 @@ from ocr_bench.publish import (
     load_existing_metadata,
     publish_results,
 )
+from ocr_bench.standard_eval import evaluate_against_ground_truth
+from ocr_bench.task_config import DEFAULT_GROUND_TRUTH_COLUMN
 
 logger = structlog.get_logger()
 console = Console()
@@ -47,6 +49,11 @@ def build_parser() -> argparse.ArgumentParser:
     # Dataset
     judge.add_argument("dataset", help="HF dataset repo id")
     judge.add_argument("--split", default="train", help="Dataset split (default: train)")
+    judge.add_argument(
+        "--ground-truth-column",
+        default=DEFAULT_GROUND_TRUTH_COLUMN,
+        help=f"Ground truth column for standard metrics (default: {DEFAULT_GROUND_TRUTH_COLUMN})",
+    )
     judge.add_argument("--columns", nargs="+", default=None, help="Explicit OCR column names")
     judge.add_argument(
         "--configs", nargs="+", default=None, help="Config-per-model: list of config names"
@@ -283,6 +290,32 @@ def cmd_judge(args: argparse.Namespace) -> None:
     console.print(f"Loaded {len(ds)} samples with {len(ocr_columns)} models:")
     for col, model in ocr_columns.items():
         console.print(f"  {col} → {model}")
+
+    standard_metrics = evaluate_against_ground_truth(
+        ds,
+        ocr_columns,
+        ground_truth_column=args.ground_truth_column,
+    )
+    if standard_metrics:
+        metrics_table = Table(title="Standard Evaluation (Dummy Scaffold)")
+        metrics_table.add_column("Model")
+        metrics_table.add_column("Samples", justify="right")
+        metrics_table.add_column("Global F1", justify="right")
+        metrics_table.add_column("Jury global F1", justify="right")
+        for metric in standard_metrics:
+            metrics_table.add_row(
+                metric.model,
+                str(metric.samples),
+                f"{metric.global_f1:.3f}",
+                f"{metric.jury_global_f1:.3f}",
+            )
+        console.print()
+        console.print(metrics_table)
+    else:
+        console.print(
+            f"[yellow]Standard evaluation skipped:[/yellow] "
+            f"missing or incompatible '{args.ground_truth_column}' column."
+        )
 
     # --- Incremental: load existing comparisons ---
     existing_results: list[ComparisonResult] = []
