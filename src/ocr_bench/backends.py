@@ -10,14 +10,41 @@ from typing import Any
 import stamina
 import structlog
 from huggingface_hub import InferenceClient
-from openai import OpenAI
+from openai import APIConnectionError, OpenAI
 
 from ocr_bench.judge import JUDGE_SCHEMA, Comparison, parse_judge_output
 
 logger = structlog.get_logger()
 
-# Retry on these exception types with exponential backoff + jitter.
-_RETRYABLE = (Exception,)
+# Number of attempts for a transient judge call (connection/timeout/429/5xx).
+_RETRY_ATTEMPTS = 5
+
+# Transport-level failures worth retrying — no HTTP status (connection reset,
+# DNS failure, read timeout). HTTP errors are handled by status code below.
+_TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (APIConnectionError,)
+try:  # requests is always present via huggingface_hub; guard defensively
+    from requests.exceptions import ConnectionError as _ReqConnectionError
+    from requests.exceptions import Timeout as _ReqTimeout
+
+    _TRANSPORT_ERRORS += (_ReqConnectionError, _ReqTimeout)
+except Exception:  # pragma: no cover
+    pass
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Retry only *transient* judge failures.
+
+    Retries connection/timeout errors and HTTP 429 (rate limit) or 5xx
+    (server) responses. Fatal errors — a bad/expired token, a typo'd model
+    id, or any other 4xx — are NOT retried, so they surface immediately
+    instead of after several pointless backoffs.
+    """
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status is not None:
+        return status == 429 or status >= 500
+    return isinstance(exc, _TRANSPORT_ERRORS)
 
 
 class JudgeBackend(abc.ABC):
@@ -71,7 +98,7 @@ class InferenceProviderJudge(JudgeBackend):
         self.max_tokens = max_tokens
         self.client = InferenceClient(model=model, provider=provider)  # type: ignore[invalid-argument-type]
 
-    @stamina.retry(on=_RETRYABLE, attempts=6)
+    @stamina.retry(on=_is_retryable, attempts=_RETRY_ATTEMPTS)
     def _call_single(self, comp: Comparison) -> dict[str, str]:
         response = self.client.chat_completion(  # type: ignore[no-matching-overload]
             messages=comp.messages,
@@ -108,7 +135,7 @@ class OpenAICompatibleJudge(JudgeBackend):
         self.concurrency = concurrency
         self.client = OpenAI(base_url=base_url, api_key=api_key)
 
-    @stamina.retry(on=_RETRYABLE, attempts=3)
+    @stamina.retry(on=_is_retryable, attempts=_RETRY_ATTEMPTS)
     def _call_single(self, comp: Comparison) -> dict[str, str]:
         response = self.client.chat.completions.create(
             model=self.model,

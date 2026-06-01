@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
+import sys
 
+import pytest
+import requests
+from openai import OpenAIError
+
+from ocr_bench import cli
 from ocr_bench.cli import _resolve_results_repo, build_parser
 
 
@@ -107,6 +112,34 @@ class TestBuildParser:
         parser = build_parser()
         args = parser.parse_args(["judge", "user/dataset"])
         assert args.full_rejudge is False
+
+
+class TestMainErrorHandling:
+    """A judge/Hub failure should exit cleanly, not dump a traceback."""
+
+    def _run_main_with(self, monkeypatch, exc):
+        def boom(_args):
+            raise exc
+
+        monkeypatch.setattr(cli, "cmd_judge", boom)
+        monkeypatch.setattr(
+            sys, "argv", ["ocr-bench", "judge", "user/dataset", "--no-publish"]
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            cli.main()
+        return exc_info.value.code
+
+    def test_openai_error_exits_one(self, monkeypatch, capsys):
+        code = self._run_main_with(monkeypatch, OpenAIError("bad token"))
+        assert code == 1
+        assert "Error" in capsys.readouterr().out
+
+    def test_hub_connection_error_exits_one(self, monkeypatch, capsys):
+        code = self._run_main_with(
+            monkeypatch, requests.exceptions.ConnectionError("no network")
+        )
+        assert code == 1
+        assert "Error" in capsys.readouterr().out
 
 
 class TestResolveResultsRepo:
