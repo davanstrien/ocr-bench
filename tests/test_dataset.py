@@ -361,6 +361,41 @@ class TestLoadConfigDataset:
         assert len(set(ocr_cols.values())) == 2
 
     @patch("ocr_bench.dataset.load_dataset")
+    def test_duplicate_warning_is_actionable(self, mock_load):
+        # The collision warning must name the repo, the duplicated model_id, and
+        # the colliding config -> model_id mapping so it's diagnosable.
+        import structlog
+
+        ds_a = Dataset.from_dict(
+            {
+                "image": [None],
+                "markdown": ["a"],
+                "inference_info": [json.dumps({"model_id": "numind/NuExtract3"})],
+            }
+        )
+        ds_b = Dataset.from_dict(
+            {
+                "image": [None],
+                "markdown": ["b"],
+                "inference_info": [json.dumps({"model_id": "numind/NuExtract3"})],
+            }
+        )
+        mock_load.side_effect = [ds_a, ds_b]
+
+        with structlog.testing.capture_logs() as logs:
+            load_config_dataset("org/repo", ["nuextract3", "nuextract3-rep"])
+
+        warns = [e for e in logs if e.get("event") == "duplicate_model_ids"]
+        assert warns, "expected a duplicate_model_ids warning"
+        w = warns[0]
+        assert w["repo_id"] == "org/repo"
+        assert w["model_ids"] == ["numind/NuExtract3"]
+        assert w["collided_configs"] == {
+            "nuextract3": "numind/NuExtract3",
+            "nuextract3-rep": "numind/NuExtract3",
+        }
+
+    @patch("ocr_bench.dataset.load_dataset")
     def test_unique_model_ids_keep_bare_id(self, mock_load):
         ds_a = Dataset.from_dict(
             {

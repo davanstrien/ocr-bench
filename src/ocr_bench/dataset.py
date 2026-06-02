@@ -220,13 +220,25 @@ def load_config_dataset(
     model_counts: dict[str, int] = {}
     for model_id in ocr_columns.values():
         model_counts[model_id] = model_counts.get(model_id, 0) + 1
-    if any(n > 1 for n in model_counts.values()):
+    duplicates = sorted(mid for mid, n in model_counts.items() if n > 1)
+    if duplicates:
+        # Capture the colliding config → model_id mapping before relabeling so
+        # the warning is actionable (which configs/model_ids collided, in which
+        # repo) when running multiple datasets/config sweeps.
+        collided = {
+            config: model_id
+            for config, model_id in ocr_columns.items()
+            if model_counts[model_id] > 1
+        }
         for config, model_id in list(ocr_columns.items()):
             if model_counts[model_id] > 1:
                 short = model_id.split("/")[-1] if "/" in model_id else model_id
                 ocr_columns[config] = f"{short} ({config})"
         logger.warning(
             "duplicate_model_ids",
+            repo_id=repo_id,
+            model_ids=duplicates,
+            collided_configs=collided,
             note="configs sharing a model_id were labelled by config name to keep them distinct",
         )
 
