@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 import structlog
 from huggingface_hub import HfApi, get_token
@@ -13,13 +14,33 @@ logger = structlog.get_logger()
 
 @dataclass
 class ModelConfig:
-    """Configuration for a single OCR model."""
+    """Configuration for a single OCR model.
+
+    ``image`` / ``python`` / ``env`` are only needed by "image-mode" models —
+    ones whose CUDA kernels (e.g. flashinfer for Qwen3.5) must come from a
+    prebuilt Docker image because the default uv-script image lacks ``nvcc``.
+    They are passed straight through to ``run_uv_job`` and left ``None`` for
+    every standard model, which keeps the launch call identical to before.
+    """
 
     script: str
     model_id: str
     size: str
     default_flavor: str = "l4x1"
     default_args: list[str] = field(default_factory=list)
+    image: str | None = None
+    python: str | None = None
+    env: dict[str, str] | None = None
+
+
+# Image-mode invocation for models needing prebuilt CUDA kernels (Qwen3.5 /
+# flashinfer). The default uv-script image has no ``nvcc`` so flashinfer's JIT
+# compile fails at vLLM warmup; the vllm/vllm-openai image ships them prebuilt.
+# ``python`` points at that image's interpreter and ``env`` puts its site-packages
+# on the path so ``uv run`` reuses them instead of rebuilding.
+_VLLM_OPENAI_IMAGE = "vllm/vllm-openai:latest"
+_VLLM_OPENAI_PYTHON = "/usr/bin/python3"
+_VLLM_OPENAI_ENV = {"PYTHONPATH": "/usr/local/lib/python3.12/dist-packages"}
 
 
 MODEL_REGISTRY: dict[str, ModelConfig] = {
@@ -65,6 +86,25 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         model_id="rednote-hilab/dots.mocr",
         size="3B",
         default_flavor="l4x1",
+    ),
+    # Image-mode models (Qwen3.5 / flashinfer) — need the vllm/vllm-openai image.
+    "nuextract3": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/nuextract3.py",
+        model_id="numind/NuExtract3",
+        size="4B",
+        default_flavor="a100-large",
+        image=_VLLM_OPENAI_IMAGE,
+        python=_VLLM_OPENAI_PYTHON,
+        env=_VLLM_OPENAI_ENV,
+    ),
+    "paddleocr-vl-1.6": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/paddleocr-vl-1.6.py",
+        model_id="PaddlePaddle/PaddleOCR-VL-1.6",
+        size="0.9B",
+        default_flavor="a100-large",
+        image=_VLLM_OPENAI_IMAGE,
+        python=_VLLM_OPENAI_PYTHON,
+        env=_VLLM_OPENAI_ENV,
     ),
 }
 
@@ -157,13 +197,30 @@ def launch_ocr_jobs(
             extra_args=config.default_args or None,
         )
 
-        logger.info("launching_job", model=slug, flavor=flavor, script=config.script)
+        # Only image-mode models set image/python/env; standard models keep the
+        # exact same run_uv_job call as before (no extra kwargs).
+        extra_kwargs: dict[str, Any] = {}
+        if config.image:
+            extra_kwargs["image"] = config.image
+        if config.python:
+            extra_kwargs["python"] = config.python
+        if config.env:
+            extra_kwargs["env"] = config.env
+
+        logger.info(
+            "launching_job",
+            model=slug,
+            flavor=flavor,
+            script=config.script,
+            image=config.image,
+        )
         job = api.run_uv_job(
             script=config.script,
             script_args=script_args,
             flavor=flavor,
             secrets={"HF_TOKEN": token},
             timeout=timeout,
+            **extra_kwargs,
         )
         jobs.append(JobRun(model_slug=slug, job_id=job.id, job_url=job.url))
         logger.info("job_launched", model=slug, job_id=job.id, url=job.url)

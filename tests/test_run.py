@@ -35,10 +35,20 @@ class TestModelConfig:
         )
         assert cfg.default_args == ["--prompt-mode", "free"]
 
+    def test_image_mode_fields_default_none(self):
+        cfg = ModelConfig(
+            script="https://example.com/script.py",
+            model_id="org/model",
+            size="1B",
+        )
+        assert cfg.image is None
+        assert cfg.python is None
+        assert cfg.env is None
+
 
 class TestModelRegistry:
     def test_has_core_models(self):
-        assert len(MODEL_REGISTRY) == 7
+        assert len(MODEL_REGISTRY) == 9
 
     def test_default_models_exist_in_registry(self):
         for slug in DEFAULT_MODELS:
@@ -55,6 +65,20 @@ class TestModelRegistry:
         cfg = MODEL_REGISTRY["deepseek-ocr"]
         assert "--prompt-mode" in cfg.default_args
         assert "free" in cfg.default_args
+
+    def test_image_mode_models_configured(self):
+        # NuExtract3 and PaddleOCR-VL-1.6 need the prebuilt-kernel image on a100.
+        for slug in ("nuextract3", "paddleocr-vl-1.6"):
+            cfg = MODEL_REGISTRY[slug]
+            assert cfg.image == "vllm/vllm-openai:latest", slug
+            assert cfg.python == "/usr/bin/python3", slug
+            assert cfg.env == {"PYTHONPATH": "/usr/local/lib/python3.12/dist-packages"}, slug
+            assert cfg.default_flavor == "a100-large", slug
+
+    def test_image_mode_models_not_in_defaults(self):
+        # Opt-in only — they need a100-large and are slower than the default set.
+        assert "nuextract3" not in DEFAULT_MODELS
+        assert "paddleocr-vl-1.6" not in DEFAULT_MODELS
 
 
 class TestListModels:
@@ -158,6 +182,37 @@ class TestLaunchOcrJobs:
 
         call_kwargs = mock_api.run_uv_job.call_args
         assert call_kwargs.kwargs["flavor"] == "a100-large"
+
+    @patch("ocr_bench.run.get_token", return_value="fake-token")
+    def test_image_mode_passes_image_python_env(self, mock_token):
+        mock_api = MagicMock()
+        mock_job = MagicMock()
+        mock_job.id = "j1"
+        mock_job.url = "https://example.com"
+        mock_api.run_uv_job.return_value = mock_job
+
+        launch_ocr_jobs("in", "out", models=["nuextract3"], api=mock_api)
+
+        kwargs = mock_api.run_uv_job.call_args.kwargs
+        assert kwargs["image"] == "vllm/vllm-openai:latest"
+        assert kwargs["python"] == "/usr/bin/python3"
+        assert kwargs["env"] == {"PYTHONPATH": "/usr/local/lib/python3.12/dist-packages"}
+
+    @patch("ocr_bench.run.get_token", return_value="fake-token")
+    def test_standard_model_omits_image_kwargs(self, mock_token):
+        # Standard models must keep the exact pre-existing call (no image/python/env).
+        mock_api = MagicMock()
+        mock_job = MagicMock()
+        mock_job.id = "j1"
+        mock_job.url = "https://example.com"
+        mock_api.run_uv_job.return_value = mock_job
+
+        launch_ocr_jobs("in", "out", models=["glm-ocr"], api=mock_api)
+
+        kwargs = mock_api.run_uv_job.call_args.kwargs
+        assert "image" not in kwargs
+        assert "python" not in kwargs
+        assert "env" not in kwargs
 
 
 class TestPollJobs:
