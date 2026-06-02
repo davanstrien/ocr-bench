@@ -20,15 +20,23 @@ logger = structlog.get_logger()
 _RETRY_ATTEMPTS = 5
 
 # Transport-level failures worth retrying — no HTTP status (connection reset,
-# DNS failure, read timeout). `APIConnectionError` also covers the openai
-# client's `APITimeoutError` (a subclass). HTTP errors are handled by status
-# code below.
+# DNS failure, read timeout, server hang-up mid-response). `APIConnectionError`
+# also covers the openai client's `APITimeoutError` (a subclass). HTTP errors are
+# handled by status code below.
 _TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (APIConnectionError,)
 try:  # requests is always present via huggingface_hub; guard defensively
     from requests.exceptions import ConnectionError as _ReqConnectionError
     from requests.exceptions import Timeout as _ReqTimeout
 
     _TRANSPORT_ERRORS += (_ReqConnectionError, _ReqTimeout)
+except Exception:  # pragma: no cover
+    pass
+try:  # httpx backs huggingface_hub's InferenceClient — the default judge path.
+    # Providers (e.g. Novita) disconnect on long runs, raising httpx
+    # TransportError subclasses (RemoteProtocolError, ConnectError, timeouts).
+    from httpx import TransportError as _HttpxTransportError
+
+    _TRANSPORT_ERRORS += (_HttpxTransportError,)
 except Exception:  # pragma: no cover
     pass
 
