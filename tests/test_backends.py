@@ -78,6 +78,15 @@ class TestIsRetryable:
         assert _is_retryable(requests.exceptions.ConnectionError("boom")) is True
         assert _is_retryable(requests.exceptions.Timeout("slow")) is True
 
+    def test_httpx_transport_error_is_retried(self):
+        # InferenceClient raises httpx errors; a provider disconnect mid-run
+        # (RemoteProtocolError) or a connect failure must be retried, not fatal.
+        import httpx
+
+        assert _is_retryable(httpx.RemoteProtocolError("server disconnected")) is True
+        assert _is_retryable(httpx.ConnectError("no route")) is True
+        assert _is_retryable(httpx.ReadTimeout("slow")) is True
+
     def test_unknown_error_is_not_retried(self):
         # A programming bug (no status, not transport) must not be retried.
         assert _is_retryable(ValueError("bug")) is False
