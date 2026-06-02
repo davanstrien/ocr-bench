@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import sys
 
-import requests
 import structlog
 from openai import OpenAIError
 from rich.console import Console
@@ -645,9 +644,10 @@ def main() -> None:
     except DatasetError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(1)
-    except (OpenAIError, requests.exceptions.RequestException) as exc:
+    except (OpenAIError, OSError) as exc:
         # Judge or Hub request failed (bad/expired token, unknown model id,
-        # rate limit, provider/network outage) — fail with a clean message
-        # instead of dumping a traceback on the user.
-        console.print(f"[red]Error:[/red] judge or Hub request failed: {exc}")
+        # rate limit, provider/network outage) — every requests/HfHubHTTPError
+        # subclasses OSError — or another OS-level error. Fail with a clean
+        # message instead of dumping a traceback on the user.
+        console.print(f"[red]Error:[/red] {exc}")
         sys.exit(1)

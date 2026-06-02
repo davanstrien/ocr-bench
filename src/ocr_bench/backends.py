@@ -20,7 +20,9 @@ logger = structlog.get_logger()
 _RETRY_ATTEMPTS = 5
 
 # Transport-level failures worth retrying — no HTTP status (connection reset,
-# DNS failure, read timeout). HTTP errors are handled by status code below.
+# DNS failure, read timeout). `APIConnectionError` also covers the openai
+# client's `APITimeoutError` (a subclass). HTTP errors are handled by status
+# code below.
 _TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (APIConnectionError,)
 try:  # requests is always present via huggingface_hub; guard defensively
     from requests.exceptions import ConnectionError as _ReqConnectionError
