@@ -211,6 +211,25 @@ def load_config_dataset(
     if unified is None:
         raise DatasetError("No configs loaded successfully")
 
+    # Disambiguate configs that resolve to the same model_id (mirrors the flat
+    # discover_ocr_columns path). Downstream the ELO keys models by these values,
+    # so two configs of the same model run with different settings (e.g.
+    # `nuextract3` vs `nuextract3-rep`) would silently collapse into one
+    # leaderboard row. On collision, label by config name; keep the bare
+    # model_id when unique.
+    model_counts: dict[str, int] = {}
+    for model_id in ocr_columns.values():
+        model_counts[model_id] = model_counts.get(model_id, 0) + 1
+    if any(n > 1 for n in model_counts.values()):
+        for config, model_id in list(ocr_columns.items()):
+            if model_counts[model_id] > 1:
+                short = model_id.split("/")[-1] if "/" in model_id else model_id
+                ocr_columns[config] = f"{short} ({config})"
+        logger.warning(
+            "duplicate_model_ids",
+            note="configs sharing a model_id were labelled by config name to keep them distinct",
+        )
+
     return unified, ocr_columns
 
 

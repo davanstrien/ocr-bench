@@ -335,6 +335,53 @@ class TestLoadConfigDataset:
         assert ds[0]["cfg_b"] == "text_b1"
 
     @patch("ocr_bench.dataset.load_dataset")
+    def test_disambiguates_same_model_id_configs(self, mock_load):
+        # Two configs = same model, different run settings -> must stay distinct,
+        # not collapse to one leaderboard row.
+        ds_a = Dataset.from_dict(
+            {
+                "image": [None],
+                "markdown": ["a"],
+                "inference_info": [json.dumps({"model_id": "numind/NuExtract3"})],
+            }
+        )
+        ds_b = Dataset.from_dict(
+            {
+                "image": [None],
+                "markdown": ["b"],
+                "inference_info": [json.dumps({"model_id": "numind/NuExtract3"})],
+            }
+        )
+        mock_load.side_effect = [ds_a, ds_b]
+
+        _, ocr_cols = load_config_dataset("repo/id", ["nuextract3", "nuextract3-rep"])
+        assert ocr_cols["nuextract3"] == "NuExtract3 (nuextract3)"
+        assert ocr_cols["nuextract3-rep"] == "NuExtract3 (nuextract3-rep)"
+        # distinct values -> downstream model set won't collapse them
+        assert len(set(ocr_cols.values())) == 2
+
+    @patch("ocr_bench.dataset.load_dataset")
+    def test_unique_model_ids_keep_bare_id(self, mock_load):
+        ds_a = Dataset.from_dict(
+            {
+                "image": [None],
+                "markdown": ["a"],
+                "inference_info": [json.dumps({"model_id": "org/a"})],
+            }
+        )
+        ds_b = Dataset.from_dict(
+            {
+                "image": [None],
+                "markdown": ["b"],
+                "inference_info": [json.dumps({"model_id": "org/b"})],
+            }
+        )
+        mock_load.side_effect = [ds_a, ds_b]
+
+        _, ocr_cols = load_config_dataset("repo/id", ["cfg_a", "cfg_b"])
+        assert ocr_cols == {"cfg_a": "org/a", "cfg_b": "org/b"}
+
+    @patch("ocr_bench.dataset.load_dataset")
     def test_uses_pr_revision(self, mock_load):
         ds = Dataset.from_dict({"image": [None], "markdown": ["text"]})
         mock_load.return_value = ds
