@@ -6,6 +6,7 @@ import argparse
 import sys
 
 import structlog
+from openai import OpenAIError
 from rich.console import Console
 from rich.table import Table
 
@@ -641,5 +642,12 @@ def main() -> None:
         elif args.command == "publish":
             cmd_publish(args)
     except DatasetError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        sys.exit(1)
+    except (OpenAIError, OSError) as exc:
+        # Judge or Hub request failed (bad/expired token, unknown model id,
+        # rate limit, provider/network outage) — every requests/HfHubHTTPError
+        # subclasses OSError — or another OS-level error. Fail with a clean
+        # message instead of dumping a traceback on the user.
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(1)

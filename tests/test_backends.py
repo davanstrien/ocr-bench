@@ -4,13 +4,32 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import requests
+
 from ocr_bench.backends import (
     InferenceProviderJudge,
     OpenAICompatibleJudge,
+    _is_retryable,
     aggregate_jury_votes,
     parse_judge_spec,
 )
 from ocr_bench.judge import Comparison
+
+
+class _StatusError(Exception):
+    """Stand-in for an openai HTTP error exposing ``status_code``."""
+
+    def __init__(self, status_code: int):
+        super().__init__(f"HTTP {status_code}")
+        self.status_code = status_code
+
+
+class _ResponseError(Exception):
+    """Stand-in for a requests/hf error exposing ``response.status_code``."""
+
+    def __init__(self, status_code: int):
+        super().__init__(f"HTTP {status_code}")
+        self.response = type("_Resp", (), {"status_code": status_code})()
 
 
 def _make_comparison(idx: int = 0) -> Comparison:
@@ -23,6 +42,45 @@ def _make_comparison(idx: int = 0) -> Comparison:
         swapped=False,
         messages=[{"role": "user", "content": "test"}],
     )
+
+
+# ---------------------------------------------------------------------------
+# _is_retryable
+# ---------------------------------------------------------------------------
+
+
+class TestIsRetryable:
+    def test_rate_limit_is_retried(self):
+        assert _is_retryable(_StatusError(429)) is True
+
+    def test_server_error_is_retried(self):
+        assert _is_retryable(_StatusError(500)) is True
+        assert _is_retryable(_StatusError(503)) is True
+
+    def test_auth_error_is_not_retried(self):
+        # Bad/expired token (401) and forbidden (403) should fail fast.
+        assert _is_retryable(_StatusError(401)) is False
+        assert _is_retryable(_StatusError(403)) is False
+
+    def test_not_found_is_not_retried(self):
+        # Typo'd model id → 404 → no point retrying.
+        assert _is_retryable(_StatusError(404)) is False
+
+    def test_bad_request_is_not_retried(self):
+        assert _is_retryable(_StatusError(400)) is False
+
+    def test_response_status_code_path(self):
+        # requests/hf-style errors expose status via .response.status_code.
+        assert _is_retryable(_ResponseError(502)) is True
+        assert _is_retryable(_ResponseError(403)) is False
+
+    def test_connection_error_is_retried(self):
+        assert _is_retryable(requests.exceptions.ConnectionError("boom")) is True
+        assert _is_retryable(requests.exceptions.Timeout("slow")) is True
+
+    def test_unknown_error_is_not_retried(self):
+        # A programming bug (no status, not transport) must not be retried.
+        assert _is_retryable(ValueError("bug")) is False
 
 
 # ---------------------------------------------------------------------------
