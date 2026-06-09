@@ -490,7 +490,8 @@ def cmd_run(args: argparse.Namespace) -> None:
         for slug in sorted(MODEL_REGISTRY):
             cfg = MODEL_REGISTRY[slug]
             default = " (default)" if slug in DEFAULT_MODELS else ""
-            table.add_row(slug + default, cfg.model_id, cfg.size, cfg.default_flavor)
+            gpu = cfg.default_flavor + (" (image-mode)" if cfg.image else "")
+            table.add_row(slug + default, cfg.model_id, cfg.size, gpu)
 
         console.print(table)
         console.print(f"\nDefault set: {', '.join(DEFAULT_MODELS)}")
@@ -529,6 +530,10 @@ def cmd_run(args: argparse.Namespace) -> None:
             console.print(f"[cyan]{slug}[/cyan] ({cfg.model_id})")
             console.print(f"  Flavor:  {flavor}")
             console.print(f"  Timeout: {args.timeout}")
+            if cfg.image:
+                console.print(f"  Image:   {cfg.image}")
+                console.print(f"  Python:  {cfg.python}")
+                console.print(f"  Env:     {cfg.env}")
             console.print(f"  Script:  {cfg.script}")
             console.print(f"  Args:    {' '.join(script_args)}")
             console.print()
