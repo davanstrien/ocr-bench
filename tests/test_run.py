@@ -48,7 +48,7 @@ class TestModelConfig:
 
 class TestModelRegistry:
     def test_has_core_models(self):
-        assert len(MODEL_REGISTRY) == 9
+        assert len(MODEL_REGISTRY) == 10
 
     def test_default_models_exist_in_registry(self):
         for slug in DEFAULT_MODELS:
@@ -79,6 +79,15 @@ class TestModelRegistry:
         # Opt-in only — they need a100-large and are slower than the default set.
         assert "nuextract3" not in DEFAULT_MODELS
         assert "paddleocr-vl-1.6" not in DEFAULT_MODELS
+
+    def test_paddleocr_vl_15_is_standard(self):
+        # 1.5 uses transformers batch inference (no vLLM/flashinfer), so it runs on
+        # the default uv-script image — unlike 1.6, it needs no image-mode config.
+        cfg = MODEL_REGISTRY["paddleocr-vl-1.5"]
+        assert cfg.default_flavor == "l4x1"
+        assert cfg.image is None
+        assert cfg.python is None
+        assert cfg.env is None
 
 
 class TestListModels:

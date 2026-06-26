@@ -87,6 +87,14 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         size="3B",
         default_flavor="l4x1",
     ),
+    # PaddleOCR-VL-1.5 uses transformers batch inference (no vLLM/flashinfer), so it
+    # runs on the default uv-script image — unlike 1.6, which needs the prebuilt image.
+    "paddleocr-vl-1.5": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/paddleocr-vl-1.5.py",
+        model_id="PaddlePaddle/PaddleOCR-VL-1.5",
+        size="0.9B",
+        default_flavor="l4x1",
+    ),
     # Image-mode models (Qwen3.5 / flashinfer) — need the vllm/vllm-openai image.
     "nuextract3": ModelConfig(
         script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/nuextract3.py",
