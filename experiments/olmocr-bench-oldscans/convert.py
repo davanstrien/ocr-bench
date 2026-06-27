@@ -2,10 +2,10 @@
 Job 1 (GPU): run PaddleOCR-VL-1.6 over the olmOCR-bench `old_scans` subset and
 write candidate markdown in the exact layout `olmocr.bench.benchmark` expects.
 
-This runs with PaddlePaddle's OWN docker image (paddle 3.2.1 + paddleocr 3.6.0
-preinstalled), NOT uv -- the image has no uv and assembling paddle from PyPI is
-brittle (libGL, paddlex[ocr]). So there is no PEP 723 header: every import here
-(paddleocr, huggingface_hub, stdlib) is already in the image's python3.10.
+Runs with PaddlePaddle's docker image (paddle 3.2.1 + paddleocr 3.6.0 + the v1.6
+weights preinstalled) via the image's python3.10 -- not uv. Every import here
+(paddleocr, huggingface_hub, stdlib) is already in the image, so there is no
+PEP 723 header.
 
 Fidelity: the markdown extraction mirrors olmOCR-bench's own runner
 (`olmocr/bench/runners/run_paddlevl.py`) exactly -- `res.markdown["markdown_texts"]`,
