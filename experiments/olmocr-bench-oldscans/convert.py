@@ -28,14 +28,20 @@ Delivery + run (see README for full commands):
         python3 /bucket/convert.py
 
 Env:
-  OUT_ROOT   local staging dir (default /tmp/olmocr-oldscans-out)
-  BUCKET     bucket to sync results to (default below)
-  LIMIT      cap number of PDFs (plumbing smoke test; 0 = all). With a cap, the
-             un-converted docs are scored FAILED, so the result is not a
-             representative score -- use a smoke run only to check the pipeline.
+  OUT_ROOT          local staging dir (default /tmp/olmocr-oldscans-out)
+  BUCKET            bucket to sync results to (default below)
+  PIPELINE_VERSION  PaddleOCRVL version (default v1.6). "v1" = the original 0.9B
+                    PaddleOCR-VL = the version on the olmOCR-bench leaderboard
+                    (37.8) -> run it (with a distinct CANDIDATE) for a strict
+                    same-version reproduction.
+  CANDIDATE         output subfolder + model label (default paddleocr_vl_16)
+  LIMIT             cap number of PDFs (plumbing smoke test; 0 = all). With a cap,
+                    the un-converted docs are scored FAILED, so the result is not
+                    a representative score -- use a smoke run only to check plumbing.
 """
 import json
 import os
+import shutil
 from collections import defaultdict
 from pathlib import Path
 
@@ -44,7 +50,8 @@ from paddleocr import PaddleOCRVL
 
 BENCH_REPO = "allenai/olmOCR-bench"
 JSONL_PATH = "bench_data/old_scans.jsonl"
-CANDIDATE = "paddleocr_vl_16"            # any name except "pdfs"
+CANDIDATE = os.environ.get("CANDIDATE", "paddleocr_vl_16")   # any name except "pdfs"
+PIPELINE_VERSION = os.environ.get("PIPELINE_VERSION", "v1.6")
 OUT_ROOT = Path(os.environ.get("OUT_ROOT", "/tmp/olmocr-oldscans-out"))
 BUCKET = os.environ.get("BUCKET", "hf://buckets/davanstrien/paddleocr-vl16-oldscans")
 LIMIT = int(os.environ.get("LIMIT", "0"))
@@ -58,17 +65,28 @@ for t in tests:
     pages_by_pdf[t["pdf"]].add(int(t.get("page", 1)))
 print(f"{len(tests)} tests across {len(pages_by_pdf)} PDFs -> {OUT_ROOT}", flush=True)
 
-# ---- model (vendor default for v1.6, no tuning) -----------------------------
-pipeline = PaddleOCRVL(pipeline_version="v1.6")
+# ---- model (vendor default, no tuning) --------------------------------------
+print(f"pipeline_version={PIPELINE_VERSION}  candidate={CANDIDATE}", flush=True)
+pipeline = PaddleOCRVL(pipeline_version=PIPELINE_VERSION)
 
 
 def resolve_pdf(pdf_field):
-    """The jsonl `pdf` field may or may not carry a pdfs/ prefix; try variants."""
+    """Reuse the PDF already on the bucket mount if present; otherwise download it
+    once and stage it under OUT_ROOT/pdfs so sync_bucket adds it to the bucket for
+    the scorer (benchmark.py needs <dir>/pdfs). Avoids a separate download + sync,
+    and skips re-downloading on later runs (the bucket is mounted at /bucket)."""
+    mounted = Path("/bucket/pdfs") / pdf_field
+    if mounted.is_file():
+        return str(mounted)
     for cand in (f"bench_data/{pdf_field}", f"bench_data/pdfs/{pdf_field}", pdf_field):
         try:
-            return hf_hub_download(BENCH_REPO, cand, repo_type="dataset")
+            local = hf_hub_download(BENCH_REPO, cand, repo_type="dataset")
         except Exception:
             continue
+        dest = OUT_ROOT / "pdfs" / pdf_field
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(local, dest)
+        return local
     raise FileNotFoundError(pdf_field)
 
 

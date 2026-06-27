@@ -42,16 +42,13 @@ IMAGE=ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-vl:latest-nvid
 # deliver the script into the bucket (re-cp after editing)
 hf buckets cp convert.py $BUCKET/convert.py
 
-# convert — 98 PDFs (add -e LIMIT=3 for a 3-PDF smoke test)
+# convert — 98 PDFs (add -e LIMIT=3 for a 3-PDF smoke test). On the first run this
+# also stages the source PDFs into the bucket under pdfs/ (which the scorer needs);
+# later runs reuse them from the mount instead of re-downloading.
 hf jobs run --flavor l4x1 --timeout 1h -s HF_TOKEN -v $BUCKET:/bucket:ro \
     $IMAGE python3 /bucket/convert.py
 
-# add the source PDFs the scorer requires under pdfs/
-hf download allenai/olmOCR-bench --repo-type dataset \
-    --include "bench_data/pdfs/old_scans/*" --local-dir /tmp/olm
-hf buckets sync /tmp/olm/bench_data/pdfs $BUCKET/pdfs
-
-# score
+# score (ranks every candidate folder in the bucket together)
 hf jobs uv run --flavor cpu-upgrade -s HF_TOKEN -v $BUCKET:/bucket:ro score.py
 ```
 
@@ -62,8 +59,9 @@ Add `-d` to detach, then `hf jobs wait <id>` / `hf jobs logs <id>`.
 - **Flavor `l4x1`**: the image's CUDA build matches the `l4x1` driver; larger GPUs (l40s / a100) do not.
 - **Mount path `/bucket`**: `/data` is reserved by Jobs for local-script artifacts.
 - **`sync_bucket`, not a FUSE write**: the image runs as a non-root user that cannot write the mount, so `convert.py` writes locally and uploads over HTTP; the mount is `:ro` (script delivery only).
-- **`pdfs/` folder**: `benchmark.py` requires `<dir>/pdfs` to exist; the source PDFs are synced there (run step above).
+- **`pdfs/` folder**: `benchmark.py` requires `<dir>/pdfs` to exist; `convert.py` stages the source PDFs into the bucket on the first run and reuses them from the mount after, so no separate sync step is needed.
 - **`numpy`**: declared in `score.py` because `olmocr[bench]` imports it without declaring it.
+- **Versions**: `convert.py` takes `PIPELINE_VERSION` (default `v1.6`) and `CANDIDATE`. Run `-e PIPELINE_VERSION=v1 -e CANDIDATE=paddleocr_vl_orig` to also convert the original 0.9B PaddleOCR-VL (the leaderboard's 37.8); both candidates then sit in the bucket and the score job ranks them together.
 - **`old_scans_math`** variant: change `JSONL_PATH` in `convert.py`; `score.py` then also needs `playwright install chromium`.
 
 ## Reproducibility
