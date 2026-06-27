@@ -72,8 +72,11 @@ This run uses floating refs. To make it bit-stable, pin:
 
 - the **image by digest** (`...paddleocr-vl@sha256:...`) instead of `:latest` — this pins paddle, paddleocr, and the weights together;
 - `allenai/olmOCR-bench` by `revision`;
-- `olmocr` to an exact version in `score.py`;
-- **greedy decoding** (confirm / pin) for run-to-run stability.
+- `olmocr` to an exact version in `score.py`.
+
+Decoding is already **greedy** (the model's `generation_config.json` has no
+`do_sample`/`temperature`, so transformers defaults to greedy), so runs are
+deterministic modulo GPU-kernel nondeterminism — no sampling seed to pin.
 
 ## Result
 
@@ -94,5 +97,7 @@ PaddleOCR-VL-1.6 ties the 7B Qwen2.5-VL.
 ~15 baseline failures are `disallowed characters`: the model emits CJK glyphs
 (场, 景, 民, 生, …) on English handwritten scans.
 
-> **Status: preliminary.** Not yet validated by reproducing a published
-> olmOCR-bench number through this harness; decoding determinism unconfirmed.
+> **Status: preliminary.** Decoding is greedy (deterministic) and the candidate
+> outputs were spot-checked against the source scans (real, untruncated). Not yet
+> validated by reproducing a published olmOCR-bench number through this harness —
+> do that before quoting the figure externally.
