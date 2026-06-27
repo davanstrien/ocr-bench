@@ -88,16 +88,36 @@ PaddleOCR-VL-1.6, default v1.6 pipeline, no tuning (2026-06-27):
 | → present | 31.2% | 279 |
 | → absent | 95.7% | 70 |
 | → order | 27.7% | 177 |
-| baseline (auto-generated, 1/PDF) | 84.7% | 83 / 98 |
+| baseline (auto BaselineTest, 1/PDF, over old_scans) | 84.7% | 83 / 98 |
 
-For reference, olmOCR-bench's published OldScan column (no-anchor): olmOCR 43.7,
-GPT-4o 40.9, Qwen2.5-VL 38.6, Gemini-Flash-2 27.8, GOT-OCR (0.58B) 22.1. At 0.9B,
+**vs the published leaderboard.** olmOCR-bench lists a `PaddleOCR-VL` row at
+**Old scans = 37.8**, but *unversioned* — and its `run_paddlevl` runner landed
+2025-10-20, ~7 months before PaddleOCR-VL-**1.6** (2026-05-28), so that figure is
+an earlier PaddleOCR-VL, not 1.6. Our **38.6** is the first **1.6** old_scans
+number, ~0.8 pt above it. Takeaway: **v1.6's OmniDocBench gains don't transfer to
+degraded historical scans** — it scores essentially like the original here. The
+cheap same-version anchor (run the *original* PaddleOCR-VL through this harness,
+expect ~37.8) is the obvious next check — same image, just the version flag.
+
+**Which "38.6".** It is the `old_scans.jsonl` sub-score (present/absent/order),
+matching the leaderboard's "Old scans" column. Stock `olmocr.bench.benchmark`
+*also* prints `Average Score ≈ 61.6%` = mean(old_scans, auto-baseline) — that is
+**not** the leaderboard figure; don't quote it as the headline.
+
+**baseline 84.7% ≠ leaderboard "Base" (98.5%).** "Base" is the auto-baseline over
+the *whole* benchmark (~1,400 mostly-clean PDFs); ours is the same test over only
+the 98 hardest old_scans PDFs — a different population, not a regression. All 15
+baseline failures are `disallowed characters`: CJK/Japanese glyphs (场, 景, 民, 生,
+ら …) emitted on English scans — the hallucination that pulls old-scans baseline
+below the full-bench Base. See `samples.html` (regenerate via `gen_samples.py`)
+for scan↔output pairs with the glyphs highlighted.
+
+**Size context** (published no-anchor Old scans): olmOCR 43.7, GPT-4o 40.9,
+Qwen2.5-VL 38.6, Gemini-Flash-2 27.8, GOT-OCR (0.58B) 22.1. At 0.9B,
 PaddleOCR-VL-1.6 ties the 7B Qwen2.5-VL.
 
-~15 baseline failures are `disallowed characters`: the model emits CJK glyphs
-(场, 景, 民, 生, …) on English handwritten scans.
-
-> **Status: preliminary.** Decoding is greedy (deterministic) and the candidate
-> outputs were spot-checked against the source scans (real, untruncated). Not yet
-> validated by reproducing a published olmOCR-bench number through this harness —
-> do that before quoting the figure externally.
+> **Status.** Consistent with the published (earlier-version) PaddleOCR-VL figure
+> (37.8 → 38.6). Greedy/deterministic decoding; outputs spot-checked vs source
+> scans (real, untruncated). For a strict same-version reproduction, run the
+> original PaddleOCR-VL through this harness; pin the image digest (see
+> Reproducibility) before citing the figure on a model card.

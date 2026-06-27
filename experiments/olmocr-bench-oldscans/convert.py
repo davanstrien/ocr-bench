@@ -7,12 +7,13 @@ weights preinstalled) via the image's python3.10 -- not uv. Every import here
 (paddleocr, huggingface_hub, stdlib) is already in the image, so there is no
 PEP 723 header.
 
-Fidelity: the markdown extraction mirrors olmOCR-bench's own runner
-(`olmocr/bench/runners/run_paddlevl.py`) exactly -- `res.markdown["markdown_texts"]`,
-per page, with a bare default pipeline and NO tuning (no max_pixels / prompts /
-dpi). The ONLY intentional difference is `pipeline_version="v1.6"`, which is what
-the PaddleOCR-VL-1.6 model card tells you to pass. So we follow both the bench
-runner and PaddlePaddle's documented defaults.
+Fidelity: the markdown extraction matches olmOCR-bench's own runner
+(`olmocr/bench/runners/run_paddlevl.py`) -- `res.markdown["markdown_texts"]`, per
+page, with a bare default pipeline and NO tuning (no max_pixels / prompts / dpi).
+The one intentional difference is `pipeline_version="v1.6"`: upstream calls
+`PaddleOCRVL()` with no version (an earlier PaddleOCR-VL), while this measures 1.6
+as its model card specifies. So we follow the bench runner's extraction and
+PaddlePaddle's documented v1.6 defaults.
 
 This image runs as the non-root `paddleocr` user, which CANNOT write the bucket
 FUSE mount (root-owned). So we write outputs to a container-local dir and push
@@ -29,8 +30,9 @@ Delivery + run (see README for full commands):
 Env:
   OUT_ROOT   local staging dir (default /tmp/olmocr-oldscans-out)
   BUCKET     bucket to sync results to (default below)
-  LIMIT      cap number of PDFs (smoke test; 0 = all). A capped run scores low
-             because the un-converted tests count as failures.
+  LIMIT      cap number of PDFs (plumbing smoke test; 0 = all). With a cap, the
+             un-converted docs are scored FAILED, so the result is not a
+             representative score -- use a smoke run only to check the pipeline.
 """
 import json
 import os
