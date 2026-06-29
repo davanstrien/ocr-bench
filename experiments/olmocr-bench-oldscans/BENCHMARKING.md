@@ -51,6 +51,16 @@ numbers" pass that would lift NuExtract's `absent`. That's gaming the very
 boilerplate-exclusion criterion the bench is testing the model to do natively, so
 it's left out — the honest move is to report the sub-scores.)*
 
+## Why it matters
+
+olmOCR-bench encodes olmOCR's own goal: clean, linearised **reading-order body
+text** for LLM training/RAG, where headers, letterheads and page numbers are noise
+to drop. So the headline rewards leaving them out — reasonable if that's what you
+want. For **faithful OCR of the whole page** (archives, where the letterhead /
+stamp / marginal note *is* the record), the same number ranks the model you'd
+prefer *lower*. A benchmark score measures fitness for one purpose — check it's
+yours before trusting the ranking.
+
 ## Fairness / processing notes
 
 - **DPI**: each model's recommended PDF→PNG render DPI — NuExtract **170**,
