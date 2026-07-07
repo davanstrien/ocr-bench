@@ -5,6 +5,7 @@ from __future__ import annotations
 import abc
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from itertools import zip_longest
 from typing import Any
 
 import stamina
@@ -251,26 +252,31 @@ def aggregate_jury_votes(
     if not all_results:
         return []
 
-    n_comparisons = len(all_results[0])
-    n_judges = len(all_results)
     aggregated: list[dict[str, Any]] = []
 
-    for i in range(n_comparisons):
+    # Transpose judge-major results to comparison-major; a judge that
+    # returned a short list pads out with failures.
+    for judge_results in zip_longest(*all_results, fillvalue={}):
         votes: list[str] = []
         reasons: list[str] = []
-        for j in range(n_judges):
-            result = all_results[j][i] if i < len(all_results[j]) else {}
+        for name, result in zip(judge_names, judge_results):
             winner = result.get("winner", "")
             if winner:
                 votes.append(winner)
-                reasons.append(f"{judge_names[j]}: {result.get('reason', '')}")
+                reasons.append(f"{name}: {result.get('reason', '')}")
 
         if not votes:
             aggregated.append({"winner": "tie", "reason": "no valid votes", "agreement": "0/0"})
             continue
 
         counter = Counter(votes)
-        majority_winner, majority_count = counter.most_common(1)[0]
+        top = counter.most_common(2)
+        majority_winner, majority_count = top[0]
+        if len(top) > 1 and top[1][1] == majority_count:
+            # No strict majority (1-1, 2-2, three-way split, ...): record a
+            # tie rather than letting Counter's insertion order side with
+            # whichever judge happens to be listed first.
+            majority_winner = "tie"
         agreement = f"{majority_count}/{len(votes)}"
 
         aggregated.append({
