@@ -127,6 +127,7 @@ def publish_results(
     board: Leaderboard,
     metadata: EvalMetadata,
     existing_metadata: list[dict] | None = None,
+    license_id: str | None = None,
 ) -> None:
     """Push evaluation results to Hub as a dataset with multiple configs.
 
@@ -159,7 +160,7 @@ def publish_results(
     logger.info("published_metadata", repo=repo_id, n=len(all_meta))
 
     # README — auto-generated dataset card with leaderboard
-    readme = _build_readme(repo_id, rows, board, metadata)
+    readme = _build_readme(repo_id, rows, board, metadata, license_id=license_id)
     api = HfApi()
     api.upload_file(
         path_or_fileobj=readme.encode(),
@@ -175,6 +176,7 @@ def _build_readme(
     rows: list[dict],
     board: Leaderboard,
     metadata: EvalMetadata,
+    license_id: str | None = None,
 ) -> str:
     """Build a dataset card README with the leaderboard table."""
     has_ci = bool(board.elo_ci)
@@ -187,9 +189,14 @@ def _build_readme(
     judge_str = ", ".join(j.split("/")[-1] for j in judges) if judges else "N/A"
     n_comparisons = len(board.comparison_log)
 
-    lines = [
-        "---",
-        "license: apache-2.0",
+    # The card license describes the published results DATA (which embeds
+    # OCR text derived from the source dataset), not this tool — so there is
+    # no correct default; it's declared per-run via --license or set on the
+    # Hub repo by the publisher.
+    lines = ["---"]
+    if license_id:
+        lines.append(f"license: {license_id}")
+    lines += [
         "tags:",
         "  - ocr-bench",
         "  - leaderboard",

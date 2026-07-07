@@ -89,6 +89,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Don't publish results (default: publish to {dataset}-results)",
     )
     judge.add_argument(
+        "--license",
+        default=None,
+        help=(
+            "License tag for the published results dataset card, e.g. cc0-1.0 "
+            "(default: none — the results embed source-derived text, so only "
+            "the publisher knows the right license)"
+        ),
+    )
+    judge.add_argument(
         "--full-rejudge",
         action="store_true",
         help="Re-judge all pairs, ignoring existing comparisons in --save-results repo",
@@ -436,6 +445,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     board,
                     metadata,
                     existing_metadata=existing_meta_rows,
+                    license_id=args.license,
                 )
                 console.print(f"\nResults published to [bold]{results_repo}[/bold]")
             return
@@ -467,7 +477,13 @@ def cmd_judge(args: argparse.Namespace) -> None:
             valid_comparisons=len(new_results),
             from_prs=from_prs,
         )
-        publish_results(results_repo, board, metadata, existing_metadata=existing_meta_rows)
+        publish_results(
+            results_repo,
+            board,
+            metadata,
+            existing_metadata=existing_meta_rows,
+            license_id=args.license,
+        )
         console.print(f"\nResults published to [bold]{results_repo}[/bold]")
 
 
