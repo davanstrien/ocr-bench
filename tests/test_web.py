@@ -284,3 +284,31 @@ class TestImage:
             client = TestClient(app)
             resp = client.get("/image/99")
             assert resp.status_code == 404
+
+
+class TestPairSummaryEscaping:
+    """Model names come from dataset columns and are rendered with `| safe`."""
+
+    def test_html_in_model_names_is_escaped(self):
+        from ocr_bench.web import _build_pair_summary_html
+
+        comps = [
+            {
+                "model_a": '<img src=x onerror="alert(1)">',
+                "model_b": "Model & Co<b>",
+                "winner": "A",
+            }
+        ]
+        out = _build_pair_summary_html(comps)
+        assert "<img" not in out
+        assert "&lt;img" in out
+        assert "<b>" not in out
+        assert "Model &amp; Co&lt;b&gt;" in out
+
+    def test_plain_names_render_table(self):
+        from ocr_bench.web import _build_pair_summary_html
+
+        comps = [{"model_a": "ModelA", "model_b": "ModelB", "winner": "tie"}]
+        out = _build_pair_summary_html(comps)
+        assert "<td>ModelA</td>" in out
+        assert "<td>ModelB</td>" in out

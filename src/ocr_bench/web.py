@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import io
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -67,8 +68,10 @@ def _build_pair_summary_html(comparisons: list[dict[str, Any]]) -> str:
 
     rows = []
     for (ma, mb), counts in sorted(pair_counts.items()):
-        short_a = _short_model(ma)
-        short_b = _short_model(mb)
+        # Model names come from dataset columns — escape before embedding in
+        # HTML that the template renders with `| safe`.
+        short_a = html.escape(_short_model(ma))
+        short_b = html.escape(_short_model(mb))
         wins, losses, ties = counts["W"], counts["L"], counts["T"]
         rows.append(
             f"<tr><td>{short_a}</td><td>{short_b}</td>"

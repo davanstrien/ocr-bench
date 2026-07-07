@@ -235,3 +235,51 @@ class TestLoadExistingMetadata:
         mock_load.side_effect = Exception("not found")
         rows = load_existing_metadata("nonexistent/repo")
         assert rows == []
+
+
+class TestBuildReadme:
+    def _make_metadata(self) -> EvalMetadata:
+        return EvalMetadata(
+            source_dataset="user/data",
+            judge_models=["org/judge"],
+            seed=42,
+            max_samples=10,
+            total_comparisons=3,
+            valid_comparisons=3,
+        )
+
+    def test_no_license_by_default(self):
+        """The results data embeds source-derived text — the tool must not
+        claim a license on the publisher's behalf."""
+        from ocr_bench.publish import _build_readme
+
+        board = _make_board()
+        rows = build_leaderboard_rows(board)
+        readme = _build_readme("user/results", rows, board, self._make_metadata())
+        assert "license:" not in readme
+        # Frontmatter must still open cleanly with the tags block
+        assert readme.startswith("---\ntags:")
+
+    def test_explicit_license_included(self):
+        from ocr_bench.publish import _build_readme
+
+        board = _make_board()
+        rows = build_leaderboard_rows(board)
+        readme = _build_readme(
+            "user/results", rows, board, self._make_metadata(), license_id="cc0-1.0"
+        )
+        assert "license: cc0-1.0" in readme
+
+    def test_pipes_in_model_names_escaped(self):
+        from ocr_bench.publish import _build_readme
+
+        board = Leaderboard(
+            elo={"weird|name": 1500.0},
+            wins={"weird|name": 1},
+            losses={"weird|name": 0},
+            ties={"weird|name": 0},
+        )
+        rows = build_leaderboard_rows(board)
+        readme = _build_readme("user/results", rows, board, self._make_metadata())
+        assert "weird\\|name" in readme
+        assert "| weird|name |" not in readme
