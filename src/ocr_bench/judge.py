@@ -275,7 +275,9 @@ def parse_judge_output(text: str) -> dict[str, str]:
     """
     text = text.strip()
     if text.startswith("```"):
-        text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        # A truncated response can be a bare opening fence with no body
+        parts = text.split("\n", 1)
+        text = parts[1].rsplit("```", 1)[0].strip() if len(parts) == 2 else ""
     try:
         result = json.loads(text)
     except json.JSONDecodeError:

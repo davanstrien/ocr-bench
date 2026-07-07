@@ -114,11 +114,11 @@ class InferenceProviderJudge(JudgeBackend):
         self.name = f"{provider + ':' if provider else ''}{model}"
         self.model = model
         self.max_tokens = max_tokens
-        self.client = InferenceClient(model=model, provider=provider)  # type: ignore[invalid-argument-type]
+        self.client = InferenceClient(model=model, provider=provider)  # ty: ignore[invalid-argument-type]
 
     @stamina.retry(on=_is_retryable, attempts=_RETRY_ATTEMPTS)
     def _call_single(self, comp: Comparison) -> dict[str, str]:
-        response = self.client.chat_completion(  # type: ignore[no-matching-overload]
+        response = self.client.chat_completion(  # ty: ignore[no-matching-overload]
             messages=comp.messages,
             max_tokens=self.max_tokens,
             temperature=0.0,
@@ -157,7 +157,7 @@ class OpenAICompatibleJudge(JudgeBackend):
     def _call_single(self, comp: Comparison) -> dict[str, str]:
         response = self.client.chat.completions.create(
             model=self.model,
-            messages=comp.messages,  # type: ignore[invalid-argument-type]
+            messages=comp.messages,  # ty: ignore[invalid-argument-type]
             max_tokens=self.max_tokens,
             temperature=self.temperature,
             extra_body=self.extra_body,
