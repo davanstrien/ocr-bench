@@ -111,23 +111,27 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         model_id="deepseek-ai/DeepSeek-OCR-2",
         size="3.4B",
         default_flavor="l4x1",
+        # Free OCR (no <|grounding|>) so the judge sees clean text, matching
+        # the deepseek-ocr (v1) entry.
+        default_args=["--prompt-mode", "free"],
+        # The script's vLLM nightly cu129 wheels need CUDA 13 runtime libs
+        # (libnvrtc.so.13) that the default uv image lacks.
+        image=_VLLM_OPENAI_IMAGE,
+        python=_VLLM_OPENAI_PYTHON,
+        env=_VLLM_OPENAI_ENV,
     ),
     "unlimited-ocr": ModelConfig(
         script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/unlimited-ocr-vllm.py",
         model_id="baidu/Unlimited-OCR",
         size="3.3B",
         default_flavor="l4x1",
+        # --strip-grounding: judge sees clean text, not <|det|> layout boxes.
+        default_args=["--strip-grounding"],
         # Baidu's dedicated vLLM image (vllm + torch from the image, per the
         # script's own docstring); use the :unlimited-ocr-cu129 tag on Hopper.
         image="vllm/vllm-openai:unlimited-ocr",
         python=_VLLM_OPENAI_PYTHON,
         env=_VLLM_OPENAI_ENV,
-    ),
-    "olmocr-2": ModelConfig(
-        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/olmocr2-vllm.py",
-        model_id="allenai/olmOCR-2-7B-1025-FP8",
-        size="8.3B",
-        default_flavor="l4x1",
     ),
     # Classical (non-VLM) baselines
     "tesseract": ModelConfig(
