@@ -222,7 +222,65 @@ class TestAggregateJuryVotes:
         agg = aggregate_jury_votes(results, ["j1", "j2"])
         assert len(agg) == 2
         assert agg[0]["winner"] == "A"
-        assert agg[1]["agreement"] in ("1/2", "1/2")  # tie broken by Counter.most_common
+        # Second comparison is a 1-1 split: no majority, so it's a tie
+        assert agg[1]["winner"] == "tie"
+        assert agg[1]["agreement"] == "1/2"
+
+    def test_two_judge_split_is_tie(self):
+        """An even A/B split must not side with the first-listed judge."""
+        results = [
+            [{"winner": "A", "reason": "prefers A"}],
+            [{"winner": "B", "reason": "prefers B"}],
+        ]
+        agg = aggregate_jury_votes(results, ["j1", "j2"])
+        assert agg[0]["winner"] == "tie"
+        assert agg[0]["agreement"] == "1/2"
+        # Judge order must not matter
+        agg_rev = aggregate_jury_votes(list(reversed(results)), ["j2", "j1"])
+        assert agg_rev[0]["winner"] == "tie"
+
+    def test_four_judge_even_split_is_tie(self):
+        results = [
+            [{"winner": "A", "reason": "r"}],
+            [{"winner": "A", "reason": "r"}],
+            [{"winner": "B", "reason": "r"}],
+            [{"winner": "B", "reason": "r"}],
+        ]
+        agg = aggregate_jury_votes(results, ["j1", "j2", "j3", "j4"])
+        assert agg[0]["winner"] == "tie"
+        assert agg[0]["agreement"] == "2/4"
+
+    def test_three_way_split_is_tie(self):
+        results = [
+            [{"winner": "A", "reason": "r"}],
+            [{"winner": "B", "reason": "r"}],
+            [{"winner": "tie", "reason": "r"}],
+        ]
+        agg = aggregate_jury_votes(results, ["j1", "j2", "j3"])
+        assert agg[0]["winner"] == "tie"
+        assert agg[0]["agreement"] == "1/3"
+
+    def test_strict_majority_still_wins(self):
+        results = [
+            [{"winner": "B", "reason": "r"}],
+            [{"winner": "B", "reason": "r"}],
+            [{"winner": "tie", "reason": "r"}],
+        ]
+        agg = aggregate_jury_votes(results, ["j1", "j2", "j3"])
+        assert agg[0]["winner"] == "B"
+        assert agg[0]["agreement"] == "2/3"
+
+    def test_short_judge_list_pads_as_failure(self):
+        """A judge that returned fewer results counts as failed for the rest."""
+        results = [
+            [{"winner": "A", "reason": "r1"}, {"winner": "A", "reason": "r2"}],
+            [{"winner": "A", "reason": "r3"}],  # judge died after first comparison
+        ]
+        agg = aggregate_jury_votes(results, ["j1", "j2"])
+        assert len(agg) == 2
+        assert agg[0]["agreement"] == "2/2"
+        assert agg[1]["winner"] == "A"
+        assert agg[1]["agreement"] == "1/1"
 
 
 # ---------------------------------------------------------------------------
