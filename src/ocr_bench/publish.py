@@ -189,7 +189,7 @@ def _build_readme(
 
     lines = [
         "---",
-        "license: mit",
+        "license: apache-2.0",
         "tags:",
         "  - ocr-bench",
         "  - leaderboard",
@@ -232,7 +232,8 @@ def _build_readme(
         lines.append("|------|-------|--------|-----|------|--------|------|------|")
 
     for rank, row in enumerate(rows, 1):
-        model = row["model"]
+        # Escape pipes so arbitrary model names can't break the table
+        model = str(row["model"]).replace("|", "\\|")
         elo = row["elo"]
         params = row.get("params", "")
         if has_ci and "elo_low" in row:
