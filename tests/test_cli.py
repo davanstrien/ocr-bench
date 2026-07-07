@@ -8,7 +8,8 @@ import pytest
 from openai import OpenAIError
 
 from ocr_bench import cli
-from ocr_bench.cli import _resolve_results_repo, build_parser
+from ocr_bench.cli import _convert_results, _resolve_results_repo, build_parser
+from ocr_bench.judge import Comparison
 
 
 class TestBuildParser:
@@ -157,3 +158,48 @@ class TestResolveResultsRepo:
     def test_no_publish_overrides_explicit(self):
         result = _resolve_results_repo("user/my-dataset", "user/custom", True)
         assert result is None
+
+
+def _make_comparison(idx: int = 0) -> Comparison:
+    return Comparison(
+        sample_idx=idx,
+        model_a="model-a",
+        model_b="model-b",
+        col_a="col_a",
+        col_b="col_b",
+        swapped=False,
+        messages=[{"role": "user", "content": "test"}],
+    )
+
+
+class TestConvertResults:
+    def test_valid_result_kept(self):
+        results = _convert_results(
+            [_make_comparison()],
+            [{"winner": "A", "reason": "better", "agreement": "3/3"}],
+        )
+        assert len(results) == 1
+        assert results[0].winner == "A"
+        assert results[0].agreement == "3/3"
+
+    def test_empty_result_skipped(self):
+        results = _convert_results([_make_comparison()], [{}])
+        assert results == []
+
+    def test_all_judges_failed_tie_skipped(self):
+        """A 0/0 'tie' means every judge in the jury failed — it must not
+        enter the ELO computation as a real verdict."""
+        failed = {"winner": "tie", "reason": "no valid votes", "agreement": "0/0"}
+        results = _convert_results([_make_comparison()], [failed])
+        assert results == []
+
+    def test_mixed_results_keep_only_valid(self):
+        comps = [_make_comparison(i) for i in range(3)]
+        aggregated = [
+            {"winner": "A", "reason": "ok", "agreement": "2/3"},
+            {},
+            {"winner": "tie", "reason": "no valid votes", "agreement": "0/0"},
+        ]
+        results = _convert_results(comps, aggregated)
+        assert len(results) == 1
+        assert results[0].sample_idx == 0

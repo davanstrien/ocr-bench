@@ -8,6 +8,7 @@ import requests
 
 from ocr_bench.backends import (
     InferenceProviderJudge,
+    JudgeBackend,
     OpenAICompatibleJudge,
     _is_retryable,
     aggregate_jury_votes,
@@ -127,11 +128,48 @@ class TestParseJudgeSpec:
         assert isinstance(backend, OpenAICompatibleJudge)
         assert "endpoints.huggingface" in backend.name
         assert backend.name.endswith("/v1")
+        assert backend.temperature == 0.0
 
     def test_non_hf_url_still_openai(self):
         """Non-HF URLs still route to OpenAICompatibleJudge."""
         backend = parse_judge_spec("https://my-vllm-server.example.com/v1")
         assert isinstance(backend, OpenAICompatibleJudge)
+
+
+# ---------------------------------------------------------------------------
+# JudgeBackend.judge error handling
+# ---------------------------------------------------------------------------
+
+
+class _FlakyJudge(JudgeBackend):
+    """Judge whose _call_single raises on sample_idx 1."""
+
+    name = "flaky"
+
+    def __init__(self, concurrency: int = 1):
+        self.concurrency = concurrency
+
+    def _call_single(self, comp: Comparison) -> dict[str, str]:
+        if comp.sample_idx == 1:
+            raise RuntimeError("boom")
+        return {"winner": "A", "reason": "ok"}
+
+
+class TestJudgeErrorHandling:
+    def test_sequential_failure_yields_empty_dict(self):
+        """A failed call on the default sequential path must not abort the run."""
+        comps = [_make_comparison(i) for i in range(3)]
+        results = _FlakyJudge(concurrency=1).judge(comps)
+        assert results[0] == {"winner": "A", "reason": "ok"}
+        assert results[1] == {}
+        assert results[2] == {"winner": "A", "reason": "ok"}
+
+    def test_concurrent_failure_yields_empty_dict(self):
+        comps = [_make_comparison(i) for i in range(3)]
+        results = _FlakyJudge(concurrency=2).judge(comps)
+        assert results[0] == {"winner": "A", "reason": "ok"}
+        assert results[1] == {}
+        assert results[2] == {"winner": "A", "reason": "ok"}
 
 
 # ---------------------------------------------------------------------------

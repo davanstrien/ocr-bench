@@ -278,12 +278,22 @@ def parse_judge_output(text: str) -> dict[str, str]:
         text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
     try:
         result = json.loads(text)
-        winner = result.get("winner", "tie").upper().strip()
-        if winner == "TIE":
-            winner = "tie"
-        if winner not in ("A", "B", "tie"):
-            winner = "tie"
-        return {"winner": winner, "reason": result.get("reason", "")}
     except json.JSONDecodeError:
         logger.warning("Failed to parse judge output: %s", text[:200])
         return {}
+    if not isinstance(result, dict):
+        logger.warning("Judge output is not a JSON object: %s", text[:200])
+        return {}
+    winner = result.get("winner", "tie")
+    if not isinstance(winner, str):
+        logger.warning("Judge output has non-string winner: %s", text[:200])
+        return {}
+    winner = winner.upper().strip()
+    if winner == "TIE":
+        winner = "tie"
+    if winner not in ("A", "B", "tie"):
+        winner = "tie"
+    reason = result.get("reason", "")
+    if not isinstance(reason, str):
+        reason = json.dumps(reason)
+    return {"winner": winner, "reason": reason}
