@@ -611,7 +611,7 @@ SPACE_TEMPLATE = "davanstrien/ocr-bench-space-template"
 
 def cmd_publish(args: argparse.Namespace) -> None:
     """Deploy results viewer as a Hugging Face Space."""
-    from huggingface_hub import HfApi
+    from huggingface_hub import HfApi, SpaceHardware
 
     api = HfApi()
     results = args.results
@@ -623,7 +623,7 @@ def cmd_publish(args: argparse.Namespace) -> None:
         from_id=SPACE_TEMPLATE,
         to_id=space_id,
         private=args.private if args.private else None,
-        hardware="cpu-basic",
+        hardware=SpaceHardware.CPU_BASIC,
         exist_ok=True,
         variables=[{"key": "REPOS", "value": results}],
     )
