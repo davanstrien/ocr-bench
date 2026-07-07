@@ -75,7 +75,14 @@ class JudgeBackend(abc.ABC):
         or an empty dict on failure.
         """
         if self.concurrency <= 1 or len(comparisons) <= 1:
-            return [self._call_single(comp) for comp in comparisons]
+            results = []
+            for i, comp in enumerate(comparisons):
+                try:
+                    results.append(self._call_single(comp))
+                except Exception as exc:
+                    logger.warning("judge_call_failed", idx=i, error=str(exc))
+                    results.append({})
+            return results
 
         # Concurrent execution preserving order
         results: list[dict[str, str]] = [{}] * len(comparisons)
@@ -202,7 +209,7 @@ def parse_judge_spec(
                 model=model_name,
                 api_key=token,
                 max_tokens=max_tokens,
-                temperature=0.7,
+                temperature=0.0,
                 extra_body={"chat_template_kwargs": {"enable_thinking": False}},
                 concurrency=concurrency,
             )

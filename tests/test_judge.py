@@ -126,6 +126,25 @@ class TestParseJudgeOutput:
         assert result["winner"] == "A"
         assert result["reason"] == ""
 
+    def test_null_winner_returns_empty(self):
+        """Valid JSON with a non-string winner is a failure, not a crash."""
+        result = parse_judge_output('{"winner": null, "reason": "unsure"}')
+        assert result == {}
+
+    def test_list_winner_returns_empty(self):
+        result = parse_judge_output('{"winner": ["A"], "reason": "odd"}')
+        assert result == {}
+
+    def test_non_object_json_returns_empty(self):
+        assert parse_judge_output('"A"') == {}
+        assert parse_judge_output("[1, 2, 3]") == {}
+        assert parse_judge_output("42") == {}
+
+    def test_non_string_reason_coerced(self):
+        result = parse_judge_output('{"winner": "A", "reason": {"note": "x"}}')
+        assert result["winner"] == "A"
+        assert isinstance(result["reason"], str)
+
 
 class TestComparison:
     def test_text_fields_default_empty(self):
