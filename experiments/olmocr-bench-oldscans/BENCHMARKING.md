@@ -1,20 +1,36 @@
 # olmOCR-bench old_scans — multi-model comparison
 
-Extends the PaddleOCR-VL experiment ([README.md](README.md)) to two more open
-document models, scored through the same harness — for my own benchmarking. Same
+Extends the PaddleOCR-VL experiment ([README.md](README.md)) to a **10-model
+comparison**, all scored through the same harness — for my own benchmarking. Same
 subset (`old_scans`, 98 Library-of-Congress scans), same scorer (stock
-`olmocr.bench.benchmark`), greedy decoding, no tuning. Run 2026-06-27.
+`olmocr.bench.benchmark`), greedy decoding, no tuning. Core models run 2026-06-27;
+olmOCR-2 added 2026-07-07.
 
 ## Results
 
 | Model | params | **old_scans** | present | absent | order | baseline |
 |---|---|---|---|---|---|---|
+| olmOCR-2 | 7B | **46.8** | 45.5 | 91.4 | 31.1 | 100.0 |
+| LightOnOCR-2 | 1B | **42.2** | **45.9** | 47.1 | **34.5** | 100.0 |
+| dots.ocr | 1.7B | **41.6** | 39.1 | 81.4 | 29.9 | 96.9 |
+| GLM-OCR | 0.9B | **40.5** | 36.9 | 88.6 | 27.1 | 96.9 |
 | PaddleOCR-VL v1.6 | 0.9B | **38.6** | 31.2 | 95.7 | 27.7 | 84.7 |
 | PaddleOCR-VL v1 | 0.9B | **38.2** | 32.3 | 95.7 | 24.9 | 88.8 |
-| NuExtract3 | 4.5B | **37.8** | **41.6** | 41.4 | 30.5 | **100.0** |
+| NuExtract3 | 4.5B | **37.8** | 41.6 | 41.4 | 30.5 | 100.0 |
+| DeepSeek-OCR | ~3B | **34.6** | 27.2 | 92.9 | 23.2 | 100.0 |
+| FireRed-OCR | 2.1B | **33.3** | 30.8 | 62.9 | 25.4 | 77.6 |
 | Unlimited-OCR | 3.3B | **30.6** | 29.0 | 50.0 | 25.4 | 89.8 |
 
 `old_scans` = present + absent + order (the leaderboard's "Old scans" column).
+`baseline` = auto no-hallucination check over these 98 scans (NOT the leaderboard "Base" column).
+Param counts vendor-reported/approx.
+
+**Read across the columns, not just the headline.** olmOCR-2 tops it — expected, it's
+the model olmOCR-bench was built around. But rank by pure transcription (`present`) and
+a **1B model, LightOnOCR-2 (45.9), leads the field**, edging olmOCR-2 (45.5). And the
+headline and `present` orders disagree: PaddleOCR-VL v1.6 beats NuExtract3 on the
+headline (38.6 vs 37.8) but reads far less of the page (`present` 31.2 vs 41.6). The
+sub-score section below unpacks why.
 
 ## ⚠️ Read the sub-scores, not just the headline
 
@@ -61,6 +77,47 @@ stamp / marginal note *is* the record), the same number ranks the model you'd
 prefer *lower*. A benchmark score measures fitness for one purpose — check it's
 yours before trusting the ranking.
 
+## olmOCR-2 — the model the benchmark was built for
+
+olmOCR-2-7B (`allenai/olmOCR-2-7B-1025`) tops the table (46.8). No surprise: olmOCR-bench
+encodes olmOCR's own goal, and this model is trained for exactly it. Even so it fails
+53% of the tests, and it's the largest model here — the 1B LightOnOCR-2 matches its
+transcription (`present` 45.9 vs 45.5).
+
+Run faithfully — its own prompt (`build_no_anchoring_v4_yaml_prompt`), its 1288px
+longest-side render, YAML front matter stripped to body text — served on a Job with an
+exposed port and hit by `olmocr2.py`:
+
+```bash
+# 1. serve the model on a Job (exposed port); note the endpoint URL it prints
+hf jobs run --detach --expose 8000 --flavor a10g-small --timeout 45m -s HF_TOKEN \
+    vllm/vllm-openai \
+    vllm serve allenai/olmOCR-2-7B-1025 --max-model-len 16384
+
+# 2. convert against that endpoint (writes the olmocr2 candidate into the bucket)
+B=hf://buckets/davanstrien/paddleocr-vl16-oldscans
+hf jobs uv run --flavor cpu-upgrade -s HF_TOKEN -v $B:/bucket \
+    -e ENDPOINT=https://<jobid>--8000.hf.jobs/v1 olmocr2.py
+
+# 3. cancel the serve job once the convert finishes (exposed ports bill per minute)
+hf jobs cancel <serve-jobid>
+```
+
+`olmocr2.py` polls the endpoint until it's ready, so step 2 can be launched while the
+server warms up. Pattern: [Serve Models on Jobs](https://huggingface.co/docs/hub/jobs-serving).
+
+## Provenance / reproducing each model
+
+Committed runners in this folder produce five of the candidates: `convert.py`
+(PaddleOCR-VL v1.6 + v1), `nuextract3.py`, `unlimited_ocr.py`, and `olmocr2.py`. The
+other five — `dots.ocr`, `GLM-OCR`, `DeepSeek-OCR`, `FireRed-OCR`, `LightOnOCR-2` — were
+produced by the corresponding [uv-scripts/ocr](https://huggingface.co/datasets/uv-scripts/ocr)
+runners writing into the same `{candidate}/old_scans/{basename}_pg{page}_repeat1.md`
+bucket layout, so `score.py` ranks all ten together. Their exact `hf jobs uv run`
+invocations aren't captured in this folder yet — a documentation follow-up. `score.py`
+reports scores over whatever candidate folders are present in the bucket, so re-running
+it after adding a model re-ranks the whole set (that's how olmOCR-2 was folded in).
+
 ## Fairness / processing notes
 
 - **DPI**: each model's recommended PDF→PNG render DPI — NuExtract **170**,
@@ -86,6 +143,7 @@ B=hf://buckets/davanstrien/paddleocr-vl16-oldscans
 # convert (each writes its own candidate folder; LIMIT=3 for a smoke)
 hf jobs uv run --flavor l4x1 --timeout 1h -s HF_TOKEN -v $B:/bucket unlimited_ocr.py
 hf jobs uv run --flavor l4x1 --timeout 1h -s HF_TOKEN -v $B:/bucket nuextract3.py
+# olmocr2.py additionally needs a served endpoint — see the olmOCR-2 section above
 # score every candidate folder in the bucket together
 hf jobs uv run --flavor cpu-upgrade -s HF_TOKEN -v $B:/bucket:ro score.py
 ```

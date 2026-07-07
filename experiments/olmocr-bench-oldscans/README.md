@@ -4,6 +4,11 @@ Scores [PaddleOCR-VL-1.6](https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6) 
 `old_scans` subset of [`allenai/olmOCR-bench`](https://huggingface.co/datasets/allenai/olmOCR-bench).
 Standalone experiment — not part of the `ocr_bench` library.
 
+> This file covers the PaddleOCR-VL run. For the **10-model comparison** (adds
+> LightOnOCR-2, dots.ocr, GLM-OCR, NuExtract3, DeepSeek-OCR, FireRed-OCR, Unlimited-OCR,
+> and olmOCR-2), the per-column analysis, and the olmOCR-2 serve-on-Jobs recipe, see
+> [BENCHMARKING.md](BENCHMARKING.md).
+
 `old_scans` = 98 single-page Library-of-Congress scans, 526 tests
 (text-present / text-absent / reading-order). No math or tables, so scoring needs
 no KaTeX/chromium.
