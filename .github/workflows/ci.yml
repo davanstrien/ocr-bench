@@ -15,4 +15,5 @@ jobs:
       - run: uv python install 3.13
       - run: uv sync --locked --dev --extra viewer
       - run: uv run ruff check src/ tests/
+      - run: uv run ty check src/
       - run: uv run pytest tests/ -x -q
