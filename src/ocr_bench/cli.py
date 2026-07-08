@@ -29,6 +29,7 @@ from ocr_bench.publish import (
     EvalMetadata,
     load_existing_comparisons,
     load_existing_metadata,
+    publish_checkpoint,
     publish_results,
 )
 
@@ -70,6 +71,29 @@ def build_parser() -> argparse.ArgumentParser:
     # Eval
     judge.add_argument("--max-samples", type=int, default=None, help="Max samples to evaluate")
     judge.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
+    judge.add_argument(
+        "--max-comparisons",
+        type=int,
+        default=None,
+        help=(
+            "Hard cap on total comparisons judged this run (default: no cap). "
+            "Adaptive stopping bounds per-pair sampling but not the total; this "
+            "makes cost and wall-clock deterministic. On reaching it, the run "
+            "stops cleanly and publishes what it has."
+        ),
+    )
+    judge.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=500,
+        help=(
+            "Push accumulated comparisons to the results repo every N comparisons "
+            "(0 = off; default: 500). Cheap append-only pushes (comparisons config "
+            "only, no leaderboard/README churn) so an interrupted run resumes "
+            "without re-judging. Evaluated at batch boundaries, so N is a lower "
+            "bound on the comparisons between checkpoints."
+        ),
+    )
     judge.add_argument(
         "--max-tokens",
         type=int,
@@ -283,6 +307,48 @@ def _refresh_viewer_space(results_repo: str) -> None:
         logger.warning("viewer_space_refresh_failed", space=space_id, error=str(exc))
 
 
+def _checkpoint(
+    results_repo: str | None,
+    results: list[ComparisonResult],
+    model_names: list[str],
+) -> None:
+    """Push a comparisons-only checkpoint, swallowing any failure.
+
+    Checkpointing is best-effort durability, not a correctness step: a failed
+    push (transient Hub error, auth hiccup) must not abort a multi-hour judge
+    run. Log a warning and continue — the next checkpoint, or the final
+    publish, re-pushes the full accumulated set anyway.
+    """
+    if not results_repo:
+        return
+    try:
+        publish_checkpoint(results_repo, results, model_names)
+        console.print(f"  [dim]Checkpoint: pushed {len(results)} comparisons[/dim]")
+    except Exception as exc:
+        logger.warning("checkpoint_failed", error=str(exc))
+        console.print(f"  [yellow]Checkpoint failed (continuing): {exc}[/yellow]")
+
+
+def _unresolved_adjacent_pairs(board: Leaderboard) -> list[str]:
+    """Adjacent-rank model pairs whose 95% CIs still overlap.
+
+    Used to report what a budget-capped run left statistically unresolved.
+    Empty when CIs are unavailable or every adjacent pair is separated.
+    """
+    if not board.elo_ci:
+        return []
+    ranked = board.ranked
+    pairs: list[str] = []
+    for i in range(len(ranked) - 1):
+        hi_model, _ = ranked[i]
+        lo_model, _ = ranked[i + 1]
+        hi_ci = board.elo_ci.get(hi_model)
+        lo_ci = board.elo_ci.get(lo_model)
+        if hi_ci and lo_ci and lo_ci[1] >= hi_ci[0]:
+            pairs.append(f"{hi_model} vs {lo_model}")
+    return pairs
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Orchestrate: load → compare → judge → elo → print → publish."""
     # --- Resolve flags ---
@@ -290,6 +356,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
     merge = args.merge
     results_repo = _resolve_results_repo(args.dataset, args.save_results, args.no_publish)
     from_prs = False  # track for metadata
+    max_comparisons = args.max_comparisons  # global budget; None = uncapped
+    checkpoint_every = args.checkpoint_every  # 0 = checkpointing off
 
     if results_repo:
         console.print(f"Results will be published to [bold]{results_repo}[/bold]")
@@ -354,6 +422,17 @@ def cmd_judge(args: argparse.Namespace) -> None:
     skip_pairs: set[tuple[str, str]] | None = None
 
     if results_repo and not args.full_rejudge:
+        # Resume path. Existing comparisons include any pushed by a checkpoint
+        # (see --checkpoint-every), so a killed run relaunched WITHOUT
+        # --full-rejudge picks up where it left off instead of re-judging.
+        #
+        # NOTE: skip_pairs is PAIR-level, not (pair, sample)-level. Any model
+        # pair with >=1 existing comparison is skipped for ALL samples — a pair
+        # that was only partially judged before the kill is treated as done and
+        # is NOT topped up. Resume therefore adds only pairs with zero prior
+        # comparisons (plus refits the leaderboard over everything). This is the
+        # accepted granularity: it never re-judges completed work, at the cost
+        # of not resuming a pair mid-way. --full-rejudge forces a clean re-run.
         existing_results = load_existing_comparisons(results_repo)
         if existing_results:
             judged_pairs = {_normalize_pair(r.model_a, r.model_b) for r in existing_results}
@@ -389,6 +468,11 @@ def cmd_judge(args: argparse.Namespace) -> None:
             aggregated = all_judge_outputs[0]
         return _convert_results(batch_comps, aggregated)
 
+    # Set when the run stops because it hit --max-comparisons (vs converging or
+    # running out of samples). Recorded in the metadata row and drives the
+    # unresolved-pairs report at the end.
+    budget_exhausted = False
+
     if adaptive:
         # --- Adaptive stopping: batch-by-batch with convergence check ---
         from itertools import combinations as _combs
@@ -405,10 +489,18 @@ def cmd_judge(args: argparse.Namespace) -> None:
             f"{n_pairs} pairs, batch size {batch_samples}, "
             f"checking after {min_before_check} comparisons"
         )
+        if max_comparisons is not None:
+            console.print(f"Budget: stop after {max_comparisons} comparisons")
 
         new_results: list[ComparisonResult] = []
         total_comparisons = 0
+        last_checkpoint = 0
         for batch_num, batch_start in enumerate(range(0, len(all_indices), batch_samples)):
+            # Global budget: stop before a batch we can't afford at all.
+            if max_comparisons is not None and total_comparisons >= max_comparisons:
+                budget_exhausted = True
+                break
+
             batch_indices = all_indices[batch_start : batch_start + batch_samples]
             batch_comps = build_comparisons(
                 ds,
@@ -420,6 +512,14 @@ def cmd_judge(args: argparse.Namespace) -> None:
             if not batch_comps:
                 continue
 
+            # Trim the final batch to land exactly on the budget: stop cleanly
+            # mid-round rather than overshooting the cap.
+            if max_comparisons is not None:
+                remaining = max_comparisons - total_comparisons
+                if len(batch_comps) > remaining:
+                    batch_comps = batch_comps[:remaining]
+                    budget_exhausted = True
+
             batch_results = _judge_batch(batch_comps)
             new_results.extend(batch_results)
             total_comparisons += len(batch_comps)
@@ -427,6 +527,20 @@ def cmd_judge(args: argparse.Namespace) -> None:
 
             total = len(existing_results) + len(new_results)
             console.print(f"  Batch {batch_num + 1}: {len(batch_results)} new, {total} total")
+
+            # Periodic checkpoint: push the full accumulated comparison set
+            # (append-only, comparisons config only). Fires at batch boundaries,
+            # so checkpoint_every is a lower bound on comparisons between pushes.
+            if (
+                checkpoint_every
+                and results_repo
+                and total_comparisons - last_checkpoint >= checkpoint_every
+            ):
+                _checkpoint(results_repo, existing_results + new_results, model_names)
+                last_checkpoint = total_comparisons
+
+            if budget_exhausted:
+                break
 
             if total >= min_before_check:
                 board = compute_elo(existing_results + new_results, model_names)
@@ -459,6 +573,11 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     )
                     break
 
+        if budget_exhausted:
+            console.print(
+                f"\n[yellow]Budget reached ({total_comparisons} comparisons) — "
+                f"stopping and publishing.[/yellow]"
+            )
         console.print(f"\n{len(new_results)}/{total_comparisons} valid comparisons")
     else:
         # --- Standard single-pass flow ---
@@ -469,6 +588,13 @@ def cmd_judge(args: argparse.Namespace) -> None:
             seed=args.seed,
             skip_pairs=skip_pairs,
         )
+
+        # Global budget: judge at most the first N comparisons. Which pairs get
+        # dropped depends on build order — acceptable for a blunt operational cap.
+        if max_comparisons is not None and len(comparisons) > max_comparisons:
+            comparisons = comparisons[:max_comparisons]
+            budget_exhausted = True
+
         console.print(f"\nBuilt {len(comparisons)} new pairwise comparisons")
 
         if not comparisons and not existing_results:
@@ -490,6 +616,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     max_samples=args.max_samples or len(ds),
                     total_comparisons=0,
                     valid_comparisons=0,
+                    max_comparisons=max_comparisons,
+                    budget_exhausted=budget_exhausted,
                     from_prs=from_prs,
                 )
                 publish_results(
@@ -509,8 +637,30 @@ def cmd_judge(args: argparse.Namespace) -> None:
         for judge in judges:
             console.print(f"\nRunning judge: {judge.name}")
 
-        new_results = _judge_batch(comparisons)
-        total_comparisons = len(comparisons)
+        # Judge in chunks of checkpoint_every so checkpoints can fire mid-run;
+        # a single _judge_batch over everything would only checkpoint at the end.
+        # checkpoint_every == 0 → one chunk (no checkpointing).
+        chunk = checkpoint_every if checkpoint_every else len(comparisons)
+        new_results = []
+        total_comparisons = 0
+        last_checkpoint = 0
+        for start in range(0, len(comparisons), chunk):
+            sub = comparisons[start : start + chunk]
+            new_results.extend(_judge_batch(sub))
+            total_comparisons += len(sub)
+            if (
+                checkpoint_every
+                and results_repo
+                and total_comparisons - last_checkpoint >= checkpoint_every
+            ):
+                _checkpoint(results_repo, existing_results + new_results, model_names)
+                last_checkpoint = total_comparisons
+
+        if budget_exhausted:
+            console.print(
+                f"\n[yellow]Budget reached ({total_comparisons} comparisons) — "
+                f"publishing what was judged.[/yellow]"
+            )
         console.print(f"\n{len(new_results)}/{total_comparisons} valid comparisons")
 
     # --- Merge existing + new, compute ELO ---
@@ -518,6 +668,22 @@ def cmd_judge(args: argparse.Namespace) -> None:
     board = compute_elo(all_results, model_names)
     console.print()
     print_leaderboard(board)
+
+    # A budget-capped run may stop before the ranking is statistically settled —
+    # surface which adjacent pairs are still unresolved so the operator knows
+    # what a top-up run should target.
+    if budget_exhausted:
+        unresolved = _unresolved_adjacent_pairs(board)
+        logger.warning(
+            "budget_exhausted",
+            limit=max_comparisons,
+            judged=total_comparisons,
+            unresolved_pairs=unresolved,
+        )
+        if unresolved:
+            console.print("[yellow]Unresolved rankings at budget stop:[/yellow]")
+            for pair in unresolved:
+                console.print(f"  [yellow]{pair}[/yellow]")
 
     # --- Publish ---
     if results_repo:
@@ -528,6 +694,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
             max_samples=args.max_samples or len(ds),
             total_comparisons=total_comparisons,
             valid_comparisons=len(new_results),
+            max_comparisons=max_comparisons,
+            budget_exhausted=budget_exhausted,
             from_prs=from_prs,
         )
         publish_results(

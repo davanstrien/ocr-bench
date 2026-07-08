@@ -10,7 +10,7 @@ import structlog
 from datasets import Dataset, load_dataset
 from huggingface_hub import HfApi
 
-from ocr_bench.elo import ComparisonResult, Leaderboard
+from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo
 from ocr_bench.run import MODEL_REGISTRY
 
 logger = structlog.get_logger()
@@ -26,6 +26,11 @@ class EvalMetadata:
     max_samples: int
     total_comparisons: int
     valid_comparisons: int
+    # Global comparison budget for the run (--max-comparisons); None = uncapped.
+    # ``budget_exhausted`` records whether the run stopped because it hit the cap
+    # (as opposed to converging or exhausting the samples).
+    max_comparisons: int | None = None
+    budget_exhausted: bool = False
     from_prs: bool = False
     timestamp: str = ""
 
@@ -117,9 +122,58 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
         "max_samples": metadata.max_samples,
         "total_comparisons": metadata.total_comparisons,
         "valid_comparisons": metadata.valid_comparisons,
+        "max_comparisons": metadata.max_comparisons,
+        "budget_exhausted": metadata.budget_exhausted,
         "from_prs": metadata.from_prs,
         "timestamp": metadata.timestamp,
     }
+
+
+def _align_metadata_rows(rows: list[dict]) -> list[dict]:
+    """Give every metadata row the same keys (union), filling gaps with None.
+
+    ``Dataset.from_list`` infers its schema from the *first* row only, so a
+    newer row carrying columns that older rows lack (e.g. the budget fields
+    added here) would be silently dropped whenever an older row comes first.
+    Taking the union of keys keeps the append-only metadata log
+    forward-compatible as new fields are introduced.
+    """
+    keys: dict[str, None] = {}
+    for row in rows:
+        keys.update(dict.fromkeys(row))
+    return [{k: row.get(k) for k in keys} for row in rows]
+
+
+def publish_checkpoint(
+    repo_id: str,
+    results: list[ComparisonResult],
+    model_names: list[str],
+) -> None:
+    """Push ONLY the comparisons config as a mid-run checkpoint.
+
+    Append-only and cheap: unlike :func:`publish_results` this writes no
+    leaderboard, README, or metadata — those churn the repo and are written
+    once at the final publish. The point of a checkpoint is durability: a run
+    killed between checkpoints loses at most the comparisons judged since the
+    last one, and a relaunch WITHOUT ``--full-rejudge`` picks the checkpointed
+    comparisons back up (see ``load_existing_comparisons`` + ``skip_pairs`` in
+    ``cli.cmd_judge``).
+
+    ``results`` must be the *full* accumulated set (existing + new so far);
+    ``push_to_hub`` replaces the config's data, so passing the whole set each
+    time keeps the published comparisons config complete and monotonic.
+
+    Reuses :func:`compute_elo` with bootstrapping disabled purely to build the
+    canonicalised comparison rows the same way the final publish does — the
+    returned ELO/CIs are discarded — so checkpointed and final comparison logs
+    are identical.
+    """
+    board = compute_elo(results, model_names, n_bootstrap=0)
+    if not board.comparison_log:
+        return
+    comp_ds = Dataset.from_list(board.comparison_log)
+    comp_ds.push_to_hub(repo_id, config_name="comparisons")
+    logger.info("published_checkpoint", repo=repo_id, n=len(board.comparison_log))
 
 
 def publish_results(
@@ -155,7 +209,7 @@ def publish_results(
 
     # Metadata — append-only
     meta_row = build_metadata_row(metadata)
-    all_meta = (existing_metadata or []) + [meta_row]
+    all_meta = _align_metadata_rows((existing_metadata or []) + [meta_row])
     Dataset.from_list(all_meta).push_to_hub(repo_id, config_name="metadata")
     logger.info("published_metadata", repo=repo_id, n=len(all_meta))
 

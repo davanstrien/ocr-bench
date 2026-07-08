@@ -7,10 +7,12 @@ from unittest.mock import MagicMock, patch
 from ocr_bench.elo import ComparisonResult, Leaderboard
 from ocr_bench.publish import (
     EvalMetadata,
+    _align_metadata_rows,
     build_leaderboard_rows,
     build_metadata_row,
     load_existing_comparisons,
     load_existing_metadata,
+    publish_checkpoint,
     publish_results,
 )
 
@@ -101,6 +103,72 @@ class TestBuildMetadataRow:
         )
         row = build_metadata_row(meta)
         assert row["from_prs"] is False
+
+    def test_budget_fields_default(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=[],
+            seed=42,
+            max_samples=0,
+            total_comparisons=0,
+            valid_comparisons=0,
+        )
+        row = build_metadata_row(meta)
+        assert row["max_comparisons"] is None
+        assert row["budget_exhausted"] is False
+
+    def test_budget_fields_recorded(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=["j"],
+            seed=42,
+            max_samples=10,
+            total_comparisons=12,
+            valid_comparisons=12,
+            max_comparisons=12,
+            budget_exhausted=True,
+        )
+        row = build_metadata_row(meta)
+        assert row["max_comparisons"] == 12
+        assert row["budget_exhausted"] is True
+
+
+class TestAlignMetadataRows:
+    def test_union_of_keys_filled_with_none(self):
+        # Old row lacks the budget columns a newer row carries.
+        rows = [
+            {"source_dataset": "d", "total_comparisons": 5},
+            {"source_dataset": "d", "total_comparisons": 6, "budget_exhausted": True},
+        ]
+        aligned = _align_metadata_rows(rows)
+        expected_keys = {"source_dataset", "total_comparisons", "budget_exhausted"}
+        assert all(set(r) == expected_keys for r in aligned)
+        # The older row gets a null for the new column rather than dropping it.
+        assert aligned[0]["budget_exhausted"] is None
+        assert aligned[1]["budget_exhausted"] is True
+
+    def test_empty(self):
+        assert _align_metadata_rows([]) == []
+
+
+class TestPublishCheckpoint:
+    @patch("ocr_bench.publish.Dataset")
+    def test_pushes_only_comparisons_config(self, mock_ds_cls):
+        results = [
+            ComparisonResult(sample_idx=0, model_a="a", model_b="b", winner="A"),
+            ComparisonResult(sample_idx=1, model_a="a", model_b="b", winner="B"),
+        ]
+        publish_checkpoint("user/results", results, ["a", "b"])
+
+        mock_ds = mock_ds_cls.from_list.return_value
+        # Exactly one push — no leaderboard/metadata/README churn.
+        mock_ds.push_to_hub.assert_called_once()
+        assert mock_ds.push_to_hub.call_args.kwargs["config_name"] == "comparisons"
+
+    @patch("ocr_bench.publish.Dataset")
+    def test_no_push_when_no_results(self, mock_ds_cls):
+        publish_checkpoint("user/results", [], ["a", "b"])
+        mock_ds_cls.from_list.assert_not_called()
 
 
 class TestPublishResults:
