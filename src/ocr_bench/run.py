@@ -106,6 +106,53 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         python=_VLLM_OPENAI_PYTHON,
         env=_VLLM_OPENAI_ENV,
     ),
+    "deepseek-ocr-2": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/deepseek-ocr2-vllm.py",
+        model_id="deepseek-ai/DeepSeek-OCR-2",
+        size="3.4B",
+        default_flavor="l4x1",
+        # Free OCR (no <|grounding|>) so the judge sees clean text, matching
+        # the deepseek-ocr (v1) entry.
+        default_args=["--prompt-mode", "free"],
+        # The script's vLLM nightly cu129 wheels need CUDA 13 runtime libs
+        # (libnvrtc.so.13) that the default uv image lacks.
+        image=_VLLM_OPENAI_IMAGE,
+        python=_VLLM_OPENAI_PYTHON,
+        env=_VLLM_OPENAI_ENV,
+    ),
+    "unlimited-ocr": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/unlimited-ocr-vllm.py",
+        model_id="baidu/Unlimited-OCR",
+        size="3.3B",
+        default_flavor="l4x1",
+        # --strip-grounding: judge sees clean text, not <|det|> layout boxes.
+        default_args=["--strip-grounding"],
+        # Baidu's dedicated vLLM image (vllm + torch from the image, per the
+        # script's own docstring); use the :unlimited-ocr-cu129 tag on Hopper.
+        image="vllm/vllm-openai:unlimited-ocr",
+        python=_VLLM_OPENAI_PYTHON,
+        env=_VLLM_OPENAI_ENV,
+    ),
+    "olmocr-2": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/olmocr2-vllm.py",
+        model_id="allenai/olmOCR-2-7B-1025-FP8",
+        size="8.3B",
+        default_flavor="l4x1",
+    ),
+    # Classical (non-VLM) baselines
+    "tesseract": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/tesseract-ocr.py",
+        model_id="tesseract-5",
+        size="n/a",
+        default_flavor="cpu-upgrade",
+    ),
+    "pp-ocrv6": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/pp-ocrv6.py",
+        model_id="PaddlePaddle/PP-OCRv6_medium",
+        size="34.5M",
+        default_flavor="t4-small",
+        default_args=["--model-tier", "medium"],
+    ),
 }
 
 DEFAULT_MODELS = ["glm-ocr", "deepseek-ocr", "lighton-ocr-2", "dots-ocr", "firered-ocr"]
