@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
 from openai import OpenAIError
 
 from ocr_bench import cli
-from ocr_bench.cli import _convert_results, _resolve_results_repo, build_parser
+from ocr_bench.cli import (
+    _convert_results,
+    _refresh_viewer_space,
+    _resolve_results_repo,
+    build_parser,
+)
 from ocr_bench.judge import Comparison
 
 
@@ -203,3 +209,69 @@ class TestConvertResults:
         results = _convert_results(comps, aggregated)
         assert len(results) == 1
         assert results[0].sample_idx == 0
+
+
+def _space_var(value: str) -> MagicMock:
+    """A stand-in for huggingface_hub's SpaceVariable (has a .value)."""
+    var = MagicMock()
+    var.value = value
+    return var
+
+
+class TestRefreshViewerSpace:
+    """Layers 0+2 of issue #37: judge→Space chaining with a wiring-drift guard."""
+
+    @patch("huggingface_hub.HfApi")
+    def test_restarts_when_repos_matches(self, mock_api_cls):
+        api = mock_api_cls.return_value
+        api.repo_exists.return_value = True
+        api.get_space_variables.return_value = {"REPOS": _space_var("user/x-results")}
+
+        _refresh_viewer_space("user/x-results")
+
+        api.restart_space.assert_called_once_with(
+            "user/x-results-viewer", factory_reboot=True
+        )
+
+    @patch("huggingface_hub.HfApi")
+    def test_restarts_when_repos_unset(self, mock_api_cls):
+        """No REPOS variable is not drift — the Space defaults to its own repo."""
+        api = mock_api_cls.return_value
+        api.repo_exists.return_value = True
+        api.get_space_variables.return_value = {}
+
+        _refresh_viewer_space("user/x-results")
+
+        api.restart_space.assert_called_once_with(
+            "user/x-results-viewer", factory_reboot=True
+        )
+
+    @patch("huggingface_hub.HfApi")
+    def test_warns_and_skips_on_repos_mismatch(self, mock_api_cls):
+        api = mock_api_cls.return_value
+        api.repo_exists.return_value = True
+        api.get_space_variables.return_value = {"REPOS": _space_var("user/OTHER-results")}
+
+        _refresh_viewer_space("user/x-results")
+
+        api.restart_space.assert_not_called()
+
+    @patch("huggingface_hub.HfApi")
+    def test_no_space_does_nothing(self, mock_api_cls):
+        api = mock_api_cls.return_value
+        api.repo_exists.return_value = False
+
+        _refresh_viewer_space("user/x-results")
+
+        api.get_space_variables.assert_not_called()
+        api.restart_space.assert_not_called()
+
+    @patch("huggingface_hub.HfApi")
+    def test_hub_error_never_raises(self, mock_api_cls):
+        """A Space hiccup must never fail an otherwise-successful judge run."""
+        api = mock_api_cls.return_value
+        api.repo_exists.side_effect = RuntimeError("hub down")
+
+        _refresh_viewer_space("user/x-results")  # must not raise
+
+        api.restart_space.assert_not_called()

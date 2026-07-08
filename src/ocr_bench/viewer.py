@@ -13,24 +13,49 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 
+def _latest_revision(repo_id: str) -> str | None:
+    """Resolve the results repo's latest commit SHA.
+
+    Pinning ``load_dataset`` to this explicit revision (rather than the bare
+    ``main`` pointer) guarantees the viewer serves the just-published results
+    instead of a stale cached snapshot — the freshness half of the incident in
+    issue #37. Returns ``None`` if it can't be resolved, in which case callers
+    fall back to ``load_dataset``'s default resolution.
+    """
+    try:
+        from huggingface_hub import HfApi
+
+        return HfApi().dataset_info(repo_id).sha
+    except Exception as exc:
+        logger.warning("could_not_resolve_revision", repo=repo_id, error=str(exc))
+        return None
+
+
 def load_results(repo_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Load leaderboard and comparisons from a Hub results dataset.
 
-    Tries the default config first (new repos), then falls back to the
-    named ``leaderboard`` config (old repos).
+    Resolves the repo's latest revision up front and pins every load to it, so
+    a warm cache never serves stale results. Tries the default config first
+    (new repos), then falls back to the named ``leaderboard`` config (old repos).
 
     Returns:
         (leaderboard_rows, comparison_rows)
     """
+    revision = _latest_revision(repo_id)
+
     try:
-        leaderboard_ds = load_dataset(repo_id, split="train")
+        leaderboard_ds = load_dataset(repo_id, split="train", revision=revision)
         leaderboard_rows = [dict(row) for row in leaderboard_ds]
     except Exception:
-        leaderboard_ds = load_dataset(repo_id, name="leaderboard", split="train")
+        leaderboard_ds = load_dataset(
+            repo_id, name="leaderboard", split="train", revision=revision
+        )
         leaderboard_rows = [dict(row) for row in leaderboard_ds]
 
     try:
-        comparisons_ds = load_dataset(repo_id, name="comparisons", split="train")
+        comparisons_ds = load_dataset(
+            repo_id, name="comparisons", split="train", revision=revision
+        )
     except Exception:
         logger.warning("no_comparisons_config", repo=repo_id)
         return leaderboard_rows, []
@@ -41,8 +66,9 @@ def load_results(repo_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any
 
 def _load_source_metadata(repo_id: str) -> dict[str, Any]:
     """Load metadata config from results repo to find the source dataset."""
+    revision = _latest_revision(repo_id)
     try:
-        meta_ds = load_dataset(repo_id, name="metadata", split="train")
+        meta_ds = load_dataset(repo_id, name="metadata", split="train", revision=revision)
         if len(meta_ds) > 0:
             return dict(meta_ds[0])
     except Exception as exc:
