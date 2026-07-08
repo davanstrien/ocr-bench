@@ -18,7 +18,21 @@ logger = structlog.get_logger()
 
 @dataclass
 class EvalMetadata:
-    """Metadata for an evaluation run, stored alongside results on Hub."""
+    """Metadata for an evaluation run, stored alongside results on Hub.
+
+    The comparison counts describe this run's judge effort:
+
+    - ``total_comparisons``: pairs actually sent to a judge (judge calls).
+    - ``valid_comparisons``: judged pairs that returned a usable verdict —
+      excludes judge failures and auto-ties.
+    - ``auto_tied``: identical-output pairs scored as ties *without* a judge
+      call. Not judge calls, so excluded from the two counts above, but they
+      still enter the leaderboard as ordinary ties.
+
+    So the comparison log powering the leaderboard is ``valid_comparisons +
+    auto_tied`` for a fresh run (existing comparisons add to it on incremental
+    runs).
+    """
 
     source_dataset: str
     judge_models: list[str]
@@ -26,6 +40,7 @@ class EvalMetadata:
     max_samples: int
     total_comparisons: int
     valid_comparisons: int
+    auto_tied: int = 0
     # Global comparison budget for the run (--max-comparisons); None = uncapped.
     # ``budget_exhausted`` records whether the run stopped because it hit the cap
     # (as opposed to converging or exhausting the samples).
@@ -122,6 +137,7 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
         "max_samples": metadata.max_samples,
         "total_comparisons": metadata.total_comparisons,
         "valid_comparisons": metadata.valid_comparisons,
+        "auto_tied": metadata.auto_tied,
         "max_comparisons": metadata.max_comparisons,
         "budget_exhausted": metadata.budget_exhausted,
         "from_prs": metadata.from_prs,
@@ -207,7 +223,9 @@ def publish_results(
     lb_ds.push_to_hub(repo_id, config_name="leaderboard")
     logger.info("published_leaderboard", repo=repo_id, n=len(rows))
 
-    # Metadata — append-only
+    # Metadata — append-only. Align all rows to the union of keys so a newer
+    # row's columns (auto_tied, budget fields) aren't dropped when an older row
+    # written before those fields existed comes first.
     meta_row = build_metadata_row(metadata)
     all_meta = _align_metadata_rows((existing_metadata or []) + [meta_row])
     Dataset.from_list(all_meta).push_to_hub(repo_id, config_name="metadata")
@@ -241,7 +259,15 @@ def _build_readme(
         else json.dumps(metadata.judge_models)
     )
     judge_str = ", ".join(j.split("/")[-1] for j in judges) if judges else "N/A"
+    # Break the leaderboard's comparison log down by how each verdict was
+    # reached: judged pairs vs identical-output auto-ties (agreement "auto").
     n_comparisons = len(board.comparison_log)
+    n_auto = sum(1 for r in board.comparison_log if r.get("agreement") == "auto")
+    n_judged = n_comparisons - n_auto
+    if n_auto:
+        comparisons_str = f"{n_judged} judged + {n_auto} auto-tied ({n_comparisons} total)"
+    else:
+        comparisons_str = str(n_comparisons)
 
     # The card license describes the published results DATA (which embeds
     # OCR text derived from the source dataset), not this tool — so there is
@@ -318,7 +344,7 @@ def _build_readme(
         f"- **Source dataset**: [`{metadata.source_dataset}`]"
         f"(https://huggingface.co/datasets/{metadata.source_dataset})",
         f"- **Judge**: {judge_str}",
-        f"- **Comparisons**: {n_comparisons}",
+        f"- **Comparisons**: {comparisons_str}",
         "- **Method**: Bradley-Terry MLE with bootstrap 95% CIs",
         "",
         "## Configs",

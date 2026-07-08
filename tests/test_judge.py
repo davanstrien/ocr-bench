@@ -190,7 +190,8 @@ class TestBuildComparisons:
     def test_comparisons_have_text_fields(self):
         ds = self._make_dataset()
         ocr_columns = {"ocr_model_a": "ModelA", "ocr_model_b": "ModelB"}
-        comps = build_comparisons(ds, ocr_columns)
+        # min_chars=0 isolates this from the blank-pair filter (toy text is short)
+        comps = build_comparisons(ds, ocr_columns, min_chars=0)
         assert len(comps) == 1
         comp = comps[0]
         assert comp.text_a == "text from model A"
@@ -211,12 +212,12 @@ class TestBuildComparisons:
         ds = [
             {
                 "image": Image.new("RGB", (50, 50)),
-                "col_a": f"text {i}",
-                "col_b": f"text {i}",
+                "col_a": f"text A {i}",
+                "col_b": f"text B {i}",
             }
             for i in range(10)
         ]
-        comps = build_comparisons(ds, {"col_a": "A", "col_b": "B"}, max_samples=3)
+        comps = build_comparisons(ds, {"col_a": "A", "col_b": "B"}, max_samples=3, min_chars=0)
         assert len(comps) == 3
 
     def test_skip_samples_excludes_judged_pair_sample(self):
@@ -230,9 +231,10 @@ class TestBuildComparisons:
             },
         ]
         ocr_columns = {"col_a": "ModelA", "col_b": "ModelB", "col_c": "ModelC"}
-        # 3 models = 3 pairs; sample 0 of (A, B) already judged.
+        # 3 models = 3 pairs; sample 0 of (A, B) already judged. min_chars=0
+        # keeps the toy text (this exercises skip_samples, not the blank filter).
         comps = build_comparisons(
-            ds, ocr_columns, skip_samples={("ModelA", "ModelB"): {0}}
+            ds, ocr_columns, skip_samples={("ModelA", "ModelB"): {0}}, min_chars=0
         )
         pair_set = {(c.model_a, c.model_b) for c in comps}
         assert ("ModelA", "ModelB") not in pair_set
@@ -270,8 +272,9 @@ class TestBuildComparisons:
         ]
         ocr_columns = {"col_a": "ModelA", "col_b": "ModelB"}
         # (A, B) judged on samples 0 and 1 only; expect 2 and 3 to remain.
+        # min_chars=0 keeps the toy text (orthogonal to the blank filter).
         comps = build_comparisons(
-            ds, ocr_columns, skip_samples={("ModelA", "ModelB"): {0, 1}}
+            ds, ocr_columns, skip_samples={("ModelA", "ModelB"): {0, 1}}, min_chars=0
         )
         judged = {c.sample_idx for c in comps}
         assert judged == {2, 3}
@@ -287,7 +290,7 @@ class TestBuildComparisons:
             },
         ]
         ocr_columns = {"col_a": "A", "col_b": "B", "col_c": "C"}
-        comps = build_comparisons(ds, ocr_columns, skip_samples=None)
+        comps = build_comparisons(ds, ocr_columns, skip_samples=None, min_chars=0)
         assert len(comps) == 3  # All C(3,2) pairs
 
     def test_skip_all_pairs_skips_image_encoding(self):
@@ -307,3 +310,105 @@ class TestBuildComparisons:
                 ds, ocr_columns, skip_samples={("ModelA", "ModelB"): {0}}
             )
             mock_img.assert_not_called()
+
+
+class TestBlankPairFiltering:
+    """min_chars: skip pairs where neither model produced meaningful text."""
+
+    LONG_A = "This is a full page of transcribed printed text."
+    LONG_B = "An entirely different long transcription of the page."
+
+    def _ds(self, text_a: str, text_b: str):
+        return [{"image": Image.new("RGB", (50, 50)), "col_a": text_a, "col_b": text_b}]
+
+    def test_both_below_threshold_skipped(self):
+        comps = build_comparisons(self._ds("short", "tiny"), {"col_a": "A", "col_b": "B"})
+        assert comps == []
+
+    def test_both_empty_skipped(self):
+        comps = build_comparisons(self._ds("", ""), {"col_a": "A", "col_b": "B"})
+        assert comps == []
+
+    def test_one_long_one_blank_kept(self):
+        # Empty vs full page is a real signal (the full-text model should win),
+        # so it must NOT be filtered — only both-below-threshold is skipped.
+        comps = build_comparisons(self._ds("", self.LONG_A), {"col_a": "A", "col_b": "B"})
+        assert len(comps) == 1
+        assert comps[0].auto_result is None
+
+    def test_both_long_distinct_kept_for_judging(self):
+        comps = build_comparisons(
+            self._ds(self.LONG_A, self.LONG_B), {"col_a": "A", "col_b": "B"}
+        )
+        assert len(comps) == 1
+        assert comps[0].auto_result is None
+        assert comps[0].messages  # image + prompt built
+
+    def test_custom_min_chars_threshold(self):
+        # "hello world" (11 chars) survives a threshold of 5 but not the default.
+        ds = self._ds("hello world", "goodbye moon")
+        assert build_comparisons(ds, {"col_a": "A", "col_b": "B"}, min_chars=5) != []
+        assert build_comparisons(ds, {"col_a": "A", "col_b": "B"}, min_chars=20) == []
+
+
+class TestAutoTie:
+    """Identical outputs become an auto-tie without a judge call."""
+
+    LONG = "This is a full page of transcribed printed text, identical."
+
+    def _ds(self, text_a: str, text_b: str):
+        return [{"image": Image.new("RGB", (50, 50)), "col_a": text_a, "col_b": text_b}]
+
+    def test_identical_outputs_auto_tie_shape(self):
+        comps = build_comparisons(self._ds(self.LONG, self.LONG), {"col_a": "A", "col_b": "B"})
+        assert len(comps) == 1
+        comp = comps[0]
+        assert comp.auto_result == {
+            "winner": "tie",
+            "reason": "identical outputs — auto-tie",
+            "agreement": "auto",
+        }
+        assert comp.messages == []  # never sent to the judge
+        assert comp.swapped is False
+
+    def test_identical_after_strip(self):
+        # Whitespace-only differences still count as identical.
+        comps = build_comparisons(
+            self._ds(self.LONG, f"  {self.LONG}\n"), {"col_a": "A", "col_b": "B"}
+        )
+        assert len(comps) == 1
+        assert comps[0].auto_result is not None
+
+    def test_all_auto_tie_row_skips_image_encoding(self):
+        from unittest.mock import patch
+
+        with patch("ocr_bench.judge.image_to_base64") as mock_img:
+            comps = build_comparisons(
+                self._ds(self.LONG, self.LONG), {"col_a": "A", "col_b": "B"}
+            )
+            mock_img.assert_not_called()
+        assert comps[0].auto_result is not None
+
+    def test_identical_but_short_is_skipped_not_auto_tie(self):
+        # Both below min_chars wins over the identical check — a blank/near-blank
+        # page shouldn't pad the tie count.
+        comps = build_comparisons(self._ds("abc", "abc"), {"col_a": "A", "col_b": "B"})
+        assert comps == []
+
+    def test_mixed_row_encodes_image_once(self):
+        # One identical pair (auto-tie) + one distinct pair (judged) on the same
+        # row: the image is still needed for the judged pair.
+        ds = [
+            {
+                "image": Image.new("RGB", (50, 50)),
+                "col_a": self.LONG,
+                "col_b": self.LONG,
+                "col_c": "A different long transcription for the third model here.",
+            }
+        ]
+        comps = build_comparisons(ds, {"col_a": "A", "col_b": "B", "col_c": "C"})
+        autos = [c for c in comps if c.auto_result is not None]
+        judged = [c for c in comps if c.auto_result is None]
+        assert len(autos) == 1  # A vs B identical
+        assert len(judged) == 2  # A vs C, B vs C
+        assert all(c.messages for c in judged)

@@ -278,6 +278,17 @@ def launch_ocr_jobs(
 _TERMINAL_STAGES = frozenset({"COMPLETED", "ERROR", "CANCELED", "DELETED"})
 
 
+def failed_jobs(jobs: list[JobRun]) -> list[JobRun]:
+    """Return the jobs that did not finish in the COMPLETED state.
+
+    ``poll_jobs`` records the terminal stage lowercased ("completed", "error",
+    "canceled", "deleted"); anything other than "completed" is a failure. A
+    still-"running" job (one that was never polled) also counts as not
+    completed.
+    """
+    return [j for j in jobs if j.status != "completed"]
+
+
 def poll_jobs(
     jobs: list[JobRun],
     *,
