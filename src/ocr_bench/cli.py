@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from typing import TYPE_CHECKING
 
 import structlog
 from openai import OpenAIError
@@ -38,6 +39,9 @@ from ocr_bench.publish import (
     publish_checkpoint,
     publish_results,
 )
+
+if TYPE_CHECKING:
+    from ocr_bench.run import JobRun
 
 logger = structlog.get_logger()
 console = Console()
@@ -835,6 +839,17 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 f"[dim]{n_auto_total} identical outputs auto-tied (no judge call)[/dim]"
             )
 
+    # No new verdicts and nothing already on file → don't publish an empty
+    # (all-1500 ELO) board. The standard path guards before judging; this also
+    # catches the adaptive path when every batch was filtered out (e.g. an
+    # aggressive --min-chars on a blank-heavy dataset) or a budget so small
+    # everything was trimmed. Budget-exhausted WITH results still publishes.
+    if not new_results and not existing_results:
+        console.print(
+            "[yellow]No valid comparisons — check that OCR columns have text.[/yellow]"
+        )
+        return
+
     # A run that lands EXACTLY on the budget (e.g. the final batch fills it, or a
     # non-adaptive build produces exactly N comparisons) never trips the mid-loop
     # trim/break, so catch the exhausted state here for both paths.
@@ -874,6 +889,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             valid_comparisons=len(new_results) - n_auto_total,
             max_comparisons=max_comparisons,
             budget_exhausted=budget_exhausted,
+            auto_tied=n_auto_total,
             from_prs=from_prs,
         )
         publish_results(
@@ -887,8 +903,30 @@ def cmd_judge(args: argparse.Namespace) -> None:
         _refresh_viewer_space(results_repo)
 
 
-def cmd_run(args: argparse.Namespace) -> None:
-    """Launch OCR models on a dataset via HF Jobs."""
+def _print_job_summary(jobs: list[JobRun]) -> list[JobRun]:
+    """Print a per-job status line after a run (failures in red).
+
+    Returns the jobs that did not complete, so callers can decide what to do.
+    """
+    from ocr_bench.run import failed_jobs
+
+    for job in jobs:
+        if job.status == "completed":
+            console.print(f"  [green]✓[/green] {job.model_slug}: {job.status}")
+        else:
+            console.print(f"  [red]✗ {job.model_slug}: {job.status}[/red]")
+    failed = failed_jobs(jobs)
+    if failed:
+        console.print(
+            f"\n[bold red]{len(failed)} of {len(jobs)} job(s) did not complete.[/bold red]"
+        )
+    else:
+        console.print(f"\n[bold green]All {len(jobs)} job(s) completed.[/bold green]")
+    return failed
+
+
+def cmd_run(args: argparse.Namespace) -> list[JobRun]:
+    """Launch OCR models on a dataset via HF Jobs. Returns the launched jobs."""
     from ocr_bench.run import (
         DEFAULT_MODELS,
         MODEL_REGISTRY,
@@ -913,7 +951,7 @@ def cmd_run(args: argparse.Namespace) -> None:
 
         console.print(table)
         console.print(f"\nDefault set: {', '.join(DEFAULT_MODELS)}")
-        return
+        return []
 
     selected = args.models or DEFAULT_MODELS
     for slug in selected:
@@ -956,7 +994,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             console.print(f"  Args:    {' '.join(script_args)}")
             console.print()
         console.print("Remove --dry-run to launch these jobs.")
-        return
+        return []
 
     # Launch
     jobs = launch_ocr_jobs(
@@ -978,13 +1016,17 @@ def cmd_run(args: argparse.Namespace) -> None:
     if not args.no_wait:
         console.print("\n[bold]Waiting for jobs to complete...[/bold]")
         poll_jobs(jobs)
-        console.print("\n[bold green]All jobs finished![/bold green]")
-        console.print("\nEvaluate:")
-        console.print(f"  ocr-bench judge {args.output_repo}")
+        console.print("\n[bold]Job results:[/bold]")
+        failed = _print_job_summary(jobs)
+        if not failed:
+            console.print("\nEvaluate:")
+            console.print(f"  ocr-bench judge {args.output_repo}")
     else:
         console.print("\nJobs running in background.")
         console.print("Check status at: https://huggingface.co/settings/jobs")
         console.print(f"When complete: ocr-bench judge {args.output_repo}")
+
+    return jobs
 
 
 def cmd_view(args: argparse.Namespace) -> None:
@@ -1075,13 +1117,34 @@ def cmd_bench(args: argparse.Namespace) -> None:
     parser = build_parser()
 
     # --- Phase 1: run OCR models (waits for jobs to finish by default) ---
+    from ocr_bench.run import failed_jobs
+
     run_argv = ["run", args.input_dataset, args.output_repo, "--seed", str(args.seed)]
     if args.models:
         run_argv += ["--models", *args.models]
     if args.max_samples is not None:
         run_argv += ["--max-samples", str(args.max_samples)]
     console.rule("[bold]1/3 Run[/bold]")
-    cmd_run(parser.parse_args(run_argv))
+    jobs = cmd_run(parser.parse_args(run_argv)) or []
+
+    # Abort before judging if any model failed — a silently incomplete
+    # leaderboard is the worst outcome for the "just try it" path.
+    failed = failed_jobs(jobs)
+    if failed:
+        slugs = ", ".join(j.model_slug for j in failed)
+        console.print(
+            f"\n[bold red]Aborting: {len(failed)} of {len(jobs)} OCR job(s) did not "
+            f"complete ({slugs}).[/bold red] A partial run would produce a "
+            "misleading leaderboard, so bench stops here."
+        )
+        retry = " ".join(j.model_slug for j in failed)
+        console.print(
+            "\nRe-run just the failed models:\n"
+            f"  ocr-bench run {args.input_dataset} {args.output_repo} --models {retry}\n"
+            "or judge the models that did succeed:\n"
+            f"  ocr-bench judge {args.output_repo} --from-prs"
+        )
+        return
 
     # --- Phase 2: judge the OCR outputs (from the PRs the run just opened) ---
     judge_argv = [

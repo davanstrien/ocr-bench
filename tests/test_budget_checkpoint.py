@@ -61,8 +61,16 @@ class FakeJudge:
 
 
 def make_ds(n: int = 10, models: tuple[str, ...] = ("a", "b", "c")):
-    """Build a FakeDataset with `n` rows and one text column per model."""
-    cols = {f"col_{m}": [f"text {m} {i}" for i in range(n)] for m in models}
+    """Build a FakeDataset with `n` rows and one text column per model.
+
+    Text is kept well above the default ``--min-chars`` threshold and distinct
+    per (model, sample) so every pair is judged — these tests exercise budget /
+    checkpoint / resume mechanics, not the blank-pair or auto-tie filters.
+    """
+    cols = {
+        f"col_{m}": [f"OCR transcription output for model {m}, sample {i}" for i in range(n)]
+        for m in models
+    }
     ocr_columns = {f"col_{m}": f"model-{m}" for m in models}
     return FakeDataset(n, cols), ocr_columns
 

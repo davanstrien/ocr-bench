@@ -10,6 +10,7 @@ from ocr_bench.run import (
     JobRun,
     ModelConfig,
     build_script_args,
+    failed_jobs,
     launch_ocr_jobs,
     list_models,
     poll_jobs,
@@ -258,6 +259,24 @@ class TestPollJobs:
         result = poll_jobs(jobs, interval=1, api=mock_api)
         assert result[0].status == "completed"
         assert mock_sleep.call_count == 2
+
+
+class TestFailedJobs:
+    def test_all_completed_none_failed(self):
+        jobs = [JobRun("a", "1", "u", "completed"), JobRun("b", "2", "u", "completed")]
+        assert failed_jobs(jobs) == []
+
+    def test_returns_non_completed_in_order(self):
+        jobs = [
+            JobRun("a", "1", "u", "completed"),
+            JobRun("b", "2", "u", "error"),
+            JobRun("c", "3", "u", "canceled"),
+        ]
+        assert [j.model_slug for j in failed_jobs(jobs)] == ["b", "c"]
+
+    def test_running_counts_as_not_completed(self):
+        # A never-polled job keeps status "running" — not a success.
+        assert failed_jobs([JobRun("a", "1", "u")]) == [JobRun("a", "1", "u")]
 
 
 class TestCLIParser:

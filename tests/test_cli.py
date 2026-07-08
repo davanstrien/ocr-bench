@@ -14,6 +14,7 @@ from ocr_bench.cli import (
     _merge_auto_ties,
     _refresh_viewer_space,
     _resolve_results_repo,
+    _trim_to_budget,
     build_parser,
 )
 from ocr_bench.elo import compute_elo
@@ -324,6 +325,40 @@ class TestMergeAutoTies:
         assert _merge_auto_ties(comps, []) == [_AUTO_TIE, _AUTO_TIE]
 
 
+class TestTrimToBudget:
+    """The budget caps judge calls; auto-ties are free and always survive."""
+
+    def test_under_budget_unchanged(self):
+        comps = [_make_comparison(i) for i in range(3)]  # 3 judgeable
+        out, hit = _trim_to_budget(comps, 5)
+        assert out is comps
+        assert hit is False
+
+    def test_caps_judged_but_keeps_every_auto_tie(self):
+        # 3 judgeable + 2 auto-ties, budget of 1 judge call.
+        comps = [
+            _make_comparison(0),  # judged
+            _auto_comparison(1),  # auto-tie
+            _make_comparison(2),  # judged
+            _auto_comparison(3),  # auto-tie
+            _make_comparison(4),  # judged
+        ]
+        out, hit = _trim_to_budget(comps, 1)
+        assert hit is True
+        judged = [c for c in out if c.auto_result is None]
+        autos = [c for c in out if c.auto_result is not None]
+        assert len(judged) == 1  # capped at the budget
+        assert len(autos) == 2  # every auto-tie kept — they cost no judge call
+        assert judged[0].sample_idx == 0  # order preserved
+
+    def test_all_auto_ties_never_trimmed(self):
+        # Zero judge budget, but auto-ties don't count against it.
+        comps = [_auto_comparison(i) for i in range(4)]
+        out, hit = _trim_to_budget(comps, 0)
+        assert out is comps
+        assert hit is False
+
+
 class TestAutoTieElo:
     def test_auto_tie_flows_into_elo_as_tie(self):
         """End to end: an auto-tie comparison scores as an ordinary tie."""
@@ -382,9 +417,17 @@ class TestBenchParser:
 class TestCmdBench:
     """cmd_bench chains run → judge → view, threading shared flags."""
 
-    def _patch(self, monkeypatch):
+    def _patch(self, monkeypatch, run_jobs=None):
+        from ocr_bench.run import JobRun
+
         calls: list[tuple[str, object]] = []
-        monkeypatch.setattr(cli, "cmd_run", lambda a: calls.append(("run", a)))
+        jobs = run_jobs if run_jobs is not None else [JobRun("glm-ocr", "j1", "u", "completed")]
+
+        def rec_run(a):
+            calls.append(("run", a))
+            return jobs
+
+        monkeypatch.setattr(cli, "cmd_run", rec_run)
         monkeypatch.setattr(cli, "cmd_judge", lambda a: calls.append(("judge", a)))
         monkeypatch.setattr(cli, "cmd_view", lambda a: calls.append(("view", a)))
         return calls
@@ -438,3 +481,88 @@ class TestCmdBench:
         assert judge_a.models == ["novita:org/m"]  # judge --model, dest=models
         assert judge_a.max_samples == 25
         assert judge_a.seed == 7
+
+    def test_aborts_when_a_job_fails(self, monkeypatch, capsys):
+        """A failed OCR job must stop bench before judging — a partial
+        leaderboard is the worst outcome for the 'just try it' path."""
+        from ocr_bench.run import JobRun
+
+        run_jobs = [
+            JobRun("glm-ocr", "j1", "u", "completed"),
+            JobRun("dots-ocr", "j2", "u", "error"),
+        ]
+        calls = self._patch(monkeypatch, run_jobs=run_jobs)
+        args = build_parser().parse_args(["bench", "user/imgs", "user/out"])
+        cli.cmd_bench(args)
+        # Only the run phase ran — no judge, no view.
+        assert [c[0] for c in calls] == ["run"]
+        out = capsys.readouterr().out
+        assert "Aborting" in out
+        assert "dots-ocr" in out  # names the failed model
+
+
+class TestCmdRun:
+    """cmd_run returns the launched jobs and prints a per-job status summary."""
+
+    def _run(self, monkeypatch, statuses):
+        from ocr_bench.run import JobRun
+
+        launched = [
+            JobRun(slug, f"j{i}", f"u{i}")
+            for i, slug in enumerate(["glm-ocr", "dots-ocr"])
+        ]
+
+        def fake_launch(*a, **k):
+            return launched
+
+        def fake_poll(jobs, **k):
+            for job, status in zip(jobs, statuses):
+                job.status = status
+            return jobs
+
+        monkeypatch.setattr("ocr_bench.run.launch_ocr_jobs", fake_launch)
+        monkeypatch.setattr("ocr_bench.run.poll_jobs", fake_poll)
+        args = build_parser().parse_args(
+            ["run", "in/ds", "out/repo", "--models", "glm-ocr", "dots-ocr"]
+        )
+        return cli.cmd_run(args), launched
+
+    def test_all_completed_returns_jobs_and_eval_hint(self, monkeypatch, capsys):
+        result, launched = self._run(monkeypatch, ["completed", "completed"])
+        assert result is launched
+        out = capsys.readouterr().out
+        assert "All 2 job(s) completed." in out
+        assert "Evaluate:" in out
+
+    def test_failed_job_flagged_and_no_eval_hint(self, monkeypatch, capsys):
+        result, launched = self._run(monkeypatch, ["completed", "error"])
+        assert result is launched
+        out = capsys.readouterr().out
+        assert "did not complete" in out
+        assert "Evaluate:" not in out  # don't suggest judging a partial run
+
+
+class TestCmdJudgeEmptyGuard:
+    def test_adaptive_all_filtered_does_not_publish_empty_board(self, monkeypatch, capsys):
+        """Aggressive filtering can leave the adaptive loop with zero results;
+        it must print the no-comparisons message, not an all-1500 board."""
+        from PIL import Image
+
+        ds = [
+            {"image": Image.new("RGB", (20, 20)), "a": "x", "b": "y"}
+            for _ in range(4)
+        ]
+
+        def fake_flat(dataset, split="train", columns=None):
+            return ds, {"a": "ModelA", "b": "ModelB"}
+
+        monkeypatch.setattr(cli, "load_flat_dataset", fake_flat)
+        # --no-publish keeps it offline; adaptive is on by default. Every text is
+        # 1 char (< default min_chars) so all batches filter to nothing.
+        args = build_parser().parse_args(
+            ["judge", "user/ds", "--columns", "a", "b", "--no-publish"]
+        )
+        cli.cmd_judge(args)
+        out = capsys.readouterr().out
+        assert "No valid comparisons" in out
+        assert "OCR Model Leaderboard" not in out

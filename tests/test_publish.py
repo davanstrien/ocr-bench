@@ -132,6 +132,29 @@ class TestBuildMetadataRow:
         assert row["max_comparisons"] == 12
         assert row["budget_exhausted"] is True
 
+    def test_auto_tied_defaults_zero(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=[],
+            seed=42,
+            max_samples=0,
+            total_comparisons=0,
+            valid_comparisons=0,
+        )
+        assert build_metadata_row(meta)["auto_tied"] == 0
+
+    def test_auto_tied_recorded(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=["j"],
+            seed=42,
+            max_samples=10,
+            total_comparisons=8,
+            valid_comparisons=8,
+            auto_tied=2,
+        )
+        assert build_metadata_row(meta)["auto_tied"] == 2
+
 
 class TestAlignMetadataRows:
     def test_union_of_keys_filled_with_none(self):
@@ -248,6 +271,28 @@ class TestPublishResults:
         assert len(meta_rows) == 2
         assert meta_rows[0]["source_dataset"] == "repo/data"
 
+    @patch("ocr_bench.publish.HfApi")
+    @patch("ocr_bench.publish.Dataset")
+    def test_aligns_auto_tied_across_metadata_rows(self, mock_ds_cls, mock_api_cls):
+        board = _make_board()
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=["j2"],
+            seed=42,
+            max_samples=10,
+            total_comparisons=5,
+            valid_comparisons=4,
+            auto_tied=1,
+        )
+        # Older row written before auto_tied existed — _align_metadata_rows must
+        # give it the key (filled None) so the appended schema stays consistent.
+        existing_meta = [{"source_dataset": "repo/data", "judge_models": '["j1"]'}]
+        publish_results("user/results", board, meta, existing_metadata=existing_meta)
+
+        meta_rows = mock_ds_cls.from_list.call_args_list[-1].args[0]
+        assert meta_rows[0]["auto_tied"] is None  # aligned onto the old row
+        assert meta_rows[1]["auto_tied"] == 1  # this run's count
+
 
 class TestLoadExistingComparisons:
     @patch("ocr_bench.publish.load_dataset")
@@ -351,3 +396,34 @@ class TestBuildReadme:
         readme = _build_readme("user/results", rows, board, self._make_metadata())
         assert "weird\\|name" in readme
         assert "| weird|name |" not in readme
+
+    def test_comparisons_plain_count_when_no_auto_ties(self):
+        """No auto-ties → a single total, no breakdown (avoids "N + 0")."""
+        from ocr_bench.publish import _build_readme
+
+        board = _make_board()  # 1 comparison, no "auto" agreement
+        rows = build_leaderboard_rows(board)
+        readme = _build_readme("user/results", rows, board, self._make_metadata())
+        assert "- **Comparisons**: 1" in readme
+        assert "auto-tied" not in readme
+
+    def test_comparisons_breakdown_when_auto_ties_present(self):
+        """Auto-ties derived from the log (agreement == "auto") are reported
+        separately from judged comparisons, resolving the metadata mismatch."""
+        from ocr_bench.publish import _build_readme
+
+        board = Leaderboard(
+            elo={"model-a": 1500.0, "model-b": 1500.0},
+            wins={"model-a": 1, "model-b": 0},
+            losses={"model-a": 0, "model-b": 1},
+            ties={"model-a": 1, "model-b": 1},
+            comparison_log=[
+                {"sample_idx": 0, "model_a": "model-a", "model_b": "model-b",
+                 "winner": "A", "agreement": "1/1"},
+                {"sample_idx": 1, "model_a": "model-a", "model_b": "model-b",
+                 "winner": "tie", "agreement": "auto"},
+            ],
+        )
+        rows = build_leaderboard_rows(board)
+        readme = _build_readme("user/results", rows, board, self._make_metadata())
+        assert "- **Comparisons**: 1 judged + 1 auto-tied (2 total)" in readme
