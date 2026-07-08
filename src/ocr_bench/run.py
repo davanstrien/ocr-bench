@@ -133,6 +133,12 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         python=_VLLM_OPENAI_PYTHON,
         env=_VLLM_OPENAI_ENV,
     ),
+    "olmocr-2": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/olmocr2-vllm.py",
+        model_id="allenai/olmOCR-2-7B-1025-FP8",
+        size="8.3B",
+        default_flavor="l4x1",
+    ),
     # Classical (non-VLM) baselines
     "tesseract": ModelConfig(
         script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/tesseract-ocr.py",
