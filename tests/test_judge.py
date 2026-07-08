@@ -219,8 +219,8 @@ class TestBuildComparisons:
         comps = build_comparisons(ds, {"col_a": "A", "col_b": "B"}, max_samples=3)
         assert len(comps) == 3
 
-    def test_skip_pairs_excludes_pair(self):
-        """skip_pairs should exclude the specified model pair."""
+    def test_skip_samples_excludes_judged_pair_sample(self):
+        """skip_samples excludes the exact (pair, sample) already judged."""
         ds = [
             {
                 "image": Image.new("RGB", (50, 50)),
@@ -230,16 +230,16 @@ class TestBuildComparisons:
             },
         ]
         ocr_columns = {"col_a": "ModelA", "col_b": "ModelB", "col_c": "ModelC"}
-        # 3 models = 3 pairs. Skip one.
+        # 3 models = 3 pairs; sample 0 of (A, B) already judged.
         comps = build_comparisons(
-            ds, ocr_columns, skip_pairs={("ModelA", "ModelB")}
+            ds, ocr_columns, skip_samples={("ModelA", "ModelB"): {0}}
         )
         pair_set = {(c.model_a, c.model_b) for c in comps}
         assert ("ModelA", "ModelB") not in pair_set
         assert len(comps) == 2  # ModelA-ModelC, ModelB-ModelC
 
-    def test_skip_pairs_symmetric(self):
-        """Skipping (A, B) should also skip (B, A)."""
+    def test_skip_samples_symmetric(self):
+        """Skipping (A, B) sample 0 should also skip (B, A) sample 0."""
         ds = [
             {
                 "image": Image.new("RGB", (50, 50)),
@@ -248,14 +248,36 @@ class TestBuildComparisons:
             },
         ]
         ocr_columns = {"col_a": "ModelA", "col_b": "ModelB"}
-        # Skip in reverse order
+        # Skip in reverse pair order.
         comps = build_comparisons(
-            ds, ocr_columns, skip_pairs={("ModelB", "ModelA")}
+            ds, ocr_columns, skip_samples={("ModelB", "ModelA"): {0}}
         )
         assert len(comps) == 0
 
-    def test_skip_pairs_none_includes_all(self):
-        """Default skip_pairs=None should include all pairs."""
+    def test_skip_samples_tops_up_unjudged_samples(self):
+        """A pair judged on only some samples is still built for the rest.
+
+        This is the resume top-up guarantee: (pair, sample)-level skip, not
+        pair-level — a partially-judged pair is not frozen forever.
+        """
+        ds = [
+            {
+                "image": Image.new("RGB", (50, 50)),
+                "col_a": f"text a {i}",
+                "col_b": f"text b {i}",
+            }
+            for i in range(4)
+        ]
+        ocr_columns = {"col_a": "ModelA", "col_b": "ModelB"}
+        # (A, B) judged on samples 0 and 1 only; expect 2 and 3 to remain.
+        comps = build_comparisons(
+            ds, ocr_columns, skip_samples={("ModelA", "ModelB"): {0, 1}}
+        )
+        judged = {c.sample_idx for c in comps}
+        assert judged == {2, 3}
+
+    def test_skip_samples_none_includes_all(self):
+        """Default skip_samples=None should include all pairs."""
         ds = [
             {
                 "image": Image.new("RGB", (50, 50)),
@@ -265,7 +287,7 @@ class TestBuildComparisons:
             },
         ]
         ocr_columns = {"col_a": "A", "col_b": "B", "col_c": "C"}
-        comps = build_comparisons(ds, ocr_columns, skip_pairs=None)
+        comps = build_comparisons(ds, ocr_columns, skip_samples=None)
         assert len(comps) == 3  # All C(3,2) pairs
 
     def test_skip_all_pairs_skips_image_encoding(self):
@@ -282,6 +304,6 @@ class TestBuildComparisons:
 
         with patch("ocr_bench.judge.image_to_base64") as mock_img:
             build_comparisons(
-                ds, ocr_columns, skip_pairs={("ModelA", "ModelB")}
+                ds, ocr_columns, skip_samples={("ModelA", "ModelB"): {0}}
             )
             mock_img.assert_not_called()
