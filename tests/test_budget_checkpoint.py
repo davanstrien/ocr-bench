@@ -15,7 +15,7 @@ from PIL import Image
 from ocr_bench import cli
 from ocr_bench.cli import build_parser
 from ocr_bench.elo import ComparisonResult
-from ocr_bench.judge import _normalize_pair
+from ocr_bench.judge import CRITERIA_PROFILES, _normalize_pair, prompt_hash
 
 
 class FakeDataset:
@@ -340,3 +340,90 @@ class TestResume:
         # --full-rejudge drops the skip map, so all 3 pairs x 10 samples = 30.
         assert judge.judged == 30
         assert ("model-a", "model-b") in judge.pairs_seen
+
+
+class TestCriteriaProvenanceGuard:
+    """cmd_judge must refuse to mix criteria rubrics on one results repo (#44 review).
+
+    Judging an existing results repo under a different --criteria than its
+    comparisons were scored with would merge incompatible rubrics into one ELO
+    board and mislabel the metadata. The guard exits before judging/publishing;
+    --full-rejudge (which discards existing results) is the only safe rubric swap.
+    """
+
+    _DEFAULT_HASH = prompt_hash(CRITERIA_PROFILES["default"])
+    _TABLE_HASH = prompt_hash(CRITERIA_PROFILES["table-fidelity"])
+
+    def _run(self, argv_extra, *, existing, existing_meta):
+        """Drive cmd_judge with a 2-model dataset, catching a guard SystemExit."""
+        ds, ocr = make_ds(n=4, models=("a", "b"))
+        judge = FakeJudge()
+        argv = [
+            "judge", "user/ds", "--columns", *ocr.keys(),
+            "--save-results", "user/results", "--no-adaptive",
+            "--checkpoint-every", "0", *argv_extra,
+        ]
+        args = build_parser().parse_args(argv)
+        exit_code: int | str | None = None
+        with (
+            patch.object(cli, "load_flat_dataset", return_value=(ds, ocr)),
+            patch.object(cli, "parse_judge_spec", return_value=judge),
+            patch.object(cli, "load_existing_comparisons", return_value=existing),
+            patch.object(cli, "load_existing_metadata", return_value=existing_meta),
+            patch.object(cli, "publish_results") as m_publish,
+            patch.object(cli, "publish_checkpoint"),
+        ):
+            try:
+                cli.cmd_judge(args)
+            except SystemExit as exc:
+                exit_code = exc.code
+        return judge, m_publish, exit_code
+
+    def _existing_one_pair(self):
+        # (model-a, model-b) judged on sample 0 only, so a matching-criteria run
+        # still has samples 1-3 to top up (proves it proceeds to judge+publish).
+        return [
+            ComparisonResult(sample_idx=0, model_a="model-a", model_b="model-b", winner="A")
+        ]
+
+    def test_mismatch_exits_without_judging_or_publishing(self):
+        judge, m_publish, code = self._run(
+            ["--criteria", "table-fidelity"],
+            existing=self._existing_one_pair(),
+            existing_meta=[{"criteria": "default", "prompt_hash": self._DEFAULT_HASH}],
+        )
+        assert code == 1
+        assert judge.judged == 0  # exited before any judge call
+        m_publish.assert_not_called()
+
+    def test_pre_44_none_rows_treated_as_default_so_default_run_proceeds(self):
+        # Genuinely pre-#44 metadata: no criteria/prompt_hash columns → default.
+        _, m_publish, code = self._run(
+            [],  # no --criteria → default
+            existing=self._existing_one_pair(),
+            existing_meta=[{"source_dataset": "user/ds"}],
+        )
+        assert code is None
+        m_publish.assert_called_once()
+
+    def test_matching_criteria_proceeds(self):
+        _, m_publish, code = self._run(
+            ["--criteria", "table-fidelity"],
+            existing=self._existing_one_pair(),
+            existing_meta=[{"criteria": "table-fidelity", "prompt_hash": self._TABLE_HASH}],
+        )
+        assert code is None
+        m_publish.assert_called_once()
+        assert m_publish.call_args.args[2].criteria == "table-fidelity"
+
+    def test_full_rejudge_bypasses_guard(self):
+        # Metadata says default, run requests table-fidelity — normally blocked,
+        # but --full-rejudge never loads existing results, so no guard fires.
+        _, m_publish, code = self._run(
+            ["--criteria", "table-fidelity", "--full-rejudge"],
+            existing=self._existing_one_pair(),
+            existing_meta=[{"criteria": "default", "prompt_hash": self._DEFAULT_HASH}],
+        )
+        assert code is None
+        m_publish.assert_called_once()
+        assert m_publish.call_args.args[2].criteria == "table-fidelity"

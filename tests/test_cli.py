@@ -11,6 +11,7 @@ from openai import OpenAIError
 from ocr_bench import cli
 from ocr_bench.cli import (
     _convert_results,
+    _existing_criteria_provenance,
     _merge_auto_ties,
     _refresh_viewer_space,
     _resolve_results_repo,
@@ -18,7 +19,7 @@ from ocr_bench.cli import (
     build_parser,
 )
 from ocr_bench.elo import compute_elo
-from ocr_bench.judge import Comparison
+from ocr_bench.judge import CRITERIA_PROFILES, DEFAULT_CRITERIA, Comparison, prompt_hash
 
 
 class TestBuildParser:
@@ -183,6 +184,32 @@ class TestResolveResultsRepo:
     def test_no_publish_overrides_explicit(self):
         result = _resolve_results_repo("user/my-dataset", "user/custom", True)
         assert result is None
+
+
+class TestExistingCriteriaProvenance:
+    """Reads the criteria/prompt_hash the existing comparisons were judged under."""
+
+    _DEFAULT_HASH = prompt_hash(CRITERIA_PROFILES[DEFAULT_CRITERIA])
+
+    def test_no_rows_is_default(self):
+        assert _existing_criteria_provenance([]) == (DEFAULT_CRITERIA, self._DEFAULT_HASH)
+
+    def test_reads_last_row(self):
+        rows = [
+            {"criteria": "default", "prompt_hash": self._DEFAULT_HASH},
+            {"criteria": "table-fidelity", "prompt_hash": "fe138e71ecc3"},
+        ]
+        assert _existing_criteria_provenance(rows) == ("table-fidelity", "fe138e71ecc3")
+
+    def test_none_values_treated_as_default(self):
+        # Post-alignment old rows carry explicit None for the new columns.
+        rows = [{"criteria": None, "prompt_hash": None}]
+        assert _existing_criteria_provenance(rows) == (DEFAULT_CRITERIA, self._DEFAULT_HASH)
+
+    def test_missing_keys_treated_as_default(self):
+        # Genuinely pre-#44 rows lack the columns entirely.
+        rows = [{"source_dataset": "d", "judge_models": "[]"}]
+        assert _existing_criteria_provenance(rows) == (DEFAULT_CRITERIA, self._DEFAULT_HASH)
 
 
 _AUTO_TIE = {"winner": "tie", "reason": "identical outputs — auto-tie", "agreement": "auto"}

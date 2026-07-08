@@ -27,6 +27,7 @@ from ocr_bench.dataset import (
 from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo, rankings_resolved
 from ocr_bench.judge import (
     CRITERIA_PROFILES,
+    DEFAULT_CRITERIA,
     DEFAULT_MIN_CHARS,
     Comparison,
     _normalize_pair,
@@ -471,6 +472,21 @@ def _unresolved_adjacent_pairs(board: Leaderboard) -> list[str]:
     return pairs
 
 
+def _existing_criteria_provenance(meta_rows: list[dict]) -> tuple[str, str]:
+    """The (criteria profile, prompt hash) the existing comparisons were judged under.
+
+    Reads the LAST metadata row. Pre-#44 rows lack these columns (or carry None
+    after schema alignment); treat them as the ``default`` profile — historically
+    accurate, since the default profile's prompt is byte-identical to the
+    pre-#44 hardcoded prompt. Used to block mixing criteria rubrics on one board.
+    """
+    default_hash = prompt_hash(CRITERIA_PROFILES[DEFAULT_CRITERIA])
+    if not meta_rows:
+        return DEFAULT_CRITERIA, default_hash
+    last = meta_rows[-1]
+    return (last.get("criteria") or DEFAULT_CRITERIA, last.get("prompt_hash") or default_hash)
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Orchestrate: load → compare → judge → elo → print → publish."""
     # --- Resolve flags ---
@@ -597,6 +613,29 @@ def cmd_judge(args: argparse.Namespace) -> None:
         # --full-rejudge forces a clean re-run (ignores all existing).
         existing_results = load_existing_comparisons(results_repo)
         if existing_results:
+            existing_meta_rows = load_existing_metadata(results_repo)
+            # Provenance guard: NEVER mix criteria rubrics on one board. The
+            # existing comparisons were judged under the profile recorded in the
+            # last metadata row (pre-#44 rows = the default profile, whose prompt
+            # is byte-identical to the old hardcoded one). Judging the rest — or
+            # even just refitting — under a different --criteria would merge
+            # incompatible verdicts into one ELO board AND republish the metadata
+            # mislabeled with the current run's criteria. Refuse and exit; the
+            # only safe way to change rubric is --full-rejudge (discards existing).
+            prev_criteria, prev_hash = _existing_criteria_provenance(existing_meta_rows)
+            if (prev_criteria, prev_hash) != (criteria, criteria_prompt_hash):
+                console.print(
+                    f"[red]Error:[/red] criteria mismatch — [bold]{results_repo}[/bold] "
+                    f"was judged under criteria '[bold]{prev_criteria}[/bold]' "
+                    f"(prompt {prev_hash}), but this run requested "
+                    f"'[bold]{criteria}[/bold]' (prompt {criteria_prompt_hash}). "
+                    f"Mixing rubrics on one leaderboard would produce meaningless "
+                    f"rankings and mislabeled metadata.\n"
+                    f"Re-run with [bold]--criteria {prev_criteria}[/bold] to match the "
+                    f"existing results, or [bold]--full-rejudge[/bold] to discard them "
+                    f"and re-judge everything under '{criteria}'."
+                )
+                sys.exit(1)
             skip_samples = {}
             for r in existing_results:
                 skip_samples.setdefault(_normalize_pair(r.model_a, r.model_b), set()).add(
@@ -607,7 +646,6 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 f"across {len(skip_samples)} model pairs — skipping already-judged "
                 f"(pair, sample) combinations, topping up the rest."
             )
-            existing_meta_rows = load_existing_metadata(results_repo)
         else:
             console.print("\nNo existing comparisons found — full judge run.")
 

@@ -95,26 +95,26 @@ fabricating content is always worse.
 2. Completeness: ALL visible text must be captured — headers, footers, marginalia, \
 stamps, handwritten notes. Missing any section of text is a significant penalty.
 
-3. Accuracy: Correct characters, no garbled or fabricated words.
-
-4. Reading order: Text flows naturally as a human would read the document.
-
-5. Table fidelity: When the document contains tabular data, the extraction must \
+3. Table fidelity: When the document contains tabular data, the extraction must \
 preserve the table's row and column structure — each value must stay associated \
 with its correct row and column headers. A flattened table that runs cells \
 together so it is no longer clear which value belongs to which row or column is a \
-SIGNIFICANT error: rank it just below completeness in severity, well above a mere \
-formatting nitpick. Markup style is neutral: a well-aligned plain-text table \
+significant error. Markup style is neutral: a well-aligned plain-text table \
 (using spacing or simple separators) that preserves the cell relationships is just \
 as good as a markdown or HTML table — judge the preserved row/column relationships, \
-not the syntax used to express them. Ignore bounding box tags like <|ref|> <|det|> \
-if present, and for non-tabular text do not penalise or reward markdown markers \
-(#, **, *, etc.); plain and markdown-formatted text with the same words are \
-equivalent.
+not the syntax used to express them.
 
-If both outputs capture the same text with the same table structure and similar \
-accuracy, respond with "tie". Only pick a winner when there is a clear quality \
-difference.
+4. Accuracy: Correct characters, no garbled or fabricated words.
+
+5. Reading order: Text flows naturally as a human would read the document.
+
+Ignore bounding box tags like <|ref|> <|det|> if present. For non-tabular text, \
+do not penalise or reward markdown formatting markers (#, **, *, etc.) — plain \
+text and markdown-formatted text that contain the same words are equivalent.
+
+If both outputs capture the same text — including, where tables are present, the \
+same table structure — with similar accuracy, respond with "tie". Only pick a \
+winner when there is a clear quality difference.
 
 Output A:
 ---

@@ -177,11 +177,11 @@ class TestBuildMetadataRow:
             total_comparisons=12,
             valid_comparisons=12,
             criteria="table-fidelity",
-            prompt_hash="21dfdb7b4ec5",
+            prompt_hash="fe138e71ecc3",
         )
         row = build_metadata_row(meta)
         assert row["criteria"] == "table-fidelity"
-        assert row["prompt_hash"] == "21dfdb7b4ec5"
+        assert row["prompt_hash"] == "fe138e71ecc3"
 
 
 class TestAlignMetadataRows:
@@ -210,7 +210,7 @@ class TestAlignMetadataRows:
                 "source_dataset": "d",
                 "judge_models": '["j"]',
                 "criteria": "table-fidelity",
-                "prompt_hash": "21dfdb7b4ec5",
+                "prompt_hash": "fe138e71ecc3",
             },
         ]
         aligned = _align_metadata_rows(rows)
@@ -218,7 +218,7 @@ class TestAlignMetadataRows:
         assert aligned[0]["criteria"] is None
         assert aligned[0]["prompt_hash"] is None
         assert aligned[1]["criteria"] == "table-fidelity"
-        assert aligned[1]["prompt_hash"] == "21dfdb7b4ec5"
+        assert aligned[1]["prompt_hash"] == "fe138e71ecc3"
 
 
 class TestPublishCheckpoint:
@@ -496,7 +496,7 @@ class TestBuildReadme:
             total_comparisons=3,
             valid_comparisons=3,
             criteria="table-fidelity",
-            prompt_hash="21dfdb7b4ec5",
+            prompt_hash="fe138e71ecc3",
         )
         readme = _build_readme("user/results", rows, board, meta)
         assert "**Judge criteria**: table-fidelity" in readme
