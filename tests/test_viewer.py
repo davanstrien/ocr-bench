@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from ocr_bench.viewer import _filter_comparisons, _winner_badge, load_results
+from ocr_bench.viewer import (
+    _filter_comparisons,
+    _load_source_metadata,
+    _winner_badge,
+    load_results,
+)
 
 SAMPLE_LEADERBOARD = [
     {"model": "DeepSeek-OCR", "elo": 1539, "wins": 5, "losses": 2, "ties": 1, "win_pct": 63},
@@ -52,17 +57,19 @@ SAMPLE_COMPARISONS = [
 
 
 class TestLoadResults:
+    @patch("ocr_bench.viewer._latest_revision", return_value="sha123")
     @patch("ocr_bench.viewer.load_dataset")
-    def test_returns_leaderboard_and_comparisons(self, mock_load):
+    def test_returns_leaderboard_and_comparisons(self, mock_load, mock_rev):
         mock_lb_ds = MagicMock()
         mock_lb_ds.__iter__ = MagicMock(return_value=iter(SAMPLE_LEADERBOARD))
         mock_comp_ds = MagicMock()
         mock_comp_ds.__iter__ = MagicMock(return_value=iter(SAMPLE_COMPARISONS))
 
-        def side_effect(repo_id, name, split):
-            if name == "leaderboard":
-                return mock_lb_ds
-            return mock_comp_ds
+        def side_effect(repo_id, split=None, name=None, revision=None):
+            # First call has no name (default config) → leaderboard.
+            if name == "comparisons":
+                return mock_comp_ds
+            return mock_lb_ds
 
         mock_load.side_effect = side_effect
 
@@ -71,6 +78,38 @@ class TestLoadResults:
         assert lb[0]["model"] == "DeepSeek-OCR"
         assert len(comps) == 3
         assert comps[0]["text_a"] == "OCR text from DeepSeek"
+
+    @patch("ocr_bench.viewer._latest_revision", return_value="sha123")
+    @patch("ocr_bench.viewer.load_dataset")
+    def test_pins_every_load_to_resolved_revision(self, mock_load, mock_rev):
+        """load_results resolves the latest revision once and pins every load
+        to it, so a warm cache never serves stale results (issue #37)."""
+        mock_ds = MagicMock()
+        mock_ds.__iter__ = MagicMock(return_value=iter(SAMPLE_LEADERBOARD))
+        mock_load.return_value = mock_ds
+
+        load_results("user/results")
+
+        mock_rev.assert_called_once_with("user/results")
+        assert mock_load.call_args_list  # sanity: it did load
+        for call in mock_load.call_args_list:
+            assert call.kwargs.get("revision") == "sha123"
+
+
+class TestLoadSourceMetadata:
+    @patch("ocr_bench.viewer._latest_revision", return_value="sha456")
+    @patch("ocr_bench.viewer.load_dataset")
+    def test_pins_metadata_load_to_revision(self, mock_load, mock_rev):
+        mock_ds = MagicMock()
+        mock_ds.__len__ = MagicMock(return_value=1)
+        mock_ds.__getitem__ = MagicMock(return_value={"source_dataset": "user/source"})
+        mock_load.return_value = mock_ds
+
+        meta = _load_source_metadata("user/results")
+
+        assert meta["source_dataset"] == "user/source"
+        mock_rev.assert_called_once_with("user/results")
+        assert mock_load.call_args.kwargs.get("revision") == "sha456"
 
 
 class TestFilterComparisons:

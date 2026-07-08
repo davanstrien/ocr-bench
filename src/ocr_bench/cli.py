@@ -231,6 +231,58 @@ def _resolve_results_repo(dataset: str, save_results: str | None, no_publish: bo
     return f"{dataset}-results"
 
 
+def _refresh_viewer_space(results_repo: str) -> None:
+    """Keep the deployed ``{results}-viewer`` Space in sync after a judge run.
+
+    Two layers of the issue #37 fix:
+
+    - **Layer 0 (wiring-drift detector):** if the Space's ``REPOS`` variable is
+      set but points at a *different* dataset than the one just published,
+      restarting would faithfully reload the wrong data (the actual root cause
+      of the Britannica incident). Warn loudly and skip.
+    - **Layer 2 (freshness):** otherwise factory-reboot the Space so it reloads
+      the just-published results instead of a stale in-memory snapshot.
+
+    Wrapped so a Space hiccup (missing Space, transient Hub error) never fails
+    an otherwise-successful judge run.
+    """
+    space_id = f"{results_repo}-viewer"
+    try:
+        from huggingface_hub import HfApi
+
+        api = HfApi()
+        if not api.repo_exists(space_id, repo_type="space"):
+            logger.info("no_viewer_space", space=space_id)
+            return
+
+        variables = api.get_space_variables(space_id)
+        repos_var = variables.get("REPOS")
+        wired_repo = repos_var.value if repos_var is not None else None
+
+        if wired_repo and wired_repo != results_repo:
+            console.print(
+                f"\n[bold red]WARNING: viewer wiring drift[/bold red] — Space "
+                f"[bold]{space_id}[/bold] has REPOS=[yellow]{wired_repo}[/yellow] but "
+                f"results were just published to [yellow]{results_repo}[/yellow].\n"
+                f"The Space is wired to a different dataset; restarting it would "
+                f"reload the wrong results. [bold]Skipping restart[/bold] — fix the "
+                f"Space's REPOS variable to re-sync."
+            )
+            logger.warning(
+                "viewer_space_wiring_drift",
+                space=space_id,
+                wired_repo=wired_repo,
+                published_repo=results_repo,
+            )
+            return
+
+        api.restart_space(space_id, factory_reboot=True)
+        console.print(f"Restarted viewer Space [bold]{space_id}[/bold] to load fresh results.")
+        logger.info("restarted_viewer_space", space=space_id)
+    except Exception as exc:
+        logger.warning("viewer_space_refresh_failed", space=space_id, error=str(exc))
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Orchestrate: load → compare → judge → elo → print → publish."""
     # --- Resolve flags ---
@@ -448,6 +500,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     license_id=args.license,
                 )
                 console.print(f"\nResults published to [bold]{results_repo}[/bold]")
+                _refresh_viewer_space(results_repo)
             return
 
         if is_jury:
@@ -485,6 +538,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             license_id=args.license,
         )
         console.print(f"\nResults published to [bold]{results_repo}[/bold]")
+        _refresh_viewer_space(results_repo)
 
 
 def cmd_run(args: argparse.Namespace) -> None:
@@ -630,13 +684,30 @@ def cmd_publish(args: argparse.Namespace) -> None:
 
     api.add_space_variable(repo_id=space_id, key="REPOS", value=results)
 
-    # Update Space metadata to link to results dataset
+    # Resolve the source dataset from the results repo's metadata config so the
+    # deployed Space card cross-links to both the results and the source data
+    # (issue #38). A results repo always exists at this point; source may not
+    # resolve (older repos, private, transient error) — filter it out if so.
+    source_dataset = None
+    meta_rows = load_existing_metadata(results)
+    if meta_rows:
+        source_dataset = meta_rows[-1].get("source_dataset") or None
+
+    # De-dup while preserving order; drop Nones.
+    datasets_links: list[str] = []
+    for repo in (results, source_dataset):
+        if repo and repo not in datasets_links:
+            datasets_links.append(repo)
+
+    title = f"OCR Bench — {results.split('/')[-1]}"
+
+    # Update Space metadata to cross-link the results (and source) datasets.
     try:
         from huggingface_hub import metadata_update
 
         metadata_update(
             space_id,
-            {"datasets": [results], "tags": ["ocr-bench"]},
+            {"datasets": datasets_links, "tags": ["ocr-bench"], "title": title},
             repo_type="space",
             overwrite=True,
         )
