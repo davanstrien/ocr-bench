@@ -155,6 +155,34 @@ class TestBuildMetadataRow:
         )
         assert build_metadata_row(meta)["auto_tied"] == 2
 
+    def test_criteria_fields_default(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=[],
+            seed=42,
+            max_samples=0,
+            total_comparisons=0,
+            valid_comparisons=0,
+        )
+        row = build_metadata_row(meta)
+        assert row["criteria"] == "default"
+        assert row["prompt_hash"] == ""
+
+    def test_criteria_fields_recorded(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=["j"],
+            seed=42,
+            max_samples=10,
+            total_comparisons=12,
+            valid_comparisons=12,
+            criteria="table-fidelity",
+            prompt_hash="21dfdb7b4ec5",
+        )
+        row = build_metadata_row(meta)
+        assert row["criteria"] == "table-fidelity"
+        assert row["prompt_hash"] == "21dfdb7b4ec5"
+
 
 class TestAlignMetadataRows:
     def test_union_of_keys_filled_with_none(self):
@@ -172,6 +200,25 @@ class TestAlignMetadataRows:
 
     def test_empty(self):
         assert _align_metadata_rows([]) == []
+
+    def test_old_rows_lacking_criteria_columns_align_to_none(self):
+        """Pre-#44 metadata rows have no criteria/prompt_hash; alignment backfills
+        them with None rather than dropping the newer row's columns."""
+        rows = [
+            {"source_dataset": "d", "judge_models": '["j"]'},  # old row
+            {
+                "source_dataset": "d",
+                "judge_models": '["j"]',
+                "criteria": "table-fidelity",
+                "prompt_hash": "21dfdb7b4ec5",
+            },
+        ]
+        aligned = _align_metadata_rows(rows)
+        assert all("criteria" in r and "prompt_hash" in r for r in aligned)
+        assert aligned[0]["criteria"] is None
+        assert aligned[0]["prompt_hash"] is None
+        assert aligned[1]["criteria"] == "table-fidelity"
+        assert aligned[1]["prompt_hash"] == "21dfdb7b4ec5"
 
 
 class TestPublishCheckpoint:
@@ -427,3 +474,29 @@ class TestBuildReadme:
         rows = build_leaderboard_rows(board)
         readme = _build_readme("user/results", rows, board, self._make_metadata())
         assert "- **Comparisons**: 1 judged + 1 auto-tied (2 total)" in readme
+
+    def test_surfaces_default_criteria(self):
+        from ocr_bench.publish import _build_readme
+
+        board = _make_board()
+        rows = build_leaderboard_rows(board)
+        readme = _build_readme("user/results", rows, board, self._make_metadata())
+        assert "**Judge criteria**: default" in readme
+
+    def test_surfaces_table_fidelity_criteria(self):
+        from ocr_bench.publish import _build_readme
+
+        board = _make_board()
+        rows = build_leaderboard_rows(board)
+        meta = EvalMetadata(
+            source_dataset="user/data",
+            judge_models=["org/judge"],
+            seed=42,
+            max_samples=10,
+            total_comparisons=3,
+            valid_comparisons=3,
+            criteria="table-fidelity",
+            prompt_hash="21dfdb7b4ec5",
+        )
+        readme = _build_readme("user/results", rows, board, meta)
+        assert "**Judge criteria**: table-fidelity" in readme

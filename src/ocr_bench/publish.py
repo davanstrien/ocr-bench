@@ -47,6 +47,11 @@ class EvalMetadata:
     max_comparisons: int | None = None
     budget_exhausted: bool = False
     from_prs: bool = False
+    # Judge prompt provenance: which criteria profile (--criteria) was used and a
+    # stable hash of the exact prompt template. Two boards judged under different
+    # prompts share a judge model but differ here, so they stay distinguishable.
+    criteria: str = "default"
+    prompt_hash: str = ""
     timestamp: str = ""
 
     def __post_init__(self):
@@ -141,6 +146,8 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
         "max_comparisons": metadata.max_comparisons,
         "budget_exhausted": metadata.budget_exhausted,
         "from_prs": metadata.from_prs,
+        "criteria": metadata.criteria,
+        "prompt_hash": metadata.prompt_hash,
         "timestamp": metadata.timestamp,
     }
 
@@ -344,6 +351,7 @@ def _build_readme(
         f"- **Source dataset**: [`{metadata.source_dataset}`]"
         f"(https://huggingface.co/datasets/{metadata.source_dataset})",
         f"- **Judge**: {judge_str}",
+        f"- **Judge criteria**: {metadata.criteria}",
         f"- **Comparisons**: {comparisons_str}",
         "- **Method**: Bradley-Terry MLE with bootstrap 95% CIs",
         "",

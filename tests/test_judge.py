@@ -5,13 +5,21 @@ import json
 from PIL import Image
 
 from ocr_bench.judge import (
+    CRITERIA_PROFILES,
+    DEFAULT_CRITERIA,
     Comparison,
     build_comparisons,
     build_messages,
     build_prompt,
     image_to_base64,
     parse_judge_output,
+    prompt_hash,
 )
+
+# sha256(default prompt template)[:12] — pins the exact bytes of the default
+# criteria profile. If the default prompt is edited, this fails loudly; the new
+# value is intentional churn, not an accident.
+DEFAULT_PROMPT_HASH = "8d86832723b5"
 
 
 class TestImageToBase64:
@@ -48,6 +56,59 @@ class TestImageToBase64:
         assert result.size == (200, 100)
 
 
+class TestCriteriaProfiles:
+    def test_default_profile_present(self):
+        assert DEFAULT_CRITERIA == "default"
+        assert "default" in CRITERIA_PROFILES
+
+    def test_default_profile_byte_equal(self):
+        """The default profile must be the original prompt, byte-for-byte."""
+        assert prompt_hash(CRITERIA_PROFILES["default"]) == DEFAULT_PROMPT_HASH
+
+    def test_table_fidelity_profile_present(self):
+        assert "table-fidelity" in CRITERIA_PROFILES
+
+    def test_table_fidelity_keeps_criteria_1_to_4(self):
+        """Faithfulness > completeness > accuracy > reading order carry over."""
+        tf = CRITERIA_PROFILES["table-fidelity"]
+        for label in ("1. Faithfulness", "2. Completeness", "3. Accuracy", "4. Reading order"):
+            assert label in tf
+
+    def test_table_fidelity_adds_table_criterion(self):
+        """Criterion 5 becomes an explicit, significant table-fidelity rule."""
+        tf = CRITERIA_PROFILES["table-fidelity"]
+        assert "5. Table fidelity" in tf
+        assert "row and column" in tf
+        assert "SIGNIFICANT error" in tf
+        # Markup style stays neutral — the relationships are judged, not syntax.
+        assert "plain-text table" in tf
+        # The default's structure-neutralising criterion 5 is gone.
+        assert "5. Formatting" not in tf
+
+    def test_profiles_have_distinct_prompts(self):
+        assert CRITERIA_PROFILES["default"] != CRITERIA_PROFILES["table-fidelity"]
+
+    def test_all_profiles_have_placeholders(self):
+        for tmpl in CRITERIA_PROFILES.values():
+            assert "{ocr_text_a}" in tmpl
+            assert "{ocr_text_b}" in tmpl
+
+
+class TestPromptHash:
+    def test_is_12_hex_chars(self):
+        h = prompt_hash("anything")
+        assert len(h) == 12
+        assert all(c in "0123456789abcdef" for c in h)
+
+    def test_deterministic(self):
+        assert prompt_hash("same") == prompt_hash("same")
+
+    def test_differs_between_profiles(self):
+        assert prompt_hash(CRITERIA_PROFILES["default"]) != prompt_hash(
+            CRITERIA_PROFILES["table-fidelity"]
+        )
+
+
 class TestBuildPrompt:
     def test_not_swapped(self):
         prompt, swapped = build_prompt("text A", "text B", swapped=False)
@@ -70,6 +131,20 @@ class TestBuildPrompt:
         assert "x" * 5000 not in prompt
         # But 2500 chars should
         assert "x" * 2500 in prompt
+
+    def test_defaults_to_default_profile(self):
+        """With no template arg, build_prompt uses the default criteria."""
+        prompt, _ = build_prompt("a", "b", swapped=False)
+        assert "5. Formatting" in prompt
+        assert "5. Table fidelity" not in prompt
+
+    def test_threads_explicit_template(self):
+        prompt, _ = build_prompt(
+            "a", "b", swapped=False, prompt_template=CRITERIA_PROFILES["table-fidelity"]
+        )
+        assert "5. Table fidelity" in prompt
+        assert "a" in prompt
+        assert "b" in prompt
 
 
 class TestBuildMessages:
@@ -196,6 +271,27 @@ class TestBuildComparisons:
         comp = comps[0]
         assert comp.text_a == "text from model A"
         assert comp.text_b == "text from model B"
+
+    def test_defaults_to_default_criteria(self):
+        ds = self._make_dataset()
+        ocr_columns = {"ocr_model_a": "ModelA", "ocr_model_b": "ModelB"}
+        # min_chars=0 isolates this from the blank-pair filter (toy text is short)
+        comps = build_comparisons(ds, ocr_columns, min_chars=0)
+        prompt_text = comps[0].messages[0]["content"][1]["text"]
+        assert "5. Formatting" in prompt_text
+        assert "5. Table fidelity" not in prompt_text
+
+    def test_threads_prompt_template_into_messages(self):
+        """The selected criteria profile reaches each comparison's judge prompt."""
+        ds = self._make_dataset()
+        ocr_columns = {"ocr_model_a": "ModelA", "ocr_model_b": "ModelB"}
+        # min_chars=0 isolates this from the blank-pair filter (toy text is short)
+        comps = build_comparisons(
+            ds, ocr_columns, prompt_template=CRITERIA_PROFILES["table-fidelity"], min_chars=0
+        )
+        prompt_text = comps[0].messages[0]["content"][1]["text"]
+        assert "5. Table fidelity" in prompt_text
+        assert "5. Formatting" not in prompt_text
 
     def test_skips_empty_text(self):
         ds = [

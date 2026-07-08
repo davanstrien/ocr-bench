@@ -123,6 +123,21 @@ class TestBuildParser:
         args = parser.parse_args(["judge", "user/dataset"])
         assert args.full_rejudge is False
 
+    def test_criteria_defaults_to_default(self):
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset"])
+        assert args.criteria == "default"
+
+    def test_criteria_accepts_table_fidelity(self):
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset", "--criteria", "table-fidelity"])
+        assert args.criteria == "table-fidelity"
+
+    def test_criteria_rejects_unknown(self):
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["judge", "user/dataset", "--criteria", "nonsense"])
+
 
 class TestMainErrorHandling:
     """A judge/Hub failure should exit cleanly, not dump a traceback."""
@@ -382,6 +397,7 @@ class TestBenchParser:
         assert args.output_repo == "user/out"
         assert args.models is None
         assert args.judge_models is None
+        assert args.criteria == "default"
         assert args.max_samples is None
         assert args.seed == 42
         assert args.no_publish is False
@@ -481,6 +497,23 @@ class TestCmdBench:
         assert judge_a.models == ["novita:org/m"]  # judge --model, dest=models
         assert judge_a.max_samples == 25
         assert judge_a.seed == 7
+
+    def test_threads_criteria_to_judge(self, monkeypatch):
+        """bench --criteria reaches the judge phase's namespace."""
+        calls = self._patch(monkeypatch)
+        args = build_parser().parse_args(
+            ["bench", "user/imgs", "user/out", "--criteria", "table-fidelity"]
+        )
+        cli.cmd_bench(args)
+        judge_a = calls[1][1]
+        assert judge_a.criteria == "table-fidelity"
+
+    def test_criteria_defaults_to_default_in_judge(self, monkeypatch):
+        calls = self._patch(monkeypatch)
+        args = build_parser().parse_args(["bench", "user/imgs", "user/out"])
+        cli.cmd_bench(args)
+        judge_a = calls[1][1]
+        assert judge_a.criteria == "default"
 
     def test_aborts_when_a_job_fails(self, monkeypatch, capsys):
         """A failed OCR job must stop bench before judging — a partial

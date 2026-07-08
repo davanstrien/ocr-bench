@@ -26,10 +26,12 @@ from ocr_bench.dataset import (
 )
 from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo, rankings_resolved
 from ocr_bench.judge import (
+    CRITERIA_PROFILES,
     DEFAULT_MIN_CHARS,
     Comparison,
     _normalize_pair,
     build_comparisons,
+    prompt_hash,
     sample_indices,
 )
 from ocr_bench.publish import (
@@ -92,6 +94,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         dest="models",
         help=f"Judge model spec (repeatable for jury). Default: {DEFAULT_JUDGE}",
+    )
+    judge.add_argument(
+        "--criteria",
+        choices=sorted(CRITERIA_PROFILES),
+        default="default",
+        help=(
+            "Judge criteria profile (default: default). 'table-fidelity' adds an "
+            "explicit row/column cell-preservation criterion for table-dense corpora."
+        ),
     )
 
     # Eval
@@ -224,6 +235,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         dest="judge_models",
         help=f"Judge model spec (repeatable for a jury). Default: {DEFAULT_JUDGE}",
+    )
+    bench.add_argument(
+        "--criteria",
+        choices=sorted(CRITERIA_PROFILES),
+        default="default",
+        help=(
+            "Judge criteria profile (default: default). 'table-fidelity' adds an "
+            "explicit row/column cell-preservation criterion for table-dense corpora."
+        ),
     )
     bench.add_argument(
         "--max-samples", type=int, default=None, help="Per-model sample limit (also caps judging)"
@@ -460,6 +480,12 @@ def cmd_judge(args: argparse.Namespace) -> None:
     from_prs = False  # track for metadata
     max_comparisons = args.max_comparisons  # global budget; None = uncapped
 
+    # Judge criteria profile: the prompt template every comparison is built with,
+    # plus a stable hash of it recorded in the results metadata for provenance.
+    criteria = args.criteria
+    prompt_template = CRITERIA_PROFILES[criteria]
+    criteria_prompt_hash = prompt_hash(prompt_template)
+
     # Resolve checkpoint cadence (args.checkpoint_every: None = unspecified).
     #
     # Checkpointing REPLACES the results repo's comparisons config with the full
@@ -595,6 +621,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
     ]
     is_jury = len(judges) > 1
 
+    console.print(f"Judge criteria: [bold]{criteria}[/bold] (prompt {criteria_prompt_hash})")
+    logger.info("judge_criteria", criteria=criteria, prompt_hash=criteria_prompt_hash)
+
     def _judge_batch(batch_comps: list[Comparison]) -> list[ComparisonResult]:
         """Run judge(s) on a batch, returning ComparisonResults.
 
@@ -656,6 +685,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 indices=batch_indices,
                 seed=args.seed,
                 min_chars=args.min_chars,
+                prompt_template=prompt_template,
             )
             if not batch_comps:
                 continue
@@ -746,6 +776,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             seed=args.seed,
             skip_samples=skip_samples,
             min_chars=args.min_chars,
+            prompt_template=prompt_template,
         )
 
         # Global budget: judge at most N pairs, keeping every auto-tie (they
@@ -788,6 +819,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     max_comparisons=max_comparisons,
                     budget_exhausted=budget_exhausted,
                     from_prs=from_prs,
+                    criteria=criteria,
+                    prompt_hash=criteria_prompt_hash,
                 )
                 publish_results(
                     results_repo,
@@ -891,6 +924,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
             budget_exhausted=budget_exhausted,
             auto_tied=n_auto_total,
             from_prs=from_prs,
+            criteria=criteria,
+            prompt_hash=criteria_prompt_hash,
         )
         publish_results(
             results_repo,
@@ -1152,6 +1187,7 @@ def cmd_bench(args: argparse.Namespace) -> None:
     ]
     for model in args.judge_models or []:
         judge_argv += ["--model", model]
+    judge_argv += ["--criteria", args.criteria]
     if args.max_samples is not None:
         judge_argv += ["--max-samples", str(args.max_samples)]
     if args.no_publish:
