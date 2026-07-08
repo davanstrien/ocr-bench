@@ -11,10 +11,12 @@ from openai import OpenAIError
 from ocr_bench import cli
 from ocr_bench.cli import (
     _convert_results,
+    _merge_auto_ties,
     _refresh_viewer_space,
     _resolve_results_repo,
     build_parser,
 )
+from ocr_bench.elo import compute_elo
 from ocr_bench.judge import Comparison
 
 
@@ -35,6 +37,7 @@ class TestBuildParser:
         assert args.max_samples is None
         assert args.seed == 42
         assert args.save_results is None
+        assert args.min_chars == 20
 
     def test_multiple_models(self):
         parser = build_parser()
@@ -166,6 +169,9 @@ class TestResolveResultsRepo:
         assert result is None
 
 
+_AUTO_TIE = {"winner": "tie", "reason": "identical outputs — auto-tie", "agreement": "auto"}
+
+
 def _make_comparison(idx: int = 0) -> Comparison:
     return Comparison(
         sample_idx=idx,
@@ -175,6 +181,19 @@ def _make_comparison(idx: int = 0) -> Comparison:
         col_b="col_b",
         swapped=False,
         messages=[{"role": "user", "content": "test"}],
+    )
+
+
+def _auto_comparison(idx: int = 0) -> Comparison:
+    return Comparison(
+        sample_idx=idx,
+        model_a="model-a",
+        model_b="model-b",
+        col_a="col_a",
+        col_b="col_b",
+        swapped=False,
+        messages=[],
+        auto_result=dict(_AUTO_TIE),
     )
 
 
@@ -275,3 +294,147 @@ class TestRefreshViewerSpace:
         _refresh_viewer_space("user/x-results")  # must not raise
 
         api.restart_space.assert_not_called()
+    def test_auto_tie_kept_as_tie(self):
+        """An auto-tie verdict is a real tie, not a failure — it must survive."""
+        results = _convert_results([_auto_comparison()], [dict(_AUTO_TIE)])
+        assert len(results) == 1
+        assert results[0].winner == "tie"
+        assert results[0].agreement == "auto"
+
+
+class TestMergeAutoTies:
+    def test_interleaves_in_order(self):
+        comps = [_make_comparison(0), _auto_comparison(1), _make_comparison(2)]
+        judged = [
+            {"winner": "A", "reason": "x", "agreement": "1/1"},
+            {"winner": "B", "reason": "y", "agreement": "1/1"},
+        ]
+        merged = _merge_auto_ties(comps, judged)
+        assert merged[0]["winner"] == "A"
+        assert merged[1] == _AUTO_TIE  # auto-tie slotted in place, not judged
+        assert merged[2]["winner"] == "B"
+
+    def test_all_judged_passthrough(self):
+        comps = [_make_comparison(i) for i in range(2)]
+        judged = [{"winner": "A"}, {"winner": "tie"}]
+        assert _merge_auto_ties(comps, judged) == judged
+
+    def test_all_auto_no_judge_calls(self):
+        comps = [_auto_comparison(0), _auto_comparison(1)]
+        assert _merge_auto_ties(comps, []) == [_AUTO_TIE, _AUTO_TIE]
+
+
+class TestAutoTieElo:
+    def test_auto_tie_flows_into_elo_as_tie(self):
+        """End to end: an auto-tie comparison scores as an ordinary tie."""
+        comp = _auto_comparison()
+        merged = _merge_auto_ties([comp], [])  # no judge calls made
+        results = _convert_results([comp], merged)
+        board = compute_elo(results, ["model-a", "model-b"])
+        assert board.ties["model-a"] == 1
+        assert board.ties["model-b"] == 1
+        assert board.wins["model-a"] == 0
+        assert board.wins["model-b"] == 0
+        assert board.comparison_log[0]["agreement"] == "auto"
+
+
+class TestBenchParser:
+    def test_defaults(self):
+        parser = build_parser()
+        args = parser.parse_args(["bench", "user/imgs", "user/out"])
+        assert args.command == "bench"
+        assert args.input_dataset == "user/imgs"
+        assert args.output_repo == "user/out"
+        assert args.models is None
+        assert args.judge_models is None
+        assert args.max_samples is None
+        assert args.seed == 42
+        assert args.no_publish is False
+        assert args.port == 7860
+        assert args.host == "127.0.0.1"
+
+    def test_flags(self):
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "bench",
+                "user/imgs",
+                "user/out",
+                "--models",
+                "glm-ocr",
+                "dots-ocr",
+                "--judge-model",
+                "novita:org/m",
+                "--max-samples",
+                "25",
+                "--no-publish",
+                "--port",
+                "9000",
+            ]
+        )
+        assert args.models == ["glm-ocr", "dots-ocr"]
+        assert args.judge_models == ["novita:org/m"]
+        assert args.max_samples == 25
+        assert args.no_publish is True
+        assert args.port == 9000
+
+
+class TestCmdBench:
+    """cmd_bench chains run → judge → view, threading shared flags."""
+
+    def _patch(self, monkeypatch):
+        calls: list[tuple[str, object]] = []
+        monkeypatch.setattr(cli, "cmd_run", lambda a: calls.append(("run", a)))
+        monkeypatch.setattr(cli, "cmd_judge", lambda a: calls.append(("judge", a)))
+        monkeypatch.setattr(cli, "cmd_view", lambda a: calls.append(("view", a)))
+        return calls
+
+    def test_phase_ordering(self, monkeypatch):
+        calls = self._patch(monkeypatch)
+        args = build_parser().parse_args(["bench", "user/imgs", "user/out"])
+        cli.cmd_bench(args)
+        assert [c[0] for c in calls] == ["run", "judge", "view"]
+        run_a, judge_a, view_a = (c[1] for c in calls)
+        assert run_a.command == "run"
+        assert run_a.input_dataset == "user/imgs"
+        assert run_a.output_repo == "user/out"
+        assert run_a.no_wait is False  # bench waits for jobs before judging
+        assert judge_a.command == "judge"
+        assert judge_a.dataset == "user/out"
+        assert judge_a.from_prs is True
+        assert view_a.command == "view"
+        assert view_a.results == "user/out-results"
+
+    def test_no_publish_skips_view(self, monkeypatch):
+        calls = self._patch(monkeypatch)
+        args = build_parser().parse_args(["bench", "user/imgs", "user/out", "--no-publish"])
+        cli.cmd_bench(args)
+        assert [c[0] for c in calls] == ["run", "judge"]
+        assert calls[1][1].no_publish is True
+
+    def test_threads_shared_flags(self, monkeypatch):
+        calls = self._patch(monkeypatch)
+        args = build_parser().parse_args(
+            [
+                "bench",
+                "user/imgs",
+                "user/out",
+                "--models",
+                "glm-ocr",
+                "dots-ocr",
+                "--judge-model",
+                "novita:org/m",
+                "--max-samples",
+                "25",
+                "--seed",
+                "7",
+            ]
+        )
+        cli.cmd_bench(args)
+        run_a, judge_a, _ = (c[1] for c in calls)
+        assert run_a.models == ["glm-ocr", "dots-ocr"]
+        assert run_a.max_samples == 25
+        assert run_a.seed == 7
+        assert judge_a.models == ["novita:org/m"]  # judge --model, dest=models
+        assert judge_a.max_samples == 25
+        assert judge_a.seed == 7

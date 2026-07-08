@@ -53,11 +53,23 @@ ocr-bench judge <output-repo>
 ocr-bench view <output-repo>-results
 ```
 
+### One command
+
+Or chain all three stages in a single call — the fastest way to try ocr-bench on a new collection:
+
+```bash
+ocr-bench bench <input-dataset> <output-repo> --max-samples 50
+```
+
+`bench` runs the models (waiting for the jobs to finish), judges the outputs, then opens the viewer. It threads the shared flags through each stage: `--models`, `--judge-model` (repeatable for a jury), `--max-samples`, `--seed`, `--no-publish`, and `--port`/`--host` for the viewer. Reach for the individual subcommands when you want finer control over a single stage.
+
 ## How it works
 
 **`ocr-bench run`** launches OCR models on your dataset via [HF Jobs](https://huggingface.co/docs/hub/jobs-overview). Each model writes its output as a PR on the same Hub dataset, keeping everything together without merge conflicts.
 
 **`ocr-bench judge`** runs pairwise comparisons using a VLM judge (default: [Qwen3.5-35B-A3B](https://huggingface.co/Qwen/Qwen3.5-35B-A3B) via HF Inference Providers). For each document, the judge sees the original image and two OCR outputs (anonymised as A/B) and picks the better transcription. Results are fit to a [Bradley-Terry model](https://en.wikipedia.org/wiki/Bradley%E2%80%93Terry_model) to produce ELO ratings with bootstrap 95% confidence intervals. Adaptive stopping halts early when rankings are statistically resolved.
+
+To avoid wasting judge calls on uninformative pairs, the judge skips comparisons where **both** outputs are shorter than `--min-chars` (default 20 — neither model produced meaningful text), and scores **identical** outputs as an automatic tie without calling the judge. Pass `--min-chars 0` to disable the length filter.
 
 **`ocr-bench view`** serves a local web viewer with a leaderboard, comparison browser, and human validation. Vote on comparisons to cross-check the automated judge with human judgement.
 

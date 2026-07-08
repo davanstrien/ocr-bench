@@ -77,6 +77,19 @@ MAX_OCR_TEXT_LENGTH = 2500
 # Max image dimension (longer side) before resizing.
 MAX_IMAGE_DIM = 1024
 
+# Default minimum stripped-text length for a pair to be worth judging. A pair
+# where BOTH outputs fall below this is skipped — neither model produced
+# meaningful text, so the comparison would only add noise to the ELO.
+DEFAULT_MIN_CHARS = 20
+
+# Judge-shaped verdict for two identical outputs. Recorded as a tie without
+# spending a judge call; ``agreement="auto"`` marks it as machine-decided.
+_AUTO_TIE_RESULT: dict[str, str] = {
+    "winner": "tie",
+    "reason": "identical outputs — auto-tie",
+    "agreement": "auto",
+}
+
 
 # --- Image helpers ---
 
@@ -110,6 +123,9 @@ class Comparison:
     messages: list[dict[str, Any]]
     text_a: str = ""
     text_b: str = ""
+    # Pre-decided verdict for pairs that never reach a judge (identical
+    # outputs → auto-tie). ``None`` means the judge must score this pair.
+    auto_result: dict[str, str] | None = None
 
 
 def build_prompt(text_a: str, text_b: str, swapped: bool) -> tuple[str, bool]:
@@ -172,6 +188,7 @@ def build_comparisons(
     seed: int = 42,
     skip_samples: dict[tuple[str, str], set[int]] | None = None,
     indices: list[int] | None = None,
+    min_chars: int = DEFAULT_MIN_CHARS,
 ) -> list[Comparison]:
     """Build pairwise comparison prompts from a dataset.
 
@@ -191,9 +208,14 @@ def build_comparisons(
         indices: Explicit row indices to use. When provided, ``max_samples``
             and ``seed`` are not used for index selection (seed is still used
             for position-bias randomization).
+        min_chars: Skip a pair when BOTH outputs are shorter than this (after
+            stripping) — neither model produced meaningful text. Set to 0 to
+            disable the filter.
 
     Returns:
-        List of Comparison objects with pre-built chat messages.
+        List of Comparison objects. Pairs needing a judge carry pre-built chat
+        messages; identical-output pairs carry ``auto_result`` (an auto-tie)
+        and empty messages, and never reach the judge.
     """
     col_names = list(ocr_columns.keys())
     model_names = list(ocr_columns.values())
@@ -230,28 +252,57 @@ def build_comparisons(
         if not needed_pairs:
             continue  # Skip image encoding entirely
 
-        # Check text availability before decoding the image
-        valid_pairs = []
+        # Fetch text once per row (avoids re-decoding the image on list-backed
+        # datasets that key the row dict lazily).
         if text_cols_data is not None:
-            for i, j in needed_pairs:
-                text_a = text_cols_data[col_names[i]][idx] or ""
-                text_b = text_cols_data[col_names[j]][idx] or ""
-                if text_a.strip() and text_b.strip():
-                    valid_pairs.append((i, j, text_a, text_b))
+            texts = {col: (text_cols_data[col][idx] or "") for col in col_names}
         else:
             row = dataset[idx]
-            for i, j in needed_pairs:
-                text_a = row[col_names[i]] or ""
-                text_b = row[col_names[j]] or ""
-                if text_a.strip() and text_b.strip():
-                    valid_pairs.append((i, j, text_a, text_b))
+            texts = {col: (row[col] or "") for col in col_names}
+
+        # Classify each pair before touching the image. Each entry is
+        # (i, j, text_a, text_b, auto_result) where auto_result is None for a
+        # pair the judge must score, or an auto-tie dict for identical outputs.
+        valid_pairs: list[tuple[int, int, str, str, dict[str, str] | None]] = []
+        for i, j in needed_pairs:
+            text_a = texts[col_names[i]]
+            text_b = texts[col_names[j]]
+            stripped_a, stripped_b = text_a.strip(), text_b.strip()
+            # Neither model produced meaningful text — a wasted judge call.
+            if len(stripped_a) < min_chars and len(stripped_b) < min_chars:
+                continue
+            # Identical outputs are an unambiguous tie — record without judging.
+            if stripped_a == stripped_b:
+                valid_pairs.append((i, j, text_a, text_b, _AUTO_TIE_RESULT.copy()))
+            else:
+                valid_pairs.append((i, j, text_a, text_b, None))
 
         if not valid_pairs:
             continue
 
-        image_b64 = image_to_base64(dataset[idx]["image"])
+        # Only decode/encode the image if at least one pair needs the judge;
+        # rows whose pairs are all auto-ties skip the image entirely.
+        needs_judge = any(auto is None for (_, _, _, _, auto) in valid_pairs)
+        image_b64 = image_to_base64(dataset[idx]["image"]) if needs_judge else ""
 
-        for i, j, text_a, text_b in valid_pairs:
+        for i, j, text_a, text_b, auto in valid_pairs:
+            if auto is not None:
+                comparisons.append(
+                    Comparison(
+                        sample_idx=idx,
+                        model_a=model_names[i],
+                        model_b=model_names[j],
+                        col_a=col_names[i],
+                        col_b=col_names[j],
+                        swapped=False,
+                        messages=[],
+                        text_a=text_a,
+                        text_b=text_b,
+                        auto_result=auto,
+                    )
+                )
+                continue
+
             swapped = rng.random() < 0.5
             prompt, swapped = build_prompt(text_a, text_b, swapped)
             messages = build_messages(image_b64, prompt)

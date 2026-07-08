@@ -24,7 +24,13 @@ from ocr_bench.dataset import (
     load_flat_dataset,
 )
 from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo, rankings_resolved
-from ocr_bench.judge import Comparison, _normalize_pair, build_comparisons, sample_indices
+from ocr_bench.judge import (
+    DEFAULT_MIN_CHARS,
+    Comparison,
+    _normalize_pair,
+    build_comparisons,
+    sample_indices,
+)
 from ocr_bench.publish import (
     EvalMetadata,
     load_existing_comparisons,
@@ -112,6 +118,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     judge.add_argument(
+        "--min-chars",
+        type=int,
+        default=DEFAULT_MIN_CHARS,
+        help=(
+            "Skip a pair when both OCR outputs are shorter than this "
+            f"(default: {DEFAULT_MIN_CHARS}). Set 0 to disable."
+        ),
+    )
+    judge.add_argument(
         "--max-tokens",
         type=int,
         default=DEFAULT_MAX_TOKENS,
@@ -191,6 +206,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     publish.add_argument("--private", action="store_true", help="Make the Space private")
 
+    # --- bench subcommand (run → judge → view in one shot) ---
+    bench = sub.add_parser(
+        "bench", help="Run → judge → view in one command (the 'just try it' path)"
+    )
+    bench.add_argument("input_dataset", help="HF dataset repo id with images")
+    bench.add_argument("output_repo", help="Output dataset repo (OCR outputs + {repo}-results)")
+    bench.add_argument(
+        "--models", nargs="+", default=None, help="OCR model slugs to run (default: all core)"
+    )
+    bench.add_argument(
+        "--judge-model",
+        action="append",
+        dest="judge_models",
+        help=f"Judge model spec (repeatable for a jury). Default: {DEFAULT_JUDGE}",
+    )
+    bench.add_argument(
+        "--max-samples", type=int, default=None, help="Per-model sample limit (also caps judging)"
+    )
+    bench.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
+    bench.add_argument(
+        "--no-publish", action="store_true", help="Don't publish results (skips the viewer)"
+    )
+    bench.add_argument("--port", type=int, default=7860, help="Viewer port (default: 7860)")
+    bench.add_argument("--host", default="127.0.0.1", help="Viewer host (default: 127.0.0.1)")
+
     return parser
 
 
@@ -233,6 +273,47 @@ def print_leaderboard(board: Leaderboard) -> None:
         )
 
     console.print(table)
+
+
+def _merge_auto_ties(
+    comparisons: list[Comparison], judged: list[dict]
+) -> list[dict]:
+    """Interleave judge outputs with pre-decided auto-ties, in original order.
+
+    ``judged`` holds one result per comparison whose ``auto_result`` is None
+    (the pairs actually sent to the judge, in order). Auto-tie comparisons slot
+    their ``auto_result`` back in place, yielding a result list parallel to
+    ``comparisons`` for :func:`_convert_results`.
+    """
+    judged_iter = iter(judged)
+    return [
+        comp.auto_result if comp.auto_result is not None else next(judged_iter)
+        for comp in comparisons
+    ]
+
+
+def _trim_to_budget(
+    comparisons: list[Comparison], judge_budget: int
+) -> tuple[list[Comparison], bool]:
+    """Cap judged pairs at ``judge_budget`` while keeping every auto-tie.
+
+    Auto-ties cost no judge call, so they never count against the budget and
+    are always retained (they are real results that must still reach the
+    leaderboard). Returns the trimmed list and whether any judged pair was
+    dropped to fit the budget.
+    """
+    judgeable = sum(c.auto_result is None for c in comparisons)
+    if judgeable <= judge_budget:
+        return comparisons, False
+    kept: list[Comparison] = []
+    remaining = judge_budget
+    for comp in comparisons:
+        if comp.auto_result is not None:
+            kept.append(comp)
+        elif remaining > 0:
+            kept.append(comp)
+            remaining -= 1
+    return kept, True
 
 
 def _convert_results(
@@ -511,17 +592,23 @@ def cmd_judge(args: argparse.Namespace) -> None:
     is_jury = len(judges) > 1
 
     def _judge_batch(batch_comps: list[Comparison]) -> list[ComparisonResult]:
-        """Run judge(s) on a batch of comparisons and return ComparisonResults."""
-        all_judge_outputs: list[list[dict]] = []
-        for judge in judges:
-            results = judge.judge(batch_comps)
-            all_judge_outputs.append(results)
-        if is_jury:
-            judge_names = [j.name for j in judges]
-            aggregated = aggregate_jury_votes(all_judge_outputs, judge_names)
+        """Run judge(s) on a batch, returning ComparisonResults.
+
+        Auto-tie comparisons never reach a judge; their verdict is merged back
+        in :func:`_merge_auto_ties` so ELO sees them as ordinary ties.
+        """
+        judgeable = [c for c in batch_comps if c.auto_result is None]
+        if judgeable:
+            all_judge_outputs: list[list[dict]] = [judge.judge(judgeable) for judge in judges]
+            if is_jury:
+                judge_names = [j.name for j in judges]
+                aggregated = aggregate_jury_votes(all_judge_outputs, judge_names)
+            else:
+                aggregated = all_judge_outputs[0]
         else:
-            aggregated = all_judge_outputs[0]
-        return _convert_results(batch_comps, aggregated)
+            aggregated = []
+        merged = _merge_auto_ties(batch_comps, aggregated)
+        return _convert_results(batch_comps, merged)
 
     # Set when the run stops because it hit --max-comparisons (vs converging or
     # running out of samples). Recorded in the metadata row and drives the
@@ -548,8 +635,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
             console.print(f"Budget: stop after {max_comparisons} comparisons")
 
         new_results: list[ComparisonResult] = []
-        total_comparisons = 0
+        total_comparisons = 0  # judge calls made this run (auto-ties excluded)
         last_checkpoint = 0
+        n_auto_total = 0
         for batch_num, batch_start in enumerate(range(0, len(all_indices), batch_samples)):
             # Global budget: stop before a batch we can't afford at all.
             if max_comparisons is not None and total_comparisons >= max_comparisons:
@@ -563,21 +651,27 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 skip_samples=skip_samples,
                 indices=batch_indices,
                 seed=args.seed,
+                min_chars=args.min_chars,
             )
             if not batch_comps:
                 continue
 
-            # Trim the final batch to land exactly on the budget: stop cleanly
-            # mid-round rather than overshooting the cap.
+            batch_auto = sum(c.auto_result is not None for c in batch_comps)
+
+            # Trim the final batch to land exactly on the budget: cap judged
+            # pairs at the remaining budget but keep auto-ties (they cost no
+            # judge call), so the run stops cleanly without dropping real ties.
             if max_comparisons is not None:
-                remaining = max_comparisons - total_comparisons
-                if len(batch_comps) > remaining:
-                    batch_comps = batch_comps[:remaining]
+                batch_comps, hit_budget = _trim_to_budget(
+                    batch_comps, max_comparisons - total_comparisons
+                )
+                if hit_budget:
                     budget_exhausted = True
 
+            n_auto_total += batch_auto
             batch_results = _judge_batch(batch_comps)
             new_results.extend(batch_results)
-            total_comparisons += len(batch_comps)
+            total_comparisons += len(batch_comps) - batch_auto
             # batch_comps goes out of scope → GC can free images
 
             total = len(existing_results) + len(new_results)
@@ -633,7 +727,12 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 f"\n[yellow]Budget reached ({total_comparisons} comparisons) — "
                 f"stopping and publishing.[/yellow]"
             )
-        console.print(f"\n{len(new_results)}/{total_comparisons} valid comparisons")
+        judged_valid = len(new_results) - n_auto_total
+        console.print(f"\n{judged_valid}/{total_comparisons} valid comparisons")
+        if n_auto_total:
+            console.print(
+                f"[dim]{n_auto_total} identical outputs auto-tied (no judge call)[/dim]"
+            )
     else:
         # --- Standard single-pass flow ---
         comparisons = build_comparisons(
@@ -642,15 +741,26 @@ def cmd_judge(args: argparse.Namespace) -> None:
             max_samples=args.max_samples,
             seed=args.seed,
             skip_samples=skip_samples,
+            min_chars=args.min_chars,
         )
 
-        # Global budget: judge at most the first N comparisons. Which pairs get
-        # dropped depends on build order — acceptable for a blunt operational cap.
-        if max_comparisons is not None and len(comparisons) > max_comparisons:
-            comparisons = comparisons[:max_comparisons]
-            budget_exhausted = True
+        # Global budget: judge at most N pairs, keeping every auto-tie (they
+        # cost no judge call). Which judged pairs get dropped depends on build
+        # order — acceptable for a blunt operational cap.
+        if max_comparisons is not None:
+            comparisons, hit_budget = _trim_to_budget(comparisons, max_comparisons)
+            if hit_budget:
+                budget_exhausted = True
 
-        console.print(f"\nBuilt {len(comparisons)} new pairwise comparisons")
+        n_auto_total = sum(c.auto_result is not None for c in comparisons)
+        n_judge_calls = len(comparisons) - n_auto_total
+        if n_auto_total:
+            console.print(
+                f"\nBuilt {len(comparisons)} new pairwise comparisons "
+                f"({n_judge_calls} to judge, {n_auto_total} auto-tied)"
+            )
+        else:
+            console.print(f"\nBuilt {len(comparisons)} new pairwise comparisons")
 
         if not comparisons and not existing_results:
             console.print(
@@ -697,12 +807,14 @@ def cmd_judge(args: argparse.Namespace) -> None:
         # checkpoint_every == 0 → one chunk (no checkpointing).
         chunk = checkpoint_every if checkpoint_every else len(comparisons)
         new_results = []
-        total_comparisons = 0
+        total_comparisons = 0  # judge calls made (auto-ties excluded)
         last_checkpoint = 0
         for start in range(0, len(comparisons), chunk):
             sub = comparisons[start : start + chunk]
             new_results.extend(_judge_batch(sub))
-            total_comparisons += len(sub)
+            # Auto-ties cost no judge call, so they neither advance the budget
+            # nor trigger checkpoints; the pushed results still include them.
+            total_comparisons += sum(c.auto_result is None for c in sub)
             if (
                 checkpoint_every
                 and results_repo
@@ -716,7 +828,12 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 f"\n[yellow]Budget reached ({total_comparisons} comparisons) — "
                 f"publishing what was judged.[/yellow]"
             )
-        console.print(f"\n{len(new_results)}/{total_comparisons} valid comparisons")
+        judged_valid = len(new_results) - n_auto_total
+        console.print(f"\n{judged_valid}/{total_comparisons} valid comparisons")
+        if n_auto_total:
+            console.print(
+                f"[dim]{n_auto_total} identical outputs auto-tied (no judge call)[/dim]"
+            )
 
     # A run that lands EXACTLY on the budget (e.g. the final batch fills it, or a
     # non-adaptive build produces exactly N comparisons) never trips the mid-loop
@@ -754,7 +871,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             seed=args.seed,
             max_samples=args.max_samples or len(ds),
             total_comparisons=total_comparisons,
-            valid_comparisons=len(new_results),
+            valid_comparisons=len(new_results) - n_auto_total,
             max_comparisons=max_comparisons,
             budget_exhausted=budget_exhausted,
             from_prs=from_prs,
@@ -947,6 +1064,52 @@ def cmd_publish(args: argparse.Namespace) -> None:
     console.print(f"[green]Space published![/green] {url}")
 
 
+def cmd_bench(args: argparse.Namespace) -> None:
+    """One command: run OCR models, judge them, then open the viewer.
+
+    Chains ``run`` → ``judge`` → ``view``, threading the shared flags through
+    each phase. Sub-namespaces are built through :func:`build_parser` so the
+    per-subcommand defaults live in one place. The individual subcommands give
+    finer control over each stage.
+    """
+    parser = build_parser()
+
+    # --- Phase 1: run OCR models (waits for jobs to finish by default) ---
+    run_argv = ["run", args.input_dataset, args.output_repo, "--seed", str(args.seed)]
+    if args.models:
+        run_argv += ["--models", *args.models]
+    if args.max_samples is not None:
+        run_argv += ["--max-samples", str(args.max_samples)]
+    console.rule("[bold]1/3 Run[/bold]")
+    cmd_run(parser.parse_args(run_argv))
+
+    # --- Phase 2: judge the OCR outputs (from the PRs the run just opened) ---
+    judge_argv = [
+        "judge", args.output_repo, "--from-prs", "--seed", str(args.seed)
+    ]
+    for model in args.judge_models or []:
+        judge_argv += ["--model", model]
+    if args.max_samples is not None:
+        judge_argv += ["--max-samples", str(args.max_samples)]
+    if args.no_publish:
+        judge_argv.append("--no-publish")
+    console.rule("[bold]2/3 Judge[/bold]")
+    cmd_judge(parser.parse_args(judge_argv))
+
+    # --- Phase 3: view the results ---
+    if args.no_publish:
+        console.print(
+            "\n[yellow]--no-publish set: nothing was published, so there is "
+            "nothing to view. Skipping the viewer.[/yellow]"
+        )
+        return
+    results_repo = _resolve_results_repo(args.output_repo, None, False)
+    assert results_repo is not None  # no_publish is False past the guard above
+    view_argv = ["view", results_repo, "--port", str(args.port), "--host", args.host]
+    console.rule("[bold]3/3 View[/bold]")
+    cmd_view(parser.parse_args(view_argv))
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -964,6 +1127,8 @@ def main() -> None:
             cmd_view(args)
         elif args.command == "publish":
             cmd_publish(args)
+        elif args.command == "bench":
+            cmd_bench(args)
     except DatasetError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(1)
