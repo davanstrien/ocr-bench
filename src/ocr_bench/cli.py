@@ -37,6 +37,22 @@ logger = structlog.get_logger()
 console = Console()
 
 
+def _positive_int(value: str) -> int:
+    """argparse type: integer >= 1 (rejects 0 and negatives)."""
+    ivalue = int(value)
+    if ivalue < 1:
+        raise argparse.ArgumentTypeError(f"must be a positive integer (>= 1), got {ivalue}")
+    return ivalue
+
+
+def _non_negative_int(value: str) -> int:
+    """argparse type: integer >= 0 (rejects negatives)."""
+    ivalue = int(value)
+    if ivalue < 0:
+        raise argparse.ArgumentTypeError(f"must be >= 0, got {ivalue}")
+    return ivalue
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ocr-bench",
@@ -73,25 +89,26 @@ def build_parser() -> argparse.ArgumentParser:
     judge.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
     judge.add_argument(
         "--max-comparisons",
-        type=int,
+        type=_positive_int,
         default=None,
         help=(
-            "Hard cap on total comparisons judged this run (default: no cap). "
-            "Adaptive stopping bounds per-pair sampling but not the total; this "
-            "makes cost and wall-clock deterministic. On reaching it, the run "
-            "stops cleanly and publishes what it has."
+            "Hard cap on total comparisons judged this run (default: no cap; "
+            "must be >= 1). Adaptive stopping bounds per-pair sampling but not "
+            "the total; this makes cost and wall-clock deterministic. On reaching "
+            "it, the run stops cleanly and publishes what it has."
         ),
     )
     judge.add_argument(
         "--checkpoint-every",
-        type=int,
-        default=500,
+        type=_non_negative_int,
+        default=None,
         help=(
             "Push accumulated comparisons to the results repo every N comparisons "
-            "(0 = off; default: 500). Cheap append-only pushes (comparisons config "
-            "only, no leaderboard/README churn) so an interrupted run resumes "
-            "without re-judging. Evaluated at batch boundaries, so N is a lower "
-            "bound on the comparisons between checkpoints."
+            "(0 = off; default: 500, or off under --full-rejudge). Cheap "
+            "append-only pushes (comparisons config only, no leaderboard/README "
+            "churn) so an interrupted run resumes without re-judging. Evaluated at "
+            "batch boundaries, so N is a lower bound on the comparisons between "
+            "checkpoints."
         ),
     )
     judge.add_argument(
@@ -357,7 +374,39 @@ def cmd_judge(args: argparse.Namespace) -> None:
     results_repo = _resolve_results_repo(args.dataset, args.save_results, args.no_publish)
     from_prs = False  # track for metadata
     max_comparisons = args.max_comparisons  # global budget; None = uncapped
-    checkpoint_every = args.checkpoint_every  # 0 = checkpointing off
+
+    # Resolve checkpoint cadence (args.checkpoint_every: None = unspecified).
+    #
+    # Checkpointing REPLACES the results repo's comparisons config with the full
+    # accumulated set (existing + new). Under --full-rejudge, existing is empty,
+    # so a checkpoint would overwrite the previously-complete published
+    # comparisons with only THIS run's partial set — and a death between the
+    # first checkpoint and the final publish would leave that partial set as the
+    # published state. So default checkpointing OFF under --full-rejudge. If the
+    # user explicitly opted in (N > 0), honor it but warn loudly about the risk.
+    if args.checkpoint_every is None:
+        if args.full_rejudge:
+            checkpoint_every = 0
+            logger.info("checkpoint_disabled_full_rejudge")
+            console.print(
+                "[dim]Checkpointing off under --full-rejudge (a mid-run checkpoint "
+                "would replace the complete published comparisons with this run's "
+                "partial set). Pass --checkpoint-every N to override.[/dim]"
+            )
+        else:
+            checkpoint_every = 500
+    else:
+        checkpoint_every = args.checkpoint_every  # 0 = off
+        if args.full_rejudge and checkpoint_every > 0:
+            console.print(
+                "[bold red]WARNING[/bold red]: --checkpoint-every with "
+                "--full-rejudge — checkpoints REPLACE the published comparisons "
+                "config with this run's partial set. If the run dies before the "
+                "final publish, the previously-complete comparisons are lost."
+            )
+            logger.warning(
+                "checkpoint_full_rejudge_clobber_risk", checkpoint_every=checkpoint_every
+            )
 
     if results_repo:
         console.print(f"Results will be published to [bold]{results_repo}[/bold]")
@@ -419,27 +468,33 @@ def cmd_judge(args: argparse.Namespace) -> None:
     # --- Incremental: load existing comparisons ---
     existing_results: list[ComparisonResult] = []
     existing_meta_rows: list[dict] = []
-    skip_pairs: set[tuple[str, str]] | None = None
+    # Maps a normalized (model_a, model_b) pair to the sample indices already
+    # judged for it, so build_comparisons skips only those exact (pair, sample)
+    # combinations.
+    skip_samples: dict[tuple[str, str], set[int]] | None = None
 
     if results_repo and not args.full_rejudge:
         # Resume path. Existing comparisons include any pushed by a checkpoint
         # (see --checkpoint-every), so a killed run relaunched WITHOUT
         # --full-rejudge picks up where it left off instead of re-judging.
         #
-        # NOTE: skip_pairs is PAIR-level, not (pair, sample)-level. Any model
-        # pair with >=1 existing comparison is skipped for ALL samples — a pair
-        # that was only partially judged before the kill is treated as done and
-        # is NOT topped up. Resume therefore adds only pairs with zero prior
-        # comparisons (plus refits the leaderboard over everything). This is the
-        # accepted granularity: it never re-judges completed work, at the cost
-        # of not resuming a pair mid-way. --full-rejudge forces a clean re-run.
+        # The skip is (pair, sample_idx)-level: a pair judged on only some
+        # samples before the kill is TOPPED UP on the samples it hasn't been
+        # judged on yet, rather than being dropped wholesale. This matters for
+        # adaptive runs, where a checkpoint can persist a pair at (say) 3/50
+        # samples — a pair-level skip would freeze it there forever.
+        # --full-rejudge forces a clean re-run (ignores all existing).
         existing_results = load_existing_comparisons(results_repo)
         if existing_results:
-            judged_pairs = {_normalize_pair(r.model_a, r.model_b) for r in existing_results}
-            skip_pairs = judged_pairs
+            skip_samples = {}
+            for r in existing_results:
+                skip_samples.setdefault(_normalize_pair(r.model_a, r.model_b), set()).add(
+                    r.sample_idx
+                )
             console.print(
                 f"\nIncremental mode: {len(existing_results)} existing comparisons "
-                f"across {len(judged_pairs)} model pairs — skipping those."
+                f"across {len(skip_samples)} model pairs — skipping already-judged "
+                f"(pair, sample) combinations, topping up the rest."
             )
             existing_meta_rows = load_existing_metadata(results_repo)
         else:
@@ -505,7 +560,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             batch_comps = build_comparisons(
                 ds,
                 ocr_columns,
-                skip_pairs=skip_pairs,
+                skip_samples=skip_samples,
                 indices=batch_indices,
                 seed=args.seed,
             )
@@ -586,7 +641,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             ocr_columns,
             max_samples=args.max_samples,
             seed=args.seed,
-            skip_pairs=skip_pairs,
+            skip_samples=skip_samples,
         )
 
         # Global budget: judge at most the first N comparisons. Which pairs get
@@ -662,6 +717,12 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 f"publishing what was judged.[/yellow]"
             )
         console.print(f"\n{len(new_results)}/{total_comparisons} valid comparisons")
+
+    # A run that lands EXACTLY on the budget (e.g. the final batch fills it, or a
+    # non-adaptive build produces exactly N comparisons) never trips the mid-loop
+    # trim/break, so catch the exhausted state here for both paths.
+    if max_comparisons and total_comparisons >= max_comparisons:
+        budget_exhausted = True
 
     # --- Merge existing + new, compute ELO ---
     all_results = existing_results + new_results

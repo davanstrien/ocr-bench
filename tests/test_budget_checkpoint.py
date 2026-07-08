@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
 from PIL import Image
 
 from ocr_bench import cli
@@ -48,11 +49,14 @@ class FakeJudge:
         self.winner = winner
         self.judged = 0
         self.pairs_seen: list[tuple[str, str]] = []
+        self.pair_samples: set[tuple[tuple[str, str], int]] = set()
 
     def judge(self, comparisons):
         self.judged += len(comparisons)
         for comp in comparisons:
-            self.pairs_seen.append(_normalize_pair(comp.model_a, comp.model_b))
+            pair = _normalize_pair(comp.model_a, comp.model_b)
+            self.pairs_seen.append(pair)
+            self.pair_samples.add((pair, comp.sample_idx))
         return [{"winner": self.winner, "reason": "r"} for _ in comparisons]
 
 
@@ -110,9 +114,11 @@ class TestParserFlags:
         args = build_parser().parse_args(["judge", "user/ds"])
         assert args.max_comparisons is None
 
-    def test_checkpoint_every_default_500(self):
+    def test_checkpoint_every_default_none_sentinel(self):
+        # Parser leaves it None (unspecified); cmd_judge resolves to 500, or 0
+        # under --full-rejudge.
         args = build_parser().parse_args(["judge", "user/ds"])
-        assert args.checkpoint_every == 500
+        assert args.checkpoint_every is None
 
     def test_flags_parse_explicitly(self):
         args = build_parser().parse_args(
@@ -120,6 +126,26 @@ class TestParserFlags:
         )
         assert args.max_comparisons == 100
         assert args.checkpoint_every == 0
+
+
+class TestArgValidators:
+    @pytest.mark.parametrize("bad", ["0", "-1", "-100"])
+    def test_max_comparisons_rejects_non_positive(self, bad):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["judge", "user/ds", "--max-comparisons", bad])
+
+    @pytest.mark.parametrize("bad", ["-1", "-100"])
+    def test_checkpoint_every_rejects_negative(self, bad):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["judge", "user/ds", "--checkpoint-every", bad])
+
+    def test_checkpoint_every_zero_allowed(self):
+        args = build_parser().parse_args(["judge", "user/ds", "--checkpoint-every", "0"])
+        assert args.checkpoint_every == 0
+
+    def test_max_comparisons_one_allowed(self):
+        args = build_parser().parse_args(["judge", "user/ds", "--max-comparisons", "1"])
+        assert args.max_comparisons == 1
 
 
 class TestBudget:
@@ -157,6 +183,52 @@ class TestBudget:
         )
         assert judge.judged == 30
         assert _published_metadata(m_publish).budget_exhausted is False
+
+    def test_budget_exactly_filled_by_last_batch_marks_exhausted(self):
+        # 5 samples x 3 pairs = 15 comparisons in a single adaptive batch;
+        # cap = 15 lands EXACTLY on the budget without tripping the trim/break.
+        # The post-loop check must still mark it exhausted.
+        ds, ocr = make_ds(n=5)
+        judge, m_publish, _ = _run_judge(
+            ["--max-comparisons", "15", "--checkpoint-every", "0"], ds, ocr
+        )
+        assert judge.judged == 15
+        assert _published_metadata(m_publish).budget_exhausted is True
+
+
+class TestCheckpointFullRejudge:
+    def test_default_disabled_under_full_rejudge(self, capsys):
+        # No explicit --checkpoint-every + --full-rejudge -> checkpointing off,
+        # with an explanatory message (avoids clobbering complete published data).
+        ds, ocr = make_ds(n=10)
+        _, _, m_checkpoint = _run_judge(
+            ["--no-adaptive", "--full-rejudge"], ds, ocr
+        )
+        m_checkpoint.assert_not_called()
+        assert "Checkpointing off under --full-rejudge" in capsys.readouterr().out
+
+    def test_default_enabled_without_full_rejudge(self, capsys):
+        # Sanity: the disabled message is specific to --full-rejudge.
+        ds, ocr = make_ds(n=10)
+        _run_judge(["--no-adaptive"], ds, ocr)
+        assert "Checkpointing off under --full-rejudge" not in capsys.readouterr().out
+
+    def test_explicit_override_honored_with_warning(self, capsys):
+        # Explicit --checkpoint-every N>0 with --full-rejudge is honored but warns.
+        ds, ocr = make_ds(n=10)
+        _, _, m_checkpoint = _run_judge(
+            ["--no-adaptive", "--full-rejudge", "--checkpoint-every", "10"], ds, ocr
+        )
+        assert m_checkpoint.call_count == 3  # honored despite full-rejudge
+        assert "WARNING" in capsys.readouterr().out
+
+    def test_explicit_zero_no_warning_under_full_rejudge(self, capsys):
+        ds, ocr = make_ds(n=10)
+        _, _, m_checkpoint = _run_judge(
+            ["--no-adaptive", "--full-rejudge", "--checkpoint-every", "0"], ds, ocr
+        )
+        m_checkpoint.assert_not_called()
+        assert "WARNING" not in capsys.readouterr().out
 
 
 class TestCheckpointing:
@@ -202,10 +274,10 @@ class TestCheckpointing:
 
 
 class TestResume:
-    def test_resume_skips_checkpointed_pairs(self):
-        # A prior (checkpointed) run already judged the (model-a, model-b) pair.
-        # Relaunch WITHOUT --full-rejudge: that pair is skipped for ALL samples
-        # (pair-level skip), so only (a,c) and (b,c) get judged this run.
+    def test_resume_tops_up_partial_pairs(self):
+        # A prior (checkpointed) run judged (model-a, model-b) on samples 0-3
+        # only. Relaunch WITHOUT --full-rejudge: (pair, sample)-level skip means
+        # (a,b) is topped up on samples 4-9, and (a,c)/(b,c) run on all 10.
         ds, ocr = make_ds(n=10)
         existing = [
             ComparisonResult(
@@ -219,12 +291,29 @@ class TestResume:
             ocr,
             existing=existing,
         )
-        # 10 samples x 2 remaining pairs = 20 (the (a,b) pair is fully skipped).
+        # (a,b): 6 remaining samples + (a,c),(b,c): 10 each = 26.
+        assert judge.judged == 26
+        # (a,b) is topped up, not frozen — but only on the not-yet-judged samples.
+        ab = ("model-a", "model-b")
+        ab_samples = {s for (pair, s) in judge.pair_samples if pair == ab}
+        assert ab_samples == {4, 5, 6, 7, 8, 9}
+        m_publish.assert_called_once()
+
+    def test_resume_fully_judged_pair_not_rejudged(self):
+        # A pair judged on ALL samples is skipped entirely (nothing to top up).
+        ds, ocr = make_ds(n=10)
+        existing = [
+            ComparisonResult(
+                sample_idx=i, model_a="model-a", model_b="model-b", winner="A"
+            )
+            for i in range(10)
+        ]
+        judge, _, _ = _run_judge(
+            ["--no-adaptive", "--checkpoint-every", "0"], ds, ocr, existing=existing
+        )
+        # Only (a,c) and (b,c) remain: 20.
         assert judge.judged == 20
         assert ("model-a", "model-b") not in judge.pairs_seen
-        assert ("model-a", "model-c") in judge.pairs_seen
-        assert ("model-b", "model-c") in judge.pairs_seen
-        m_publish.assert_called_once()
 
     def test_full_rejudge_ignores_existing(self):
         ds, ocr = make_ds(n=10)
@@ -240,6 +329,6 @@ class TestResume:
             ocr,
             existing=existing,
         )
-        # --full-rejudge drops skip_pairs, so all 3 pairs x 10 samples = 30.
+        # --full-rejudge drops the skip map, so all 3 pairs x 10 samples = 30.
         assert judge.judged == 30
         assert ("model-a", "model-b") in judge.pairs_seen

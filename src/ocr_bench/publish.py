@@ -156,7 +156,7 @@ def publish_checkpoint(
     once at the final publish. The point of a checkpoint is durability: a run
     killed between checkpoints loses at most the comparisons judged since the
     last one, and a relaunch WITHOUT ``--full-rejudge`` picks the checkpointed
-    comparisons back up (see ``load_existing_comparisons`` + ``skip_pairs`` in
+    comparisons back up (see ``load_existing_comparisons`` + ``skip_samples`` in
     ``cli.cmd_judge``).
 
     ``results`` must be the *full* accumulated set (existing + new so far);

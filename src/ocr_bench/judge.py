@@ -170,7 +170,7 @@ def build_comparisons(
     ocr_columns: dict[str, str],
     max_samples: int | None = None,
     seed: int = 42,
-    skip_pairs: set[tuple[str, str]] | None = None,
+    skip_samples: dict[tuple[str, str], set[int]] | None = None,
     indices: list[int] | None = None,
 ) -> list[Comparison]:
     """Build pairwise comparison prompts from a dataset.
@@ -181,9 +181,13 @@ def build_comparisons(
         max_samples: If set, randomly sample this many rows. Ignored when
             ``indices`` is provided.
         seed: Random seed for sampling and position-bias randomization.
-        skip_pairs: Set of (model_a, model_b) pairs to exclude. Pairs are
-            normalized so (a, b) and (b, a) are treated identically.
-            If None, all pairs are included.
+        skip_samples: Maps a (model_a, model_b) pair to the set of sample
+            indices already judged for that pair; those exact (pair, sample)
+            combinations are excluded. Pairs are normalized so (a, b) and
+            (b, a) match. This is (pair, sample)-level, not pair-level: a pair
+            judged on only some samples is still built for the rest, so a
+            resumed run tops up partially-judged pairs. If None, nothing is
+            skipped.
         indices: Explicit row indices to use. When provided, ``max_samples``
             and ``seed`` are not used for index selection (seed is still used
             for position-bias randomization).
@@ -195,10 +199,11 @@ def build_comparisons(
     model_names = list(ocr_columns.values())
     pairs = list(combinations(range(len(col_names)), 2))
 
-    # Normalize skip set for symmetric lookup
-    normalized_skip: set[tuple[str, str]] = set()
-    if skip_pairs:
-        normalized_skip = {_normalize_pair(a, b) for a, b in skip_pairs}
+    # Normalize skip map for symmetric (order-independent) pair lookup.
+    normalized_skip: dict[tuple[str, str], set[int]] = {}
+    if skip_samples:
+        for (a, b), sample_ids in skip_samples.items():
+            normalized_skip.setdefault(_normalize_pair(a, b), set()).update(sample_ids)
 
     if indices is None:
         indices = sample_indices(len(dataset), max_samples, seed)
@@ -213,11 +218,14 @@ def build_comparisons(
         text_cols_data = {col: dataset[col] for col in col_names}
 
     for idx in indices:
-        # Determine which pairs need judging for this row
+        # Which pairs still need judging for THIS sample. A pair is skipped only
+        # for the specific samples already judged, so partially-judged pairs get
+        # topped up on resume rather than dropped.
         needed_pairs = [
             (i, j)
             for i, j in pairs
-            if _normalize_pair(model_names[i], model_names[j]) not in normalized_skip
+            if idx
+            not in normalized_skip.get(_normalize_pair(model_names[i], model_names[j]), ())
         ]
         if not needed_pairs:
             continue  # Skip image encoding entirely
