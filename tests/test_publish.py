@@ -167,6 +167,19 @@ class TestBuildMetadataRow:
         row = build_metadata_row(meta)
         assert row["max_ocr_text_len"] == 2500
         assert row["judge_image_dim"] == 1024
+        assert row["judge_text_mode"] == "normalized"
+
+    def test_judge_text_mode_recorded(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=[],
+            seed=42,
+            max_samples=0,
+            total_comparisons=0,
+            valid_comparisons=0,
+            judge_text_mode="raw",
+        )
+        assert build_metadata_row(meta)["judge_text_mode"] == "raw"
 
     def test_cap_fields_recorded(self):
         meta = EvalMetadata(

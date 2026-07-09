@@ -157,6 +157,19 @@ def build_parser() -> argparse.ArgumentParser:
             f"(default: {MAX_IMAGE_DIM}). Dense broadsheets may need 1536-2048."
         ),
     )
+    judge.add_argument(
+        "--judge-text-mode",
+        choices=["normalized", "raw"],
+        default="normalized",
+        help=(
+            "How OCR text is prepared for the judge (default: normalized). "
+            "'normalized' flattens HTML to bare content before the char cap so "
+            "the cap is format-neutral (the default, because raw mode lets "
+            "HTML-verbose outputs burn the cap on markup — the #45 bias). "
+            "'raw' skips normalization and caps text as-is — use it to judge "
+            "markup quality itself or to audit the harness's transformation."
+        ),
+    )
 
     # Output
     judge.add_argument(
@@ -250,6 +263,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-samples", type=int, default=None, help="Per-model sample limit (also caps judging)"
     )
     bench.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
+    bench.add_argument(
+        "--judge-text-mode",
+        choices=["normalized", "raw"],
+        default="normalized",
+        help="OCR text prep for the judge (default: normalized; see `judge --help`).",
+    )
     bench.add_argument(
         "--no-publish", action="store_true", help="Don't publish results (skips the viewer)"
     )
@@ -482,6 +501,15 @@ def cmd_judge(args: argparse.Namespace) -> None:
     results_repo = _resolve_results_repo(args.dataset, args.save_results, args.no_publish)
     from_prs = False  # track for metadata
     max_comparisons = args.max_comparisons  # global budget; None = uncapped
+    normalize = args.judge_text_mode == "normalized"
+    if not normalize:
+        console.print(
+            "[yellow]judge-text-mode=raw:[/yellow] OCR text is capped WITHOUT HTML "
+            "normalization, so HTML-verbose outputs (tables) burn the char cap on "
+            "markup and get truncated mid-content while compact formats fit whole — "
+            "the #45 format bias. 'normalized' is the default for exactly this "
+            "reason; use raw only to judge markup quality or audit the transformation."
+        )
 
     # Resolve checkpoint cadence (args.checkpoint_every: None = unspecified).
     #
@@ -681,6 +709,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 min_chars=args.min_chars,
                 max_ocr_text_len=args.max_ocr_text_len,
                 judge_image_dim=args.judge_image_dim,
+                normalize=normalize,
             )
             if not batch_comps:
                 continue
@@ -773,6 +802,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             min_chars=args.min_chars,
             max_ocr_text_len=args.max_ocr_text_len,
             judge_image_dim=args.judge_image_dim,
+            normalize=normalize,
         )
 
         # Global budget: judge at most N pairs, keeping every auto-tie (they
@@ -817,6 +847,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     from_prs=from_prs,
                     max_ocr_text_len=args.max_ocr_text_len,
                     judge_image_dim=args.judge_image_dim,
+                    judge_text_mode=args.judge_text_mode,
                 )
                 publish_results(
                     results_repo,
@@ -922,6 +953,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             from_prs=from_prs,
             max_ocr_text_len=args.max_ocr_text_len,
             judge_image_dim=args.judge_image_dim,
+            judge_text_mode=args.judge_text_mode,
         )
         publish_results(
             results_repo,
@@ -1179,7 +1211,8 @@ def cmd_bench(args: argparse.Namespace) -> None:
 
     # --- Phase 2: judge the OCR outputs (from the PRs the run just opened) ---
     judge_argv = [
-        "judge", args.output_repo, "--from-prs", "--seed", str(args.seed)
+        "judge", args.output_repo, "--from-prs", "--seed", str(args.seed),
+        "--judge-text-mode", args.judge_text_mode,
     ]
     for model in args.judge_models or []:
         judge_argv += ["--model", model]

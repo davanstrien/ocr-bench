@@ -39,6 +39,31 @@ class TestBuildParser:
         assert args.seed == 42
         assert args.save_results is None
         assert args.min_chars == 20
+        assert args.judge_text_mode == "normalized"
+
+    def test_judge_text_mode_raw(self):
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset", "--judge-text-mode", "raw"])
+        assert args.judge_text_mode == "raw"
+
+    def test_judge_text_mode_normalized(self):
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset", "--judge-text-mode", "normalized"])
+        assert args.judge_text_mode == "normalized"
+
+    def test_judge_text_mode_rejects_unknown(self):
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["judge", "user/dataset", "--judge-text-mode", "cooked"])
+
+    def test_bench_judge_text_mode(self):
+        parser = build_parser()
+        args = parser.parse_args(["bench", "user/imgs", "user/out"])
+        assert args.judge_text_mode == "normalized"
+        args = parser.parse_args(
+            ["bench", "user/imgs", "user/out", "--judge-text-mode", "raw"]
+        )
+        assert args.judge_text_mode == "raw"
 
     def test_multiple_models(self):
         parser = build_parser()

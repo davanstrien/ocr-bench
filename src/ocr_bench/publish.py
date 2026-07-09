@@ -51,6 +51,9 @@ class EvalMetadata:
     timestamp: str = ""
     max_ocr_text_len: int = MAX_OCR_TEXT_LENGTH
     judge_image_dim: int = MAX_IMAGE_DIM
+    # "normalized" (HTML flattened before the cap) or "raw" (capped as-is).
+    # Changes verdicts, so it's provenance alongside the caps.
+    judge_text_mode: str = "normalized"
 
     def __post_init__(self):
         if not self.timestamp:
@@ -149,6 +152,7 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
         "timestamp": metadata.timestamp,
         "max_ocr_text_len": metadata.max_ocr_text_len,
         "judge_image_dim": metadata.judge_image_dim,
+        "judge_text_mode": metadata.judge_text_mode,
     }
 
 

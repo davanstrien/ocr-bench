@@ -290,6 +290,29 @@ class TestBuildPrompt:
         assert "Name | Age" in prompt
         assert "<td>" not in prompt
 
+    def test_normalize_true_is_default(self):
+        # Default path flattens HTML (no explicit normalize=).
+        prompt, _, _, _ = build_prompt("<td>x</td><td>y</td>", "short", swapped=False)
+        assert "x | y" in prompt
+        assert "<td>" not in prompt
+
+    def test_raw_mode_skips_normalization(self):
+        # normalize=False: the raw HTML markup reaches the prompt untouched.
+        html = "<table><tr><td>Name</td><td>Age</td></tr></table>"
+        prompt, _, _, _ = build_prompt(html, "short", swapped=False, normalize=False)
+        assert html in prompt
+        assert "Name | Age" not in prompt
+
+    def test_raw_mode_caps_markup(self):
+        # In raw mode the cap counts markup chars — long HTML truncates where
+        # normalized content would have fit. 5 rows: raw ~125 chars, normalized
+        # ~24 chars ("cell" x5 as lines); cap at 60 splits them.
+        html = "<table>" + "<tr><td>cell</td></tr>" * 5 + "</table>"
+        _, _, trunc_norm, _ = build_prompt(html, "short", swapped=False, max_len=60)
+        _, _, trunc_raw, _ = build_prompt(html, "short", swapped=False, max_len=60, normalize=False)
+        assert not trunc_norm  # flattened content fits under 60
+        assert trunc_raw  # raw markup blows the cap
+
 
 class TestBuildMessages:
     def test_message_structure(self):
@@ -567,6 +590,22 @@ class TestBuildComparisons:
             )
             mock_img.assert_called_once()
             assert mock_img.call_args.kwargs["max_dim"] == 1536
+
+    def test_normalize_flag_threaded_to_prompt(self):
+        # A cell-heavy HTML output vs a plain one. Under raw mode the HTML markup
+        # reaches the prompt untouched; under the default it is flattened.
+        html = "<table><tr><td>Alpha</td><td>Beta</td></tr></table>"
+        ds = [{"image": Image.new("RGB", (50, 50)), "col_a": html, "col_b": "plain text here"}]
+        cols = {"col_a": "A", "col_b": "B"}
+
+        raw = build_comparisons(ds, cols, normalize=False)
+        raw_prompt = raw[0].messages[0]["content"][1]["text"]
+        assert "<td>" in raw_prompt
+
+        norm = build_comparisons(ds, cols)  # normalize=True default
+        norm_prompt = norm[0].messages[0]["content"][1]["text"]
+        assert "<td>" not in norm_prompt
+        assert "Alpha | Beta" in norm_prompt
 
 
 class TestBlankPairFiltering:

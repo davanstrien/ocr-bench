@@ -355,24 +355,28 @@ def build_prompt(
     text_b: str,
     swapped: bool,
     max_len: int = MAX_OCR_TEXT_LENGTH,
+    normalize: bool = True,
 ) -> tuple[str, bool, bool, bool]:
     """Build the pairwise comparison prompt, applying position-bias swap.
 
-    Each text is normalized (HTML flattened to bare content) before the length
-    cap so the budget is spent on content, not markup — keeping the cap
-    format-neutral. When a text is still over ``max_len`` after normalization it
-    is truncated and a harness-voice evaluator note is appended AFTER that
-    output's block (outside the fenced text, before the JSON instruction) so the
-    judge doesn't read the cut as model incompleteness or the note as
-    model-added commentary.
+    When ``normalize`` is True (default), each text is normalized (HTML
+    flattened to bare content) before the length cap so the budget is spent on
+    content, not markup — keeping the cap format-neutral. When False, text goes
+    to the cap as-is (raw mode). When a text is still over ``max_len`` it is
+    truncated and a harness-voice evaluator note is appended AFTER that output's
+    block (outside the fenced text, before the JSON instruction) so the judge
+    doesn't read the cut as model incompleteness or the note as model-added
+    commentary.
 
     Returns (prompt_text, swapped, truncated_a, truncated_b). The returned flags
     refer to the original A/B (``text_a``/``text_b``) ordering, independent of
     the display swap; the note references the judge-visible (post-swap) A/B
     positions.
     """
-    a, trunc_a = _apply_cap(normalize_for_judge(text_a), max_len)
-    b, trunc_b = _apply_cap(normalize_for_judge(text_b), max_len)
+    norm_a = normalize_for_judge(text_a) if normalize else text_a
+    norm_b = normalize_for_judge(text_b) if normalize else text_b
+    a, trunc_a = _apply_cap(norm_a, max_len)
+    b, trunc_b = _apply_cap(norm_b, max_len)
     # Map original-order truncation to judge-visible positions for the note.
     disp_a_truncated, disp_b_truncated = (trunc_b, trunc_a) if swapped else (trunc_a, trunc_b)
     if swapped:
@@ -444,6 +448,7 @@ def build_comparisons(
     min_chars: int = DEFAULT_MIN_CHARS,
     max_ocr_text_len: int = MAX_OCR_TEXT_LENGTH,
     judge_image_dim: int = MAX_IMAGE_DIM,
+    normalize: bool = True,
 ) -> list[Comparison]:
     """Build pairwise comparison prompts from a dataset.
 
@@ -469,6 +474,8 @@ def build_comparisons(
         max_ocr_text_len: Per-output character cap applied after HTML
             normalization when building each prompt.
         judge_image_dim: Longer-side pixel cap for the judge image.
+        normalize: When True (default), flatten HTML to bare content before the
+            cap (format-neutral). When False, cap the text as-is (raw mode).
 
     Returns:
         List of Comparison objects. Pairs needing a judge carry pre-built chat
@@ -567,7 +574,7 @@ def build_comparisons(
 
             swapped = rng.random() < 0.5
             prompt, swapped, trunc_a, trunc_b = build_prompt(
-                text_a, text_b, swapped, max_len=max_ocr_text_len
+                text_a, text_b, swapped, max_len=max_ocr_text_len, normalize=normalize
             )
             messages = build_messages(image_b64, prompt)
 
