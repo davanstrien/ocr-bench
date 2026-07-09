@@ -155,6 +155,32 @@ class TestBuildMetadataRow:
         )
         assert build_metadata_row(meta)["auto_tied"] == 2
 
+    def test_failed_outputs_serialized(self):
+        import json
+
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=[],
+            seed=42,
+            max_samples=10,
+            total_comparisons=1,
+            valid_comparisons=1,
+            failed_outputs={"model-x": 5},
+        )
+        row = build_metadata_row(meta)
+        assert json.loads(row["failed_outputs"]) == {"model-x": 5}
+
+    def test_failed_outputs_default_empty(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=[],
+            seed=42,
+            max_samples=0,
+            total_comparisons=0,
+            valid_comparisons=0,
+        )
+        assert build_metadata_row(meta)["failed_outputs"] == "{}"
+
 
 class TestAlignMetadataRows:
     def test_union_of_keys_filled_with_none(self):
@@ -427,3 +453,59 @@ class TestBuildReadme:
         rows = build_leaderboard_rows(board)
         readme = _build_readme("user/results", rows, board, self._make_metadata())
         assert "- **Comparisons**: 1 judged + 1 auto-tied (2 total)" in readme
+
+    def _board_two_models(self) -> Leaderboard:
+        return Leaderboard(
+            elo={"model-a": 1500.0, "model-b": 1400.0},
+            wins={"model-a": 1, "model-b": 0},
+            losses={"model-a": 0, "model-b": 1},
+            ties={"model-a": 0, "model-b": 0},
+        )
+
+    def _metadata_with_failed(self, failed) -> EvalMetadata:
+        return EvalMetadata(
+            source_dataset="user/data",
+            judge_models=["org/judge"],
+            seed=42,
+            max_samples=10,
+            total_comparisons=1,
+            valid_comparisons=1,
+            failed_outputs=failed,
+        )
+
+    def test_failed_outputs_section_and_row_marker(self):
+        from ocr_bench.publish import _build_readme
+
+        board = self._board_two_models()
+        rows = build_leaderboard_rows(board)
+        readme = _build_readme(
+            "user/results", rows, board, self._metadata_with_failed({"model-b": 50})
+        )
+        assert "## ⚠ Failed outputs" in readme
+        assert "model-b ⚠" in readme  # flagged in the leaderboard row
+        assert "| model-b | 50 |" in readme  # listed in the failures table
+        # A flagged run must not be mistaken for a low-quality model.
+        assert "excluded from judging" in readme.lower()
+
+    def test_no_failed_section_when_clean(self):
+        from ocr_bench.publish import _build_readme
+
+        board = self._board_two_models()
+        rows = build_leaderboard_rows(board)
+        readme = _build_readme("user/results", rows, board, self._metadata_with_failed({}))
+        assert "## ⚠ Failed outputs" not in readme
+        assert "⚠" not in readme
+
+    def test_failed_outputs_accepts_json_string(self):
+        """A metadata object rebuilt from a stored row carries failed_outputs
+        as a JSON string — the card must still render it."""
+        import json
+
+        from ocr_bench.publish import _build_readme
+
+        board = self._board_two_models()
+        rows = build_leaderboard_rows(board)
+        readme = _build_readme(
+            "user/results", rows, board, self._metadata_with_failed(json.dumps({"model-b": 7}))
+        )
+        assert "| model-b | 7 |" in readme

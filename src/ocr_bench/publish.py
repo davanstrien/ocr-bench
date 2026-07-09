@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import structlog
 from datasets import Dataset, load_dataset
@@ -47,6 +47,8 @@ class EvalMetadata:
     max_comparisons: int | None = None
     budget_exhausted: bool = False
     from_prs: bool = False
+    # model → count of error-sentinel outputs excluded from judging (issue #46).
+    failed_outputs: dict[str, int] = field(default_factory=dict)
     timestamp: str = ""
 
     def __post_init__(self):
@@ -141,6 +143,7 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
         "max_comparisons": metadata.max_comparisons,
         "budget_exhausted": metadata.budget_exhausted,
         "from_prs": metadata.from_prs,
+        "failed_outputs": json.dumps(metadata.failed_outputs),
         "timestamp": metadata.timestamp,
     }
 
@@ -224,8 +227,8 @@ def publish_results(
     logger.info("published_leaderboard", repo=repo_id, n=len(rows))
 
     # Metadata — append-only. Align all rows to the union of keys so a newer
-    # row's columns (auto_tied, budget fields) aren't dropped when an older row
-    # written before those fields existed comes first.
+    # row's columns (auto_tied, budget fields, failed_outputs) aren't dropped
+    # when an older row written before those fields existed comes first.
     meta_row = build_metadata_row(metadata)
     all_meta = _align_metadata_rows((existing_metadata or []) + [meta_row])
     Dataset.from_list(all_meta).push_to_hub(repo_id, config_name="metadata")
@@ -268,6 +271,16 @@ def _build_readme(
         comparisons_str = f"{n_judged} judged + {n_auto} auto-tied ({n_comparisons} total)"
     else:
         comparisons_str = str(n_comparisons)
+
+    # Models that emitted error sentinels instead of transcriptions. These
+    # outputs were excluded from judging, so a high count means the run failed
+    # on this corpus — the card must not let it read as "ranked low" (issue #46).
+    failed = metadata.failed_outputs
+    if isinstance(failed, str):
+        failed = json.loads(failed) if failed else {}
+    failed_outputs: dict[str, int] = {
+        model: count for model, count in (failed or {}).items() if count
+    }
 
     # The card license describes the published results DATA (which embeds
     # OCR text derived from the source dataset), not this tool — so there is
@@ -321,6 +334,10 @@ def _build_readme(
     for rank, row in enumerate(rows, 1):
         # Escape pipes so arbitrary model names can't break the table
         model = str(row["model"]).replace("|", "\\|")
+        if row["model"] in failed_outputs:
+            # Flag rows whose model produced excluded error sentinels so a
+            # failed run is never mistaken for a genuinely low-ranked model.
+            model = f"{model} ⚠"
         elo = row["elo"]
         params = row.get("params", "")
         if has_ci and "elo_low" in row:
@@ -336,6 +353,25 @@ def _build_readme(
                 f"| {row['wins']} | {row['losses']} | {row['ties']} "
                 f"| {row['win_pct']}% |"
             )
+
+    if failed_outputs:
+        lines += [
+            "",
+            "## ⚠ Failed outputs",
+            "",
+            "The models below emitted error sentinels (e.g. `[OCR ERROR]`, "
+            "`[OCR FAILED]`) instead of transcriptions on some pages — usually a "
+            "crashed or misconfigured run, **not** poor OCR quality. Those outputs "
+            "were **excluded from judging**, so a high count means the model did "
+            "not produce comparable output on this corpus. Do not read a flagged "
+            "model's rank as a quality signal.",
+            "",
+            "| Model | Excluded outputs |",
+            "|-------|------------------|",
+        ]
+        for model, count in sorted(failed_outputs.items(), key=lambda kv: -kv[1]):
+            safe_model = str(model).replace("|", "\\|")
+            lines.append(f"| {safe_model} | {count} |")
 
     lines += [
         "",

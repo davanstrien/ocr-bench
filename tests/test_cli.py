@@ -17,7 +17,9 @@ from ocr_bench.cli import (
     _trim_to_budget,
     build_parser,
 )
+from ocr_bench.dataset import AlignmentResult
 from ocr_bench.elo import compute_elo
+from ocr_bench.integrity import AuditReport, ColumnStats, ConfigAudit
 from ocr_bench.judge import Comparison
 
 
@@ -122,6 +124,119 @@ class TestBuildParser:
         parser = build_parser()
         args = parser.parse_args(["judge", "user/dataset"])
         assert args.full_rejudge is False
+
+
+class TestAuditParser:
+    def test_audit_defaults(self):
+        args = build_parser().parse_args(["audit", "user/data"])
+        assert args.command == "audit"
+        assert args.dataset == "user/data"
+        assert args.split == "train"
+        assert args.max_ocr_text_len == 2500
+
+    def test_audit_overrides(self):
+        args = build_parser().parse_args(
+            ["audit", "user/data", "--split", "test", "--max-ocr-text-len", "500"]
+        )
+        assert args.split == "test"
+        assert args.max_ocr_text_len == 500
+
+
+def _audit_report(sentinel_count: int = 0, n_rows: int = 10, status: str = "ok") -> AuditReport:
+    stats = ColumnStats(
+        name="cfg",
+        model="m",
+        n_rows=n_rows,
+        n_empty=0,
+        n_sentinel=sentinel_count,
+        n_short=0,
+        n_over_max=0,
+        median_len=100.0,
+        max_len=200,
+        max_ocr_text_len=2500,
+    )
+    return AuditReport(
+        repo_id="user/data",
+        configs=[ConfigAudit(stats)],
+        alignment=AlignmentResult(status=status),
+        max_ocr_text_len=2500,
+    )
+
+
+class TestCmdAudit:
+    def test_clean_repo_does_not_exit(self, monkeypatch):
+        monkeypatch.setattr(cli, "audit_repo", lambda *a, **k: _audit_report())
+        args = build_parser().parse_args(["audit", "user/data"])
+        cli.cmd_audit(args)  # no SystemExit
+
+    def test_high_sentinels_exit_one(self, monkeypatch):
+        monkeypatch.setattr(cli, "audit_repo", lambda *a, **k: _audit_report(sentinel_count=5))
+        args = build_parser().parse_args(["audit", "user/data"])
+        with pytest.raises(SystemExit) as exc_info:
+            cli.cmd_audit(args)
+        assert exc_info.value.code == 1
+
+    def test_misalignment_exit_one(self, monkeypatch):
+        monkeypatch.setattr(
+            cli, "audit_repo", lambda *a, **k: _audit_report(status="misaligned")
+        )
+        args = build_parser().parse_args(["audit", "user/data"])
+        with pytest.raises(SystemExit) as exc_info:
+            cli.cmd_audit(args)
+        assert exc_info.value.code == 1
+
+    def _stats(self, name: str, n_rows: int) -> ColumnStats:
+        return ColumnStats(
+            name=name,
+            model=name,
+            n_rows=n_rows,
+            n_empty=0,
+            n_sentinel=0,
+            n_short=0,
+            n_over_max=0,
+            median_len=100.0,
+            max_len=200,
+            max_ocr_text_len=2500,
+        )
+
+    def test_row_count_mismatch_exit_one(self, monkeypatch):
+        report = AuditReport(
+            repo_id="user/data",
+            configs=[ConfigAudit(self._stats("cfg_a", 3)), ConfigAudit(self._stats("cfg_b", 2))],
+            alignment=AlignmentResult(status="unverified"),
+            max_ocr_text_len=2500,
+        )
+        monkeypatch.setattr(cli, "audit_repo", lambda *a, **k: report)
+        args = build_parser().parse_args(["audit", "user/data"])
+        with pytest.raises(SystemExit) as exc_info:
+            cli.cmd_audit(args)
+        assert exc_info.value.code == 1
+
+    def test_no_configs_exit_two(self, monkeypatch):
+        # Couldn't audit anything → operational (2), not an integrity failure (1).
+        empty = AuditReport(
+            repo_id="user/data",
+            configs=[],
+            alignment=AlignmentResult(status="n/a"),
+            max_ocr_text_len=2500,
+        )
+        monkeypatch.setattr(cli, "audit_repo", lambda *a, **k: empty)
+        args = build_parser().parse_args(["audit", "user/data"])
+        with pytest.raises(SystemExit) as exc_info:
+            cli.cmd_audit(args)
+        assert exc_info.value.code == 2
+
+    def test_operational_error_exit_two(self, monkeypatch):
+        # A Hub/network/load failure during the audit is exit 2, so CI can tell
+        # a broken run from a bad repo.
+        def boom(*a, **k):
+            raise OSError("hub unreachable")
+
+        monkeypatch.setattr(cli, "audit_repo", boom)
+        args = build_parser().parse_args(["audit", "user/data"])
+        with pytest.raises(SystemExit) as exc_info:
+            cli.cmd_audit(args)
+        assert exc_info.value.code == 2
 
 
 class TestMainErrorHandling:

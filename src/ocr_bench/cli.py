@@ -25,8 +25,15 @@ from ocr_bench.dataset import (
     load_flat_dataset,
 )
 from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo, rankings_resolved
+from ocr_bench.integrity import (
+    SENTINEL_FLAG_RATE,
+    audit_repo,
+    compute_model_stats,
+    failed_output_counts,
+)
 from ocr_bench.judge import (
     DEFAULT_MIN_CHARS,
+    MAX_OCR_TEXT_LENGTH,
     Comparison,
     _normalize_pair,
     build_comparisons,
@@ -234,6 +241,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     bench.add_argument("--port", type=int, default=7860, help="Viewer port (default: 7860)")
     bench.add_argument("--host", default="127.0.0.1", help="Viewer host (default: 127.0.0.1)")
+
+    # --- audit subcommand ---
+    audit = sub.add_parser(
+        "audit",
+        help="Read-only pre-judge health check on an OCR output repo",
+    )
+    audit.add_argument("dataset", help="HF dataset repo id with OCR outputs")
+    audit.add_argument("--split", default="train", help="Dataset split (default: train)")
+    audit.add_argument(
+        "--max-ocr-text-len",
+        type=int,
+        default=MAX_OCR_TEXT_LENGTH,
+        help=(
+            "Text length above which the judge truncates an output "
+            f"(default: {MAX_OCR_TEXT_LENGTH}); reported as truncation exposure"
+        ),
+    )
 
     return parser
 
@@ -550,6 +574,20 @@ def cmd_judge(args: argparse.Namespace) -> None:
     for col, model in ocr_columns.items():
         console.print(f"  {col} → {model}")
 
+    # --- Input integrity: sentinel outputs (issue #46) ---
+    # Error sentinels (e.g. "[OCR ERROR]") are excluded from judging by
+    # build_comparisons; here we count them per model for the metadata + card
+    # and warn loudly when a model's run largely failed on this corpus.
+    model_stats = compute_model_stats(ds, ocr_columns, max_ocr_text_len=MAX_OCR_TEXT_LENGTH)
+    failed_outputs = failed_output_counts(model_stats)
+    for stat in model_stats:
+        if stat.sentinel_rate > SENTINEL_FLAG_RATE:
+            console.print(
+                f"[yellow]⚠ {stat.model}: {stat.n_sentinel}/{stat.n_rows} outputs are "
+                f"error sentinels ({stat.sentinel_rate:.0%}) — excluded from judging; "
+                f"a high rate means this run failed, not that the model is weak.[/yellow]"
+            )
+
     # --- Incremental: load existing comparisons ---
     existing_results: list[ComparisonResult] = []
     existing_meta_rows: list[dict] = []
@@ -788,6 +826,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     max_comparisons=max_comparisons,
                     budget_exhausted=budget_exhausted,
                     from_prs=from_prs,
+                    failed_outputs=failed_outputs,
                 )
                 publish_results(
                     results_repo,
@@ -891,6 +930,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             budget_exhausted=budget_exhausted,
             auto_tied=n_auto_total,
             from_prs=from_prs,
+            failed_outputs=failed_outputs,
         )
         publish_results(
             results_repo,
@@ -1173,6 +1213,103 @@ def cmd_bench(args: argparse.Namespace) -> None:
     cmd_view(parser.parse_args(view_argv))
 
 
+# Audit exit codes, so CI can tell a bad *repo* from a broken *run*.
+_AUDIT_EXIT_INTEGRITY = 1  # audit ran and found blocking problems
+_AUDIT_EXIT_OPERATIONAL = 2  # audit could not complete (network/Hub/load)
+
+
+def _pct(rate: float) -> str:
+    """Format a rate as a percentage, colouring anything non-zero for attention."""
+    if rate <= 0:
+        return "0%"
+    colour = "red" if rate > SENTINEL_FLAG_RATE else "yellow"
+    return f"[{colour}]{rate:.0%}[/{colour}]"
+
+
+def _align_cell(status: str) -> str:
+    """Colour a per-config alignment status for the audit table."""
+    colours = {"misaligned": "red", "unverified": "yellow", "ok": "green"}
+    colour = colours.get(status)
+    return f"[{colour}]{status}[/{colour}]" if colour else status
+
+
+def cmd_audit(args: argparse.Namespace) -> None:
+    """Read-only pre-judge health check.
+
+    Exit codes: 0 = clean, 1 = the repo would poison a judge run (integrity
+    failure), 2 = the audit could not complete (network / Hub / dataset load).
+    """
+    try:
+        report = audit_repo(
+            args.dataset,
+            split=args.split,
+            max_ocr_text_len=args.max_ocr_text_len,
+        )
+    except (DatasetError, OSError, OpenAIError, ValueError) as exc:
+        # Couldn't even run the check (repo missing, no OCR columns, network /
+        # Hub outage). Distinct from an integrity failure so automation can tell
+        # "broken run" from "bad data".
+        console.print(f"[red]Audit could not complete:[/red] {exc}")
+        sys.exit(_AUDIT_EXIT_OPERATIONAL)
+
+    if not report.configs:
+        console.print("[red]No OCR configs/columns found to audit.[/red]")
+        sys.exit(_AUDIT_EXIT_OPERATIONAL)
+
+    align = report.alignment
+    table = Table(title=f"OCR input audit — {args.dataset}", show_lines=False)
+    table.add_column("Config", style="cyan")
+    table.add_column("Model")
+    table.add_column("Rows", justify="right")
+    table.add_column("Empty", justify="right")
+    table.add_column("<20ch", justify="right")
+    table.add_column("Sentinel", justify="right")
+    table.add_column("Median len", justify="right")
+    table.add_column("Max len", justify="right")
+    table.add_column(f">{args.max_ocr_text_len}", justify="right")
+    table.add_column("Align")
+
+    for cfg in report.configs:
+        s = cfg.stats
+        table.add_row(
+            s.name,
+            s.model,
+            str(s.n_rows),
+            _pct(s.empty_rate),
+            _pct(s.short_rate),
+            _pct(s.sentinel_rate),
+            f"{s.median_len:.0f}",
+            str(s.max_len),
+            _pct(s.over_max_rate),
+            _align_cell(align.config_status(s.name)),
+        )
+
+    console.print(table)
+
+    # Overall alignment line
+    if align.status == "misaligned":
+        console.print(f"[red]Alignment: {align.describe()}[/red]")
+    elif align.status in ("unverified", "partial"):
+        console.print(f"[yellow]Alignment: {align.describe()}[/yellow]")
+    else:
+        console.print(f"Alignment: {align.describe()}")
+
+    # Verdict + exit code (usable in automation)
+    if report.has_problems:
+        problems: list[str] = []
+        if align.status == "misaligned":
+            problems.append("row misalignment")
+        if report.row_count_mismatch:
+            counts = ", ".join(f"{c.stats.name}={c.stats.n_rows}" for c in report.configs)
+            problems.append(f"row-count mismatch ({counts})")
+        if report.flagged_models:
+            flagged = ", ".join(report.flagged_models)
+            problems.append(f">{SENTINEL_FLAG_RATE:.0%} sentinels: {flagged}")
+        console.print(f"\n[red]FAIL[/red] — {'; '.join(problems)}")
+        sys.exit(_AUDIT_EXIT_INTEGRITY)
+    console.print("\n[green]OK[/green] — no blocking issues found")
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -1192,6 +1329,8 @@ def main() -> None:
             cmd_publish(args)
         elif args.command == "bench":
             cmd_bench(args)
+        elif args.command == "audit":
+            cmd_audit(args)
     except DatasetError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(1)
