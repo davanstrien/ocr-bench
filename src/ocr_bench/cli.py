@@ -98,17 +98,23 @@ def build_parser() -> argparse.ArgumentParser:
         dest="models",
         help=f"Judge model spec (repeatable for jury). Default: {DEFAULT_JUDGE}",
     )
-    criteria_group = judge.add_mutually_exclusive_group()
-    criteria_group.add_argument(
+    # --criteria and --criteria-file are mutually exclusive, enforced in
+    # _resolve_criteria (NOT an argparse mutually-exclusive group: on Python
+    # 3.13.0 such a group with a defaulted choices arg in a subparser fails to
+    # detect the conflict — a real regression, fixed in 3.13.1). --criteria's
+    # default is the None sentinel so "explicitly passed" is distinguishable
+    # from "unset"; it resolves to DEFAULT_CRITERIA in _resolve_criteria.
+    judge.add_argument(
         "--criteria",
         choices=sorted(CRITERIA_PROFILES),
-        default="default",
+        default=None,
         help=(
             "Judge criteria profile (default: default). 'table-fidelity' adds an "
-            "explicit row/column cell-preservation criterion for table-dense corpora."
+            "explicit row/column cell-preservation criterion for table-dense corpora. "
+            "Mutually exclusive with --criteria-file."
         ),
     )
-    criteria_group.add_argument(
+    judge.add_argument(
         "--criteria-file",
         default=None,
         metavar="PATH",
@@ -251,17 +257,18 @@ def build_parser() -> argparse.ArgumentParser:
         dest="judge_models",
         help=f"Judge model spec (repeatable for a jury). Default: {DEFAULT_JUDGE}",
     )
-    bench_criteria = bench.add_mutually_exclusive_group()
-    bench_criteria.add_argument(
+    # Mutual exclusion enforced in _resolve_criteria (see the judge parser note).
+    bench.add_argument(
         "--criteria",
         choices=sorted(CRITERIA_PROFILES),
-        default="default",
+        default=None,
         help=(
             "Judge criteria profile (default: default). 'table-fidelity' adds an "
-            "explicit row/column cell-preservation criterion for table-dense corpora."
+            "explicit row/column cell-preservation criterion for table-dense corpora. "
+            "Mutually exclusive with --criteria-file."
         ),
     )
-    bench_criteria.add_argument(
+    bench.add_argument(
         "--criteria-file",
         default=None,
         metavar="PATH",
@@ -496,14 +503,22 @@ def _unresolved_adjacent_pairs(board: Leaderboard) -> list[str]:
 def _resolve_criteria(args: argparse.Namespace) -> tuple[str, str, str]:
     """Resolve (criteria_name, prompt_template, prompt_hash) from the CLI args.
 
-    ``--criteria-file`` (mutually exclusive with ``--criteria`` at the parser)
-    loads and validates a custom prompt template, named ``custom:<filename>``;
-    its hash is computed exactly as for a built-in profile, so provenance and
-    the mixing guard treat custom and built-in rubrics identically. Otherwise
-    the named built-in profile is used. Raises ``DatasetError`` on an unreadable
-    or invalid custom file (clean CLI error, no traceback).
+    Enforces that ``--criteria`` and ``--criteria-file`` are mutually exclusive
+    (``--criteria`` defaults to ``None``, so an explicit value is distinguishable
+    from unset — this exclusivity is enforced here rather than via an argparse
+    group, which is unreliable on Python 3.13.0). ``--criteria-file`` loads and
+    validates a custom prompt template, named ``custom:<filename>``; its hash is
+    computed exactly as for a built-in profile, so provenance and the mixing
+    guard treat custom and built-in rubrics identically. Otherwise the named
+    built-in profile (or the default when unset) is used. Raises ``DatasetError``
+    on a conflict, or an unreadable/invalid custom file (clean CLI error).
     """
+    criteria = getattr(args, "criteria", None)
     criteria_file = getattr(args, "criteria_file", None)
+    if criteria_file and criteria is not None:
+        raise DatasetError(
+            "--criteria and --criteria-file are mutually exclusive; pass only one"
+        )
     if criteria_file:
         try:
             template = Path(criteria_file).read_text(encoding="utf-8")
@@ -514,8 +529,9 @@ def _resolve_criteria(args: argparse.Namespace) -> tuple[str, str, str]:
         except ValueError as exc:
             raise DatasetError(f"invalid --criteria-file '{criteria_file}': {exc}") from exc
         return f"custom:{Path(criteria_file).name}", template, prompt_hash(template)
-    template = CRITERIA_PROFILES[args.criteria]
-    return args.criteria, template, prompt_hash(template)
+    name = criteria or DEFAULT_CRITERIA
+    template = CRITERIA_PROFILES[name]
+    return name, template, prompt_hash(template)
 
 
 def _existing_criteria_provenance(meta_rows: list[dict]) -> tuple[str, str]:
@@ -1245,6 +1261,11 @@ def cmd_bench(args: argparse.Namespace) -> None:
     """
     parser = build_parser()
 
+    # Validate the criteria selection BEFORE launching OCR jobs: a bad
+    # --criteria-file or a --criteria/--criteria-file conflict should fail fast,
+    # not after a full (paid) run. Raises DatasetError, caught by main().
+    _resolve_criteria(args)
+
     # --- Phase 1: run OCR models (waits for jobs to finish by default) ---
     from ocr_bench.run import failed_jobs
 
@@ -1281,10 +1302,11 @@ def cmd_bench(args: argparse.Namespace) -> None:
     ]
     for model in args.judge_models or []:
         judge_argv += ["--model", model]
-    # Forward exactly one of the mutually-exclusive criteria flags.
+    # Forward whichever criteria flag was set (at most one — already validated
+    # above). Neither → the judge phase uses its own default.
     if args.criteria_file:
         judge_argv += ["--criteria-file", args.criteria_file]
-    else:
+    elif args.criteria is not None:
         judge_argv += ["--criteria", args.criteria]
     if args.max_samples is not None:
         judge_argv += ["--max-samples", str(args.max_samples)]
