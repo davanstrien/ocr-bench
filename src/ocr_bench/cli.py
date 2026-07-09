@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
@@ -34,6 +35,7 @@ from ocr_bench.judge import (
     build_comparisons,
     prompt_hash,
     sample_indices,
+    validate_prompt_template,
 )
 from ocr_bench.publish import (
     EvalMetadata,
@@ -96,13 +98,25 @@ def build_parser() -> argparse.ArgumentParser:
         dest="models",
         help=f"Judge model spec (repeatable for jury). Default: {DEFAULT_JUDGE}",
     )
-    judge.add_argument(
+    criteria_group = judge.add_mutually_exclusive_group()
+    criteria_group.add_argument(
         "--criteria",
         choices=sorted(CRITERIA_PROFILES),
         default="default",
         help=(
             "Judge criteria profile (default: default). 'table-fidelity' adds an "
             "explicit row/column cell-preservation criterion for table-dense corpora."
+        ),
+    )
+    criteria_group.add_argument(
+        "--criteria-file",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Path to a custom judge prompt template (mutually exclusive with "
+            "--criteria). Must contain the {ocr_text_a} and {ocr_text_b} "
+            "placeholders and no other format fields — see the 'default' profile "
+            "for the expected shape. Recorded in metadata as custom:<filename>."
         ),
     )
 
@@ -237,7 +251,8 @@ def build_parser() -> argparse.ArgumentParser:
         dest="judge_models",
         help=f"Judge model spec (repeatable for a jury). Default: {DEFAULT_JUDGE}",
     )
-    bench.add_argument(
+    bench_criteria = bench.add_mutually_exclusive_group()
+    bench_criteria.add_argument(
         "--criteria",
         choices=sorted(CRITERIA_PROFILES),
         default="default",
@@ -245,6 +260,12 @@ def build_parser() -> argparse.ArgumentParser:
             "Judge criteria profile (default: default). 'table-fidelity' adds an "
             "explicit row/column cell-preservation criterion for table-dense corpora."
         ),
+    )
+    bench_criteria.add_argument(
+        "--criteria-file",
+        default=None,
+        metavar="PATH",
+        help="Path to a custom judge prompt template (mutually exclusive with --criteria).",
     )
     bench.add_argument(
         "--max-samples", type=int, default=None, help="Per-model sample limit (also caps judging)"
@@ -472,6 +493,31 @@ def _unresolved_adjacent_pairs(board: Leaderboard) -> list[str]:
     return pairs
 
 
+def _resolve_criteria(args: argparse.Namespace) -> tuple[str, str, str]:
+    """Resolve (criteria_name, prompt_template, prompt_hash) from the CLI args.
+
+    ``--criteria-file`` (mutually exclusive with ``--criteria`` at the parser)
+    loads and validates a custom prompt template, named ``custom:<filename>``;
+    its hash is computed exactly as for a built-in profile, so provenance and
+    the mixing guard treat custom and built-in rubrics identically. Otherwise
+    the named built-in profile is used. Raises ``DatasetError`` on an unreadable
+    or invalid custom file (clean CLI error, no traceback).
+    """
+    criteria_file = getattr(args, "criteria_file", None)
+    if criteria_file:
+        try:
+            template = Path(criteria_file).read_text(encoding="utf-8")
+        except OSError as exc:
+            raise DatasetError(f"could not read --criteria-file '{criteria_file}': {exc}") from exc
+        try:
+            validate_prompt_template(template)
+        except ValueError as exc:
+            raise DatasetError(f"invalid --criteria-file '{criteria_file}': {exc}") from exc
+        return f"custom:{Path(criteria_file).name}", template, prompt_hash(template)
+    template = CRITERIA_PROFILES[args.criteria]
+    return args.criteria, template, prompt_hash(template)
+
+
 def _existing_criteria_provenance(meta_rows: list[dict]) -> tuple[str, str]:
     """The (criteria profile, prompt hash) the existing comparisons were judged under.
 
@@ -498,9 +544,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
 
     # Judge criteria profile: the prompt template every comparison is built with,
     # plus a stable hash of it recorded in the results metadata for provenance.
-    criteria = args.criteria
-    prompt_template = CRITERIA_PROFILES[criteria]
-    criteria_prompt_hash = prompt_hash(prompt_template)
+    # A built-in profile (--criteria) or a validated custom file (--criteria-file).
+    criteria, prompt_template, criteria_prompt_hash = _resolve_criteria(args)
 
     # Resolve checkpoint cadence (args.checkpoint_every: None = unspecified).
     #
@@ -622,8 +667,19 @@ def cmd_judge(args: argparse.Namespace) -> None:
             # incompatible verdicts into one ELO board AND republish the metadata
             # mislabeled with the current run's criteria. Refuse and exit; the
             # only safe way to change rubric is --full-rejudge (discards existing).
+            # Compare on the prompt HASH (the true rubric identity): this catches
+            # a built-in prompt edited across code versions, matches the same
+            # custom file re-run, and blocks two different custom files even if
+            # they share a basename.
             prev_criteria, prev_hash = _existing_criteria_provenance(existing_meta_rows)
-            if (prev_criteria, prev_hash) != (criteria, criteria_prompt_hash):
+            if prev_hash != criteria_prompt_hash:
+                if prev_criteria.startswith("custom:"):
+                    match_hint = (
+                        f"re-supply the same custom prompt file (recorded as "
+                        f"'{prev_criteria}', prompt {prev_hash})"
+                    )
+                else:
+                    match_hint = f"re-run with [bold]--criteria {prev_criteria}[/bold]"
                 console.print(
                     f"[red]Error:[/red] criteria mismatch — [bold]{results_repo}[/bold] "
                     f"was judged under criteria '[bold]{prev_criteria}[/bold]' "
@@ -631,9 +687,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     f"'[bold]{criteria}[/bold]' (prompt {criteria_prompt_hash}). "
                     f"Mixing rubrics on one leaderboard would produce meaningless "
                     f"rankings and mislabeled metadata.\n"
-                    f"Re-run with [bold]--criteria {prev_criteria}[/bold] to match the "
-                    f"existing results, or [bold]--full-rejudge[/bold] to discard them "
-                    f"and re-judge everything under '{criteria}'."
+                    f"To match the existing results, {match_hint}; or use "
+                    f"[bold]--full-rejudge[/bold] to discard them and re-judge "
+                    f"everything under '{criteria}'."
                 )
                 sys.exit(1)
             skip_samples = {}
@@ -1225,7 +1281,11 @@ def cmd_bench(args: argparse.Namespace) -> None:
     ]
     for model in args.judge_models or []:
         judge_argv += ["--model", model]
-    judge_argv += ["--criteria", args.criteria]
+    # Forward exactly one of the mutually-exclusive criteria flags.
+    if args.criteria_file:
+        judge_argv += ["--criteria-file", args.criteria_file]
+    else:
+        judge_argv += ["--criteria", args.criteria]
     if args.max_samples is not None:
         judge_argv += ["--max-samples", str(args.max_samples)]
     if args.no_publish:

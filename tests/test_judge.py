@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 from PIL import Image
 
 from ocr_bench.judge import (
@@ -14,6 +15,7 @@ from ocr_bench.judge import (
     image_to_base64,
     parse_judge_output,
     prompt_hash,
+    validate_prompt_template,
 )
 
 # sha256(prompt template)[:12] — pins the exact bytes of each criteria profile.
@@ -131,6 +133,38 @@ class TestPromptHash:
         assert prompt_hash(CRITERIA_PROFILES["default"]) != prompt_hash(
             CRITERIA_PROFILES["table-fidelity"]
         )
+
+
+class TestValidatePromptTemplate:
+    def test_valid_template_passes(self):
+        validate_prompt_template("Judge A: {ocr_text_a} vs B: {ocr_text_b}")  # no raise
+
+    def test_builtin_profiles_pass(self):
+        for tmpl in CRITERIA_PROFILES.values():
+            validate_prompt_template(tmpl)  # includes escaped {{ }} JSON example
+
+    def test_escaped_braces_allowed(self):
+        validate_prompt_template('{ocr_text_a} {ocr_text_b} reply {{"winner": "A"}}')
+
+    def test_missing_ocr_text_a(self):
+        with pytest.raises(ValueError, match=r"\{ocr_text_a\}"):
+            validate_prompt_template("only b: {ocr_text_b}")
+
+    def test_missing_ocr_text_b(self):
+        with pytest.raises(ValueError, match=r"\{ocr_text_b\}"):
+            validate_prompt_template("only a: {ocr_text_a}")
+
+    def test_missing_both(self):
+        with pytest.raises(ValueError, match="missing required placeholder"):
+            validate_prompt_template("no placeholders here")
+
+    def test_unknown_format_field(self):
+        with pytest.raises(ValueError, match="not a valid format string"):
+            validate_prompt_template("{ocr_text_a} {ocr_text_b} {surprise}")
+
+    def test_stray_unescaped_brace(self):
+        with pytest.raises(ValueError, match="escape any literal brace"):
+            validate_prompt_template("{ocr_text_a} {ocr_text_b} and a lone {")
 
 
 class TestBuildPrompt:

@@ -14,10 +14,12 @@ from ocr_bench.cli import (
     _existing_criteria_provenance,
     _merge_auto_ties,
     _refresh_viewer_space,
+    _resolve_criteria,
     _resolve_results_repo,
     _trim_to_budget,
     build_parser,
 )
+from ocr_bench.dataset import DatasetError
 from ocr_bench.elo import compute_elo
 from ocr_bench.judge import CRITERIA_PROFILES, DEFAULT_CRITERIA, Comparison, prompt_hash
 
@@ -138,6 +140,62 @@ class TestBuildParser:
         parser = build_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["judge", "user/dataset", "--criteria", "nonsense"])
+
+    def test_criteria_file_default_none(self):
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset"])
+        assert args.criteria_file is None
+
+    def test_criteria_file_parses(self):
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset", "--criteria-file", "my/rubric.txt"])
+        assert args.criteria_file == "my/rubric.txt"
+        assert args.criteria == "default"  # keeps its default when only file given
+
+    def test_criteria_and_criteria_file_mutually_exclusive(self):
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(
+                ["judge", "user/dataset", "--criteria", "default", "--criteria-file", "r.txt"]
+            )
+
+
+class TestResolveCriteria:
+    def test_builtin_default(self):
+        args = build_parser().parse_args(["judge", "user/ds"])
+        name, tmpl, phash = _resolve_criteria(args)
+        assert name == "default"
+        assert tmpl == CRITERIA_PROFILES["default"]
+        assert phash == prompt_hash(CRITERIA_PROFILES["default"])
+
+    def test_builtin_table_fidelity(self):
+        args = build_parser().parse_args(["judge", "user/ds", "--criteria", "table-fidelity"])
+        name, tmpl, phash = _resolve_criteria(args)
+        assert name == "table-fidelity"
+        assert phash == prompt_hash(CRITERIA_PROFILES["table-fidelity"])
+
+    def test_custom_file(self, tmp_path):
+        f = tmp_path / "table-rubric.txt"
+        f.write_text("Judge these. A: {ocr_text_a} B: {ocr_text_b}")
+        args = build_parser().parse_args(["judge", "user/ds", "--criteria-file", str(f)])
+        name, tmpl, phash = _resolve_criteria(args)
+        assert name == "custom:table-rubric.txt"
+        assert tmpl == f.read_text()
+        assert phash == prompt_hash(tmpl)
+
+    def test_custom_file_invalid_template_raises(self, tmp_path):
+        f = tmp_path / "bad.txt"
+        f.write_text("missing the b placeholder: {ocr_text_a}")
+        args = build_parser().parse_args(["judge", "user/ds", "--criteria-file", str(f)])
+        with pytest.raises(DatasetError, match="ocr_text_b"):
+            _resolve_criteria(args)
+
+    def test_custom_file_missing_raises(self, tmp_path):
+        args = build_parser().parse_args(
+            ["judge", "user/ds", "--criteria-file", str(tmp_path / "nope.txt")]
+        )
+        with pytest.raises(DatasetError, match="could not read"):
+            _resolve_criteria(args)
 
 
 class TestMainErrorHandling:
@@ -425,11 +483,20 @@ class TestBenchParser:
         assert args.models is None
         assert args.judge_models is None
         assert args.criteria == "default"
+        assert args.criteria_file is None
         assert args.max_samples is None
         assert args.seed == 42
         assert args.no_publish is False
         assert args.port == 7860
         assert args.host == "127.0.0.1"
+
+    def test_criteria_file_mutually_exclusive_with_criteria(self):
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(
+                ["bench", "user/imgs", "user/out", "--criteria", "default",
+                 "--criteria-file", "r.txt"]
+            )
 
     def test_flags(self):
         parser = build_parser()
@@ -541,6 +608,17 @@ class TestCmdBench:
         cli.cmd_bench(args)
         judge_a = calls[1][1]
         assert judge_a.criteria == "default"
+        assert judge_a.criteria_file is None
+
+    def test_threads_criteria_file_to_judge(self, monkeypatch):
+        """bench --criteria-file is forwarded (not --criteria) to the judge phase."""
+        calls = self._patch(monkeypatch)
+        args = build_parser().parse_args(
+            ["bench", "user/imgs", "user/out", "--criteria-file", "my/rubric.txt"]
+        )
+        cli.cmd_bench(args)
+        judge_a = calls[1][1]
+        assert judge_a.criteria_file == "my/rubric.txt"
 
     def test_aborts_when_a_job_fails(self, monkeypatch, capsys):
         """A failed OCR job must stop bench before judging — a partial

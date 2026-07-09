@@ -146,6 +146,31 @@ def prompt_hash(prompt_template: str) -> str:
     return hashlib.sha256(prompt_template.encode()).hexdigest()[:12]
 
 
+def validate_prompt_template(template: str) -> None:
+    """Raise ``ValueError`` if a prompt template won't work with ``build_prompt``.
+
+    A valid template must contain both ``{ocr_text_a}`` and ``{ocr_text_b}`` and
+    no other format fields — any unknown ``{field}`` or a stray unescaped brace
+    would crash ``str.format`` at judge time. This mirrors how ``build_prompt``
+    formats the template, so a template that passes here is safe to judge with.
+    Used to vet user-supplied ``--criteria-file`` templates before a run starts.
+    """
+    try:
+        template.format(ocr_text_a="A", ocr_text_b="B")
+    except (KeyError, IndexError, ValueError) as exc:
+        raise ValueError(
+            f"template is not a valid format string ({exc!s}). Only "
+            "{ocr_text_a} and {ocr_text_b} may appear as placeholders; escape "
+            "any literal brace as {{ or }}"
+        ) from exc
+    missing = [f for f in ("{ocr_text_a}", "{ocr_text_b}") if f not in template]
+    if missing:
+        raise ValueError(
+            f"template is missing required placeholder(s): {', '.join(missing)} "
+            "(see the default profile for the expected shape)"
+        )
+
+
 JUDGE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {

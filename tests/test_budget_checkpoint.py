@@ -427,3 +427,33 @@ class TestCriteriaProvenanceGuard:
         assert code is None
         m_publish.assert_called_once()
         assert m_publish.call_args.args[2].criteria == "table-fidelity"
+
+    def test_same_custom_file_rerun_matches(self, tmp_path):
+        # A repo judged under a custom prompt file, re-run with the same file:
+        # identical hash → proceeds (guard compares hashes, not names).
+        f = tmp_path / "rubric.txt"
+        f.write_text("Custom rubric. A={ocr_text_a} B={ocr_text_b}")
+        file_hash = prompt_hash(f.read_text())
+        _, m_publish, code = self._run(
+            ["--criteria-file", str(f)],
+            existing=self._existing_one_pair(),
+            existing_meta=[{"criteria": "custom:rubric.txt", "prompt_hash": file_hash}],
+        )
+        assert code is None
+        m_publish.assert_called_once()
+        assert m_publish.call_args.args[2].criteria == "custom:rubric.txt"
+
+    def test_different_custom_content_blocks(self, tmp_path, capsys):
+        # Same basename, DIFFERENT content → different hash → blocked, and the
+        # error tells the user to re-supply the same file (not a --criteria name).
+        f = tmp_path / "rubric.txt"
+        f.write_text("A NEW rubric. A={ocr_text_a} B={ocr_text_b}")
+        judge, m_publish, code = self._run(
+            ["--criteria-file", str(f)],
+            existing=self._existing_one_pair(),
+            existing_meta=[{"criteria": "custom:rubric.txt", "prompt_hash": "0badc0ffee00"}],
+        )
+        assert code == 1
+        assert judge.judged == 0
+        m_publish.assert_not_called()
+        assert "custom prompt file" in capsys.readouterr().out
