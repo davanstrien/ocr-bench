@@ -11,6 +11,7 @@ from datasets import Dataset, load_dataset
 from huggingface_hub import HfApi
 
 from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo
+from ocr_bench.judge import MAX_IMAGE_DIM, MAX_OCR_TEXT_LENGTH
 from ocr_bench.run import MODEL_REGISTRY
 
 logger = structlog.get_logger()
@@ -48,6 +49,8 @@ class EvalMetadata:
     budget_exhausted: bool = False
     from_prs: bool = False
     timestamp: str = ""
+    max_ocr_text_len: int = MAX_OCR_TEXT_LENGTH
+    judge_image_dim: int = MAX_IMAGE_DIM
 
     def __post_init__(self):
         if not self.timestamp:
@@ -81,6 +84,8 @@ def load_existing_comparisons(repo_id: str) -> list[ComparisonResult]:
                 text_b=row.get("text_b", ""),
                 col_a=row.get("col_a", ""),
                 col_b=row.get("col_b", ""),
+                truncated_a=row.get("truncated_a", False),
+                truncated_b=row.get("truncated_b", False),
             )
         )
     logger.info("loaded_existing_comparisons", repo=repo_id, n=len(results))
@@ -142,6 +147,8 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
         "budget_exhausted": metadata.budget_exhausted,
         "from_prs": metadata.from_prs,
         "timestamp": metadata.timestamp,
+        "max_ocr_text_len": metadata.max_ocr_text_len,
+        "judge_image_dim": metadata.judge_image_dim,
     }
 
 

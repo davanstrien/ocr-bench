@@ -230,6 +230,22 @@ class TestConvertResults:
         assert len(results) == 1
         assert results[0].sample_idx == 0
 
+    def test_truncation_flags_propagated(self):
+        comp = Comparison(
+            sample_idx=0,
+            model_a="model-a",
+            model_b="model-b",
+            col_a="col_a",
+            col_b="col_b",
+            swapped=False,
+            messages=[{"role": "user", "content": "test"}],
+            truncated_a=True,
+            truncated_b=False,
+        )
+        results = _convert_results([comp], [{"winner": "A", "reason": "ok"}])
+        assert results[0].truncated_a is True
+        assert results[0].truncated_b is False
+
 
 def _space_var(value: str) -> MagicMock:
     """A stand-in for huggingface_hub's SpaceVariable (has a .value)."""

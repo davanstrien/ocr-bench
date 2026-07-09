@@ -155,6 +155,34 @@ class TestBuildMetadataRow:
         )
         assert build_metadata_row(meta)["auto_tied"] == 2
 
+    def test_cap_fields_default(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=[],
+            seed=42,
+            max_samples=0,
+            total_comparisons=0,
+            valid_comparisons=0,
+        )
+        row = build_metadata_row(meta)
+        assert row["max_ocr_text_len"] == 2500
+        assert row["judge_image_dim"] == 1024
+
+    def test_cap_fields_recorded(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=[],
+            seed=42,
+            max_samples=0,
+            total_comparisons=0,
+            valid_comparisons=0,
+            max_ocr_text_len=12000,
+            judge_image_dim=2048,
+        )
+        row = build_metadata_row(meta)
+        assert row["max_ocr_text_len"] == 12000
+        assert row["judge_image_dim"] == 2048
+
 
 class TestAlignMetadataRows:
     def test_union_of_keys_filled_with_none(self):
@@ -172,6 +200,43 @@ class TestAlignMetadataRows:
 
     def test_empty(self):
         assert _align_metadata_rows([]) == []
+
+    def test_cap_fields_survive_append_over_old_rows(self):
+        # Regression for the metadata schema drop (#45): an old metadata row
+        # predates max_ocr_text_len/judge_image_dim. Appending a new row that
+        # carries them must NOT drop them just because the old row (schema-
+        # defining, first) lacks them — _align_metadata_rows backfills None.
+        old_row = build_metadata_row(
+            EvalMetadata(
+                source_dataset="repo/data",
+                judge_models=["j"],
+                seed=42,
+                max_samples=10,
+                total_comparisons=5,
+                valid_comparisons=5,
+            )
+        )
+        del old_row["max_ocr_text_len"]
+        del old_row["judge_image_dim"]
+        new_row = build_metadata_row(
+            EvalMetadata(
+                source_dataset="repo/data",
+                judge_models=["j"],
+                seed=42,
+                max_samples=10,
+                total_comparisons=6,
+                valid_comparisons=6,
+                max_ocr_text_len=12000,
+                judge_image_dim=2048,
+            )
+        )
+        aligned = _align_metadata_rows([old_row, new_row])
+        # Both fields present on every row (schema union); old row backfilled None.
+        assert all("max_ocr_text_len" in r and "judge_image_dim" in r for r in aligned)
+        assert aligned[0]["max_ocr_text_len"] is None
+        assert aligned[0]["judge_image_dim"] is None
+        assert aligned[1]["max_ocr_text_len"] == 12000
+        assert aligned[1]["judge_image_dim"] == 2048
 
 
 class TestPublishCheckpoint:
@@ -322,6 +387,52 @@ class TestLoadExistingComparisons:
         assert results[0].model_a == "ModelA"
         assert results[0].winner == "A"
         assert results[0].swapped is False
+
+    @patch("ocr_bench.publish.load_dataset")
+    def test_backward_compat_missing_truncation_flags(self, mock_load):
+        # Old published rows predate the truncation flags — they must load
+        # cleanly, defaulting the flags to False rather than raising.
+        mock_ds = MagicMock()
+        mock_ds.__iter__ = lambda self: iter(
+            [
+                {
+                    "sample_idx": 0,
+                    "model_a": "ModelA",
+                    "model_b": "ModelB",
+                    "winner": "A",
+                    "reason": "better",
+                    "agreement": "1/1",
+                    "text_a": "hello",
+                    "text_b": "world",
+                    "col_a": "col_a",
+                    "col_b": "col_b",
+                },
+            ]
+        )
+        mock_load.return_value = mock_ds
+        results = load_existing_comparisons("user/results")
+        assert results[0].truncated_a is False
+        assert results[0].truncated_b is False
+
+    @patch("ocr_bench.publish.load_dataset")
+    def test_reads_truncation_flags(self, mock_load):
+        mock_ds = MagicMock()
+        mock_ds.__iter__ = lambda self: iter(
+            [
+                {
+                    "sample_idx": 0,
+                    "model_a": "ModelA",
+                    "model_b": "ModelB",
+                    "winner": "A",
+                    "truncated_a": True,
+                    "truncated_b": False,
+                },
+            ]
+        )
+        mock_load.return_value = mock_ds
+        results = load_existing_comparisons("user/results")
+        assert results[0].truncated_a is True
+        assert results[0].truncated_b is False
 
     @patch("ocr_bench.publish.load_dataset")
     def test_returns_empty_on_missing_repo(self, mock_load):

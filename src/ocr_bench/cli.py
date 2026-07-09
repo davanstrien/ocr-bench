@@ -27,6 +27,8 @@ from ocr_bench.dataset import (
 from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo, rankings_resolved
 from ocr_bench.judge import (
     DEFAULT_MIN_CHARS,
+    MAX_IMAGE_DIM,
+    MAX_OCR_TEXT_LENGTH,
     Comparison,
     _normalize_pair,
     build_comparisons,
@@ -135,6 +137,25 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_MAX_TOKENS,
         help=f"Max tokens for judge response (default: {DEFAULT_MAX_TOKENS})",
+    )
+    judge.add_argument(
+        "--max-ocr-text-len",
+        type=int,
+        default=MAX_OCR_TEXT_LENGTH,
+        help=(
+            "Per-output character cap (applied after HTML normalization) for "
+            f"each OCR text in the prompt (default: {MAX_OCR_TEXT_LENGTH}). "
+            "Table-dense corpora may need a larger value."
+        ),
+    )
+    judge.add_argument(
+        "--judge-image-dim",
+        type=int,
+        default=MAX_IMAGE_DIM,
+        help=(
+            "Longer-side pixel cap for the judge image "
+            f"(default: {MAX_IMAGE_DIM}). Dense broadsheets may need 1536-2048."
+        ),
     )
 
     # Output
@@ -343,6 +364,8 @@ def _convert_results(
                 text_b=comp.text_b,
                 col_a=comp.col_a,
                 col_b=comp.col_b,
+                truncated_a=comp.truncated_a,
+                truncated_b=comp.truncated_b,
             )
         )
     return results
@@ -656,6 +679,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 indices=batch_indices,
                 seed=args.seed,
                 min_chars=args.min_chars,
+                max_ocr_text_len=args.max_ocr_text_len,
+                judge_image_dim=args.judge_image_dim,
             )
             if not batch_comps:
                 continue
@@ -746,6 +771,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
             seed=args.seed,
             skip_samples=skip_samples,
             min_chars=args.min_chars,
+            max_ocr_text_len=args.max_ocr_text_len,
+            judge_image_dim=args.judge_image_dim,
         )
 
         # Global budget: judge at most N pairs, keeping every auto-tie (they
@@ -788,6 +815,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     max_comparisons=max_comparisons,
                     budget_exhausted=budget_exhausted,
                     from_prs=from_prs,
+                    max_ocr_text_len=args.max_ocr_text_len,
+                    judge_image_dim=args.judge_image_dim,
                 )
                 publish_results(
                     results_repo,
@@ -891,6 +920,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
             budget_exhausted=budget_exhausted,
             auto_tied=n_auto_total,
             from_prs=from_prs,
+            max_ocr_text_len=args.max_ocr_text_len,
+            judge_image_dim=args.judge_image_dim,
         )
         publish_results(
             results_repo,

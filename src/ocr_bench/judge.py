@@ -7,7 +7,9 @@ import io
 import json
 import logging
 import random
+import re
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from itertools import combinations
 from typing import Any
 
@@ -91,6 +93,224 @@ _AUTO_TIE_RESULT: dict[str, str] = {
 }
 
 
+# --- HTML normalization (format-neutral length budget) ---
+#
+# Verbose formats (HTML tables) spend many characters on markup, so the
+# MAX_OCR_TEXT_LENGTH cap amputates them mid-content while compact markdown
+# fits whole — biasing the judge before it ever reads the words. Flattening
+# HTML to bare text makes the cap apply to content chars across all formats.
+
+# Cell boundary marker inside a flattened table row. Pipe (with spaces) keeps
+# cell boundaries visible and reads like a markdown table row — the judge is
+# told markdown formatting is neutral, so this carries table structure without
+# adding penalisable markup.
+_CELL_DELIM = " | "
+
+# Known HTML tag names. The normalizer only enters the HTML path when one of
+# THESE is present, and inside that path only these are treated as markup —
+# any other ``<name>`` (a GLAM transcription token like <torn>/<illegible>/
+# <gap>, or a markdown autolink <https://…>) is re-emitted verbatim, never
+# dropped. Names must be lowercase (HTMLParser lowercases tags before dispatch).
+_KNOWN_HTML_TAGS = frozenset(
+    {
+        # tables
+        "table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption",
+        "colgroup", "col",
+        # blocks
+        "p", "div", "span", "br", "hr", "pre", "code", "blockquote",
+        "figure", "figcaption", "section", "article", "header", "footer",
+        "nav", "aside", "main", "address",
+        # lists
+        "ul", "ol", "li", "dl", "dt", "dd",
+        # headings
+        "h1", "h2", "h3", "h4", "h5", "h6",
+        # inline
+        "b", "i", "u", "s", "em", "strong", "small", "sub", "sup", "mark",
+        "del", "ins", "a", "img", "abbr", "cite", "q", "label", "font",
+        "center", "wbr", "big", "tt",
+        # document / non-visible
+        "html", "head", "body", "script", "style", "template", "title",
+        "meta", "link",
+    }
+)
+
+# Tags whose boundaries start a new line in the flattened text.
+_BLOCK_TAGS = frozenset(
+    {
+        "p", "div", "tr", "li", "br", "table", "thead", "tbody", "tfoot",
+        "ul", "ol", "dl", "dt", "dd", "section", "article", "header", "footer",
+        "nav", "aside", "main", "blockquote", "pre", "figure", "figcaption",
+        "hr", "caption", "h1", "h2", "h3", "h4", "h5", "h6",
+    }
+)
+
+# Cell tags whose boundaries insert a cell delimiter within a row.
+_CELL_TAGS = frozenset({"td", "th"})
+
+# Tags whose *content* is not visible document text — suppressed entirely.
+_SKIP_CONTENT_TAGS = frozenset({"script", "style", "template"})
+
+# Matches a KNOWN HTML tag (open/close/self-close) followed by a tag terminator
+# so ``<torn>`` / ``<https://…>`` don't count as HTML. Longest-name-first
+# alternation so e.g. "table" is tried before "td"/"tr" and "span" before "s".
+_KNOWN_TAG_RE = re.compile(
+    r"</?(?:"
+    + "|".join(re.escape(t) for t in sorted(_KNOWN_HTML_TAGS, key=lambda t: len(t), reverse=True))
+    + r")(?=[\s/>])",
+    re.IGNORECASE,
+)
+
+# Runs of horizontal whitespace, collapsed to a single space per line.
+_HWS_RE = re.compile(r"[ \t\r\f\v]+")
+
+
+class _JudgeTextExtractor(HTMLParser):
+    """Flatten known HTML to bare content, preserving table cell/row boundaries.
+
+    ``convert_charrefs=True`` (the default) means HTML entities arrive already
+    unescaped in ``handle_data``, so no explicit entity handling is needed.
+    Known block/cell tags emit newline / cell-delimiter boundaries and are then
+    dropped; ``<script>``/``<style>``/``<template>`` content is suppressed; any
+    unknown-named ``<tag>`` is re-emitted verbatim so transcription tokens and
+    autolinks embedded in real HTML survive. ``get_text`` collapses whitespace
+    conservatively.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._skip_depth = 0  # >0 while inside a script/style/template subtree
+
+    def _boundary(self, tag: str) -> None:
+        if tag in _CELL_TAGS:
+            self._parts.append(_CELL_DELIM)
+        elif tag in _BLOCK_TAGS:
+            self._parts.append("\n")
+
+    def handle_starttag(self, tag: str, attrs: Any) -> None:
+        if tag in _SKIP_CONTENT_TAGS:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return  # inside a script/style/template subtree — suppress entirely
+        if tag in _KNOWN_HTML_TAGS:
+            self._boundary(tag)
+        else:
+            # Unknown token (e.g. <torn>, <gap>, <https://…>) inside genuine
+            # HTML — keep it verbatim rather than dropping it as markup.
+            self._parts.append(self.get_starttag_text() or f"<{tag}>")
+
+    def handle_startendtag(self, tag: str, attrs: Any) -> None:
+        # Self-closing form, e.g. <br/> or <td/>.
+        if tag in _SKIP_CONTENT_TAGS:
+            return  # self-closing script/style/template carries no content
+        if self._skip_depth:
+            return
+        if tag in _KNOWN_HTML_TAGS:
+            self._boundary(tag)
+        else:
+            self._parts.append(self.get_starttag_text() or f"<{tag}/>")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in _SKIP_CONTENT_TAGS:
+            if self._skip_depth > 0:
+                self._skip_depth -= 1
+            return
+        if self._skip_depth:
+            return
+        if tag in _KNOWN_HTML_TAGS:
+            # Closing a block puts following content on its own line; cells rely
+            # on the next cell's opening delimiter, so no boundary on cell close.
+            if tag in _BLOCK_TAGS:
+                self._parts.append("\n")
+        else:
+            self._parts.append(f"</{tag}>")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0:
+            self._parts.append(data)
+
+    def get_text(self) -> str:
+        raw = "".join(self._parts)
+        lines = []
+        for line in raw.split("\n"):
+            line = _HWS_RE.sub(" ", line).strip()
+            # Drop the spurious leading delimiter emitted before a row's first cell.
+            if line.startswith("|"):
+                line = line[1:].lstrip()
+            if line:
+                lines.append(line)
+        return "\n".join(lines)
+
+
+def normalize_for_judge(text: str) -> str:
+    """Flatten HTML markup to bare content for the judge's length budget.
+
+    Only text containing a KNOWN HTML tag enters the HTML path; plain text and
+    markdown pass through unchanged, and unknown ``<tag>`` tokens (GLAM
+    transcription conventions like ``<torn>``/``<illegible>``/``<gap>``, or
+    markdown autolinks ``<https://…>``) are preserved verbatim. In the HTML
+    path: table cells become ``' | '``-delimited lines so cell boundaries
+    survive, ``<br>`` becomes a newline, ``<script>``/``<style>``/
+    ``<template>`` content is dropped, entities are unescaped, and whitespace
+    is collapsed conservatively.
+
+    Never raises — non-str input and malformed HTML degrade to best-effort
+    text (the guards live inside the protected region so nothing before the
+    return can throw).
+    """
+    try:
+        if text is None:
+            return ""
+        if not isinstance(text, str):
+            text = (
+                text.decode("utf-8", "replace")
+                if isinstance(text, (bytes, bytearray))
+                else str(text)
+            )
+        if not text or not _KNOWN_TAG_RE.search(text):
+            return text
+        parser = _JudgeTextExtractor()
+        parser.feed(text)
+        parser.close()
+        return parser.get_text()
+    except Exception:
+        # HTMLParser is lenient, but guarantee we never raise on garbage in.
+        logger.warning("normalize_for_judge failed; passing text through unchanged")
+        return text if isinstance(text, str) else ""
+
+
+# Harness-voice note appended AFTER an output's block (never inside it) when the
+# output was truncated — so the judge doesn't read the cut as the model's own
+# incompleteness, and can't mistake a marker inside the fenced text for
+# model-added commentary (which criterion 1 penalises).
+def _truncation_note(label: str) -> str:
+    return (
+        f"(Evaluator note: Output {label} above was truncated for length by the "
+        f"evaluation harness — judge only what is shown; do not penalise the cut "
+        f"as incompleteness.)"
+    )
+
+
+# Anchor for inserting the note(s): the fixed response-format instruction that
+# closes PAIRWISE_PROMPT. Inserting before it places the note(s) after both
+# output blocks and keeps the JSON instruction last, without editing the
+# (byte-stable) prompt constant.
+_JSON_INSTRUCTION_ANCHOR = "Respond with JSON only (no markdown fences"
+
+
+def _apply_cap(text: str, max_len: int) -> tuple[str, bool]:
+    """Truncate ``text`` to ``max_len`` chars. Returns (text, truncated).
+
+    No marker is added to the text itself — truncation is disclosed to the
+    judge via a harness-voice note composed in ``build_prompt`` and recorded as
+    a ``truncated_a``/``truncated_b`` flag on the row.
+    """
+    if len(text) <= max_len:
+        return text, False
+    return text[:max_len], True
+
+
 # --- Image helpers ---
 
 
@@ -126,18 +346,51 @@ class Comparison:
     # Pre-decided verdict for pairs that never reach a judge (identical
     # outputs → auto-tie). ``None`` means the judge must score this pair.
     auto_result: dict[str, str] | None = None
+    truncated_a: bool = False
+    truncated_b: bool = False
 
 
-def build_prompt(text_a: str, text_b: str, swapped: bool) -> tuple[str, bool]:
+def build_prompt(
+    text_a: str,
+    text_b: str,
+    swapped: bool,
+    max_len: int = MAX_OCR_TEXT_LENGTH,
+) -> tuple[str, bool, bool, bool]:
     """Build the pairwise comparison prompt, applying position-bias swap.
 
-    Returns (prompt_text, swapped).
+    Each text is normalized (HTML flattened to bare content) before the length
+    cap so the budget is spent on content, not markup — keeping the cap
+    format-neutral. When a text is still over ``max_len`` after normalization it
+    is truncated and a harness-voice evaluator note is appended AFTER that
+    output's block (outside the fenced text, before the JSON instruction) so the
+    judge doesn't read the cut as model incompleteness or the note as
+    model-added commentary.
+
+    Returns (prompt_text, swapped, truncated_a, truncated_b). The returned flags
+    refer to the original A/B (``text_a``/``text_b``) ordering, independent of
+    the display swap; the note references the judge-visible (post-swap) A/B
+    positions.
     """
-    a = text_a[:MAX_OCR_TEXT_LENGTH]
-    b = text_b[:MAX_OCR_TEXT_LENGTH]
+    a, trunc_a = _apply_cap(normalize_for_judge(text_a), max_len)
+    b, trunc_b = _apply_cap(normalize_for_judge(text_b), max_len)
+    # Map original-order truncation to judge-visible positions for the note.
+    disp_a_truncated, disp_b_truncated = (trunc_b, trunc_a) if swapped else (trunc_a, trunc_b)
     if swapped:
         a, b = b, a
-    return PAIRWISE_PROMPT.format(ocr_text_a=a, ocr_text_b=b), swapped
+    prompt = PAIRWISE_PROMPT.format(ocr_text_a=a, ocr_text_b=b)
+
+    notes = []
+    if disp_a_truncated:
+        notes.append(_truncation_note("A"))
+    if disp_b_truncated:
+        notes.append(_truncation_note("B"))
+    if notes:
+        note_block = "\n".join(notes) + "\n\n"
+        prompt = prompt.replace(
+            _JSON_INSTRUCTION_ANCHOR, note_block + _JSON_INSTRUCTION_ANCHOR, 1
+        )
+
+    return prompt, swapped, trunc_a, trunc_b
 
 
 def build_messages(image_b64: str, prompt: str) -> list[dict[str, Any]]:
@@ -189,6 +442,8 @@ def build_comparisons(
     skip_samples: dict[tuple[str, str], set[int]] | None = None,
     indices: list[int] | None = None,
     min_chars: int = DEFAULT_MIN_CHARS,
+    max_ocr_text_len: int = MAX_OCR_TEXT_LENGTH,
+    judge_image_dim: int = MAX_IMAGE_DIM,
 ) -> list[Comparison]:
     """Build pairwise comparison prompts from a dataset.
 
@@ -211,6 +466,9 @@ def build_comparisons(
         min_chars: Skip a pair when BOTH outputs are shorter than this (after
             stripping) — neither model produced meaningful text. Set to 0 to
             disable the filter.
+        max_ocr_text_len: Per-output character cap applied after HTML
+            normalization when building each prompt.
+        judge_image_dim: Longer-side pixel cap for the judge image.
 
     Returns:
         List of Comparison objects. Pairs needing a judge carry pre-built chat
@@ -283,7 +541,11 @@ def build_comparisons(
         # Only decode/encode the image if at least one pair needs the judge;
         # rows whose pairs are all auto-ties skip the image entirely.
         needs_judge = any(auto is None for (_, _, _, _, auto) in valid_pairs)
-        image_b64 = image_to_base64(dataset[idx]["image"]) if needs_judge else ""
+        image_b64 = (
+            image_to_base64(dataset[idx]["image"], max_dim=judge_image_dim)
+            if needs_judge
+            else ""
+        )
 
         for i, j, text_a, text_b, auto in valid_pairs:
             if auto is not None:
@@ -304,7 +566,9 @@ def build_comparisons(
                 continue
 
             swapped = rng.random() < 0.5
-            prompt, swapped = build_prompt(text_a, text_b, swapped)
+            prompt, swapped, trunc_a, trunc_b = build_prompt(
+                text_a, text_b, swapped, max_len=max_ocr_text_len
+            )
             messages = build_messages(image_b64, prompt)
 
             comparisons.append(
@@ -318,6 +582,8 @@ def build_comparisons(
                     messages=messages,
                     text_a=text_a,
                     text_b=text_b,
+                    truncated_a=trunc_a,
+                    truncated_b=trunc_b,
                 )
             )
 

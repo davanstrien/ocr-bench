@@ -5,11 +5,13 @@ import json
 from PIL import Image
 
 from ocr_bench.judge import (
+    PAIRWISE_PROMPT,
     Comparison,
     build_comparisons,
     build_messages,
     build_prompt,
     image_to_base64,
+    normalize_for_judge,
     parse_judge_output,
 )
 
@@ -48,28 +50,245 @@ class TestImageToBase64:
         assert result.size == (200, 100)
 
 
+class TestNormalizeForJudge:
+    def test_plain_text_unchanged(self):
+        text = "Just some plain OCR text with no markup at all."
+        assert normalize_for_judge(text) == text
+
+    def test_markdown_untouched(self):
+        # Headers, bold, lists, and pipe-tables have no HTML tags → no-op.
+        md = (
+            "# Title\n\nSome **bold** text.\n\n- item one\n- item two\n\n"
+            "| a | b |\n|---|---|\n| 1 | 2 |"
+        )
+        assert normalize_for_judge(md) == md
+
+    def test_empty_string(self):
+        assert normalize_for_judge("") == ""
+
+    def test_table_cells_become_delimited(self):
+        html = "<table><tr><td>Name</td><td>Age</td></tr><tr><td>Alice</td><td>30</td></tr></table>"
+        out = normalize_for_judge(html)
+        assert out == "Name | Age\nAlice | 30"
+
+    def test_bare_cells_delimited(self):
+        # Requirement's canonical example: <td>x</td><td>y</td> → delimited.
+        assert normalize_for_judge("<td>x</td><td>y</td>") == "x | y"
+
+    def test_th_header_cells(self):
+        html = "<table><tr><th>Col1</th><th>Col2</th></tr><tr><td>a</td><td>b</td></tr></table>"
+        out = normalize_for_judge(html)
+        assert out == "Col1 | Col2\na | b"
+
+    def test_cell_boundaries_preserved(self):
+        # The whole point of table fidelity: two cells stay two cells.
+        out = normalize_for_judge("<tr><td>left</td><td>right</td></tr>")
+        assert "left" in out and "right" in out
+        assert "|" in out  # boundary survived
+        assert "leftright" not in out
+
+    def test_br_becomes_newline(self):
+        assert normalize_for_judge("line one<br>line two") == "line one\nline two"
+
+    def test_self_closing_br(self):
+        assert normalize_for_judge("line one<br/>line two") == "line one\nline two"
+
+    def test_other_tags_dropped(self):
+        assert normalize_for_judge("<b>bold</b> and <i>italic</i>") == "bold and italic"
+
+    def test_span_and_div_content_kept(self):
+        out = normalize_for_judge("<div><span>alpha</span> beta</div>")
+        assert "alpha" in out and "beta" in out
+        assert "<" not in out
+
+    def test_entities_unescaped(self):
+        assert normalize_for_judge("<p>Rock &amp; Roll &lt;3</p>") == "Rock & Roll <3"
+
+    def test_numeric_entities(self):
+        assert normalize_for_judge("<p>caf&#233;</p>") == "café"
+
+    def test_whitespace_collapsed_conservatively(self):
+        out = normalize_for_judge("<p>too    many     spaces</p>")
+        assert out == "too many spaces"
+
+    def test_blank_lines_collapsed(self):
+        out = normalize_for_judge("<div><p>a</p><p>b</p></div>")
+        assert out == "a\nb"
+
+    def test_garbage_never_raises(self):
+        # Malformed / adversarial input must return a string, not raise.
+        for junk in ["<<<>>>", "<td><td><td", "<table><tr><td>unclosed", "< not a tag >", "<>"]:
+            result = normalize_for_judge(junk)
+            assert isinstance(result, str)
+
+    def test_math_expression_not_treated_as_html(self):
+        # "a < b and c > d" has no letter immediately after '<', so it is not
+        # mistaken for a tag and passes through unchanged.
+        text = "a < b and c > d"
+        assert normalize_for_judge(text) == text
+
+    def test_html_heavy_shorter_than_raw(self):
+        # A table's normalized form must be shorter than its raw markup.
+        html = (
+            "<table>"
+            + "".join(f"<tr><td>row{i}col1</td><td>row{i}col2</td></tr>" for i in range(20))
+            + "</table>"
+        )
+        assert len(normalize_for_judge(html)) < len(html)
+
+    # --- Fix 1: GLAM transcription tokens and autolinks are not markup ---
+
+    def test_transcription_tokens_alone_untouched(self):
+        # <illegible>/<torn>/<gap> are transcription conventions, not HTML —
+        # with no known HTML tag present the text passes through verbatim.
+        for text in [
+            "the <illegible> word",
+            "a page with a <torn> corner",
+            "text with a <gap/> here",
+            "<gap reason='torn'/> at line start",
+        ]:
+            assert normalize_for_judge(text) == text
+
+    def test_transcription_token_survives_inside_real_html(self):
+        # Inside genuine HTML, an unknown-named tag is re-emitted verbatim, not
+        # dropped — so a <torn> in an HTML-table cell survives.
+        out = normalize_for_judge("<p>The word <torn> is unclear</p>")
+        assert out == "The word <torn> is unclear"
+        out2 = normalize_for_judge("<table><tr><td>a</td><td><illegible></td></tr></table>")
+        assert "<illegible>" in out2
+        assert out2 == "a | <illegible>"
+
+    def test_autolink_alone_untouched(self):
+        text = "see <https://example.com/page> for details"
+        assert normalize_for_judge(text) == text
+
+    def test_autolink_survives_inside_real_html(self):
+        out = normalize_for_judge("<p>See <https://example.com></p>")
+        assert out == "See <https://example.com>"
+
+    def test_unknown_tag_with_attrs_reemitted_verbatim(self):
+        # Casing and attributes of an unknown tag are preserved via
+        # get_starttag_text().
+        out = normalize_for_judge("<p>x <Unclear cert='low'> y</p>")
+        assert "<Unclear cert='low'>" in out
+
+    # --- Fix 2: script/style/template content is not visible text ---
+
+    def test_style_content_suppressed(self):
+        out = normalize_for_judge("<style>.foo { color: red; }</style>Visible text")
+        assert out == "Visible text"
+
+    def test_script_content_suppressed(self):
+        out = normalize_for_judge("<p>Before</p><script>alert('x');</script><p>After</p>")
+        assert out == "Before\nAfter"
+
+    def test_template_content_suppressed(self):
+        out = normalize_for_judge(
+            "<p>Before</p><template><td>hidden</td></template><p>After</p>"
+        )
+        assert out == "Before\nAfter"
+
+    # --- Fix 3: never-raises honours non-str input ---
+
+    def test_none_input_returns_empty(self):
+        assert normalize_for_judge(None) == ""
+
+    def test_bytes_input_safe(self):
+        # bytes decode to text and normalize; no raise.
+        assert normalize_for_judge(b"<td>x</td>") == "x"
+        assert normalize_for_judge(b"plain bytes, no tags") == "plain bytes, no tags"
+
+    def test_non_str_non_bytes_safe(self):
+        # An unexpected type must not raise (str() fallback).
+        result = normalize_for_judge(12345)  # type: ignore[arg-type]
+        assert isinstance(result, str)
+
+
 class TestBuildPrompt:
     def test_not_swapped(self):
-        prompt, swapped = build_prompt("text A", "text B", swapped=False)
+        prompt, swapped, trunc_a, trunc_b = build_prompt("text A", "text B", swapped=False)
         assert "text A" in prompt
         assert "text B" in prompt
         assert not swapped
+        assert not trunc_a
+        assert not trunc_b
         # A should appear before B in the prompt
         assert prompt.index("text A") < prompt.index("text B")
 
     def test_swapped(self):
-        prompt, swapped = build_prompt("text A", "text B", swapped=True)
+        prompt, swapped, _, _ = build_prompt("text A", "text B", swapped=True)
         assert swapped
         # When swapped, B text appears in the A position
         assert prompt.index("text B") < prompt.index("text A")
 
     def test_truncates_long_text(self):
         long_text = "x" * 5000
-        prompt, _ = build_prompt(long_text, "short", swapped=False)
+        prompt, _, trunc_a, trunc_b = build_prompt(long_text, "short", swapped=False)
         # The full 5000-char string should not appear
         assert "x" * 5000 not in prompt
         # But 2500 chars should
         assert "x" * 2500 in prompt
+        # The truncated side is flagged; the short side is not
+        assert trunc_a
+        assert not trunc_b
+
+    def test_truncation_note_is_harness_voice_outside_output_block(self):
+        # The disclosure is a harness-voice evaluator note, NOT a marker spliced
+        # into the fenced output text (which the judge could read as model-added
+        # commentary and penalise).
+        prompt, _, trunc_a, _ = build_prompt("x" * 5000, "short", swapped=False)
+        assert trunc_a
+        assert "Evaluator note: Output A above was truncated" in prompt
+        assert "evaluation harness" in prompt
+        # The note sits after the output blocks, before the JSON instruction —
+        # never between an output's fences.
+        assert prompt.index("Evaluator note") < prompt.index("Respond with JSON only")
+        # The raw truncated text carries no inline marker.
+        assert "[..." not in prompt
+        assert "continues beyond" not in prompt
+
+    def test_no_truncation_note_when_untruncated(self):
+        prompt, _, trunc_a, trunc_b = build_prompt("short a", "short b", swapped=False)
+        assert not trunc_a and not trunc_b
+        assert "Evaluator note" not in prompt
+
+    def test_truncation_note_tracks_display_position_when_swapped(self):
+        # Original A is truncated; when displayed swapped it occupies position B,
+        # so the note must reference "Output B", while the returned flags stay in
+        # original order (truncated_a=True).
+        prompt, swapped, trunc_a, trunc_b = build_prompt("x" * 5000, "short", swapped=True)
+        assert swapped and trunc_a and not trunc_b
+        assert "Output B above was truncated" in prompt
+        assert "Output A above was truncated" not in prompt
+
+    def test_pairwise_prompt_constant_unmodified(self):
+        # The note is composed after .format(); the prompt constant stays
+        # byte-stable (no truncation machinery leaked into it).
+        assert "Evaluator note" not in PAIRWISE_PROMPT
+        assert "truncated" not in PAIRWISE_PROMPT
+
+    def test_truncation_flags_track_original_order_when_swapped(self):
+        # A is long (truncated), B is short. Even when displayed swapped, the
+        # flags stay keyed to the original A/B texts.
+        _, swapped, trunc_a, trunc_b = build_prompt("x" * 5000, "short", swapped=True)
+        assert swapped
+        assert trunc_a
+        assert not trunc_b
+
+    def test_configurable_cap(self):
+        prompt, _, trunc_a, _ = build_prompt("y" * 100, "short", swapped=False, max_len=50)
+        assert trunc_a
+        assert "y" * 50 in prompt
+        assert "y" * 51 not in prompt
+
+    def test_html_normalized_before_cap(self):
+        # 60 chars of markup wrapping 8 chars of content: with a cap of 40 the
+        # raw string would truncate mid-markup, but normalized content fits.
+        html = "<table><tr><td>Name</td><td>Age</td></tr></table>"
+        prompt, _, trunc_a, _ = build_prompt(html, "short", swapped=False, max_len=40)
+        assert not trunc_a
+        assert "Name | Age" in prompt
+        assert "<td>" not in prompt
 
 
 class TestBuildMessages:
@@ -310,6 +529,44 @@ class TestBuildComparisons:
                 ds, ocr_columns, skip_samples={("ModelA", "ModelB"): {0}}
             )
             mock_img.assert_not_called()
+
+    def test_truncation_flags_default_false(self):
+        ds = self._make_dataset()
+        ocr_columns = {"ocr_model_a": "ModelA", "ocr_model_b": "ModelB"}
+        # min_chars=0 isolates the truncation-flag defaults from the blank-pair
+        # filter (the fixture's texts are under the default 20-char threshold).
+        comps = build_comparisons(ds, ocr_columns, min_chars=0)
+        assert comps[0].truncated_a is False
+        assert comps[0].truncated_b is False
+
+    def test_max_ocr_text_len_threaded(self):
+        ds = [
+            {
+                "image": Image.new("RGB", (50, 50)),
+                "col_a": "x" * 500,
+                "col_b": "short",
+            },
+        ]
+        comps = build_comparisons(ds, {"col_a": "A", "col_b": "B"}, max_ocr_text_len=100)
+        assert comps[0].truncated_a is True
+        assert comps[0].truncated_b is False
+
+    def test_judge_image_dim_threaded(self):
+        from unittest.mock import patch
+
+        ds = [
+            {
+                "image": Image.new("RGB", (50, 50)),
+                "col_a": "text a",
+                "col_b": "text b",
+            },
+        ]
+        with patch("ocr_bench.judge.image_to_base64", return_value="b64") as mock_img:
+            build_comparisons(
+                ds, {"col_a": "A", "col_b": "B"}, judge_image_dim=1536, min_chars=0
+            )
+            mock_img.assert_called_once()
+            assert mock_img.call_args.kwargs["max_dim"] == 1536
 
 
 class TestBlankPairFiltering:
