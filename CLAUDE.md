@@ -13,7 +13,7 @@ Inspired by [Datalab's Benchmarks + Evals](https://www.datalab.to/blog/datalab-b
 | Module | What it does |
 |--------|-------------|
 | `elo.py` | Bradley-Terry MLE via scipy, bootstrap 95% CIs, ELO scale |
-| `judge.py` | VLM-as-judge prompt, Comparison dataclass, structured output schema |
+| `judge.py` | Criteria-profile/custom judge prompts, HTML normalization, truncation disclosure, Comparison dataclass, structured output schema |
 | `dataset.py` | Flat, config-per-model, PR-based dataset loading, OCR column discovery |
 | `backends.py` | API backends: InferenceProvider + OpenAI-compatible, concurrent calls |
 | `publish.py` | Publish comparisons + leaderboard to Hub; incremental load from existing results |
@@ -46,6 +46,8 @@ Branch protection is on — all changes go through PRs with CI checks.
 - **Arrow-level merges**: dataset loading uses Arrow column ops to avoid per-row image decode
 - **Don't merge PRs**: load OCR outputs via `revision=` to avoid README merge conflicts on Hub datasets
 - **Default judge**: Qwen3.5-35B-A3B via HF Inference Providers (zero parse failures, fastest, only needs HF token)
+- **Judge provenance is immutable within a results repo**: criteria/prompt hash, normalized-vs-raw text mode, text cap, and image cap are recorded; changing any requires `--full-rejudge`.
+- **Normalize before truncating**: default judge text mode flattens known HTML while preserving table-cell boundaries and GLAM transcription tokens, then applies the character cap. Raw mode is opt-in.
 
 ## Known limitations
 
@@ -56,8 +58,8 @@ Branch protection is on — all changes go through PRs with CI checks.
 ## Roadmap
 
 - Blog post: "There Is No Best OCR Model"
-- Judge prompt presets for GLAM document types
-- Custom prompt and ignore list support
+- Additional judge prompt presets for GLAM document types
+- Ignore list support
 - Judge comparison across different judge models
 - `--focus-pairs`: prioritize overlapping-CI pairs in validation UI
 - CER/WER metrics alongside VLM judge

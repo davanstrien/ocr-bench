@@ -85,6 +85,51 @@ class TestComputeElo:
         assert log["col_a"] == ""
         assert log["col_b"] == ""
 
+    def test_comparison_log_records_truncation_flags(self):
+        results = [
+            ComparisonResult(
+                sample_idx=0,
+                model_a="alpha",
+                model_b="beta",
+                winner="A",
+                truncated_a=True,
+                truncated_b=False,
+            ),
+        ]
+        board = compute_elo(results, ["alpha", "beta"], n_bootstrap=0)
+        log = board.comparison_log[0]
+        assert log["truncated_a"] is True
+        assert log["truncated_b"] is False
+
+    def test_comparison_log_truncation_flags_default_false(self):
+        results = [
+            ComparisonResult(sample_idx=0, model_a="alpha", model_b="beta", winner="tie"),
+        ]
+        board = compute_elo(results, ["alpha", "beta"], n_bootstrap=0)
+        log = board.comparison_log[0]
+        assert log["truncated_a"] is False
+        assert log["truncated_b"] is False
+
+    def test_comparison_log_truncation_flags_keyed_to_model_not_swap(self):
+        # truncated_a is about model_a's output regardless of display swap —
+        # it must NOT be flipped the way winner is.
+        results = [
+            ComparisonResult(
+                sample_idx=0,
+                model_a="alpha",
+                model_b="beta",
+                winner="B",
+                swapped=True,
+                truncated_a=True,
+                truncated_b=False,
+            ),
+        ]
+        board = compute_elo(results, ["alpha", "beta"], n_bootstrap=0)
+        log = board.comparison_log[0]
+        assert log["winner"] == "A"  # unswapped
+        assert log["truncated_a"] is True  # still model_a, not flipped
+        assert log["truncated_b"] is False
+
     def test_multiple_models(self):
         results = [
             ComparisonResult(sample_idx=0, model_a="a", model_b="b", winner="A"),

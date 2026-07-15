@@ -12,6 +12,7 @@ from ocr_bench import cli
 from ocr_bench.cli import (
     _convert_results,
     _existing_criteria_provenance,
+    _existing_preprocessing_provenance,
     _merge_auto_ties,
     _refresh_viewer_space,
     _resolve_criteria,
@@ -43,6 +44,39 @@ class TestBuildParser:
         assert args.seed == 42
         assert args.save_results is None
         assert args.min_chars == 20
+        assert args.max_ocr_text_len == 2500
+        assert args.judge_image_dim == 1024
+        assert args.judge_text_mode == "normalized"
+
+    @pytest.mark.parametrize("flag", ["--max-ocr-text-len", "--judge-image-dim"])
+    @pytest.mark.parametrize("value", ["0", "-1"])
+    def test_judge_caps_require_positive_values(self, flag, value):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["judge", "user/dataset", flag, value])
+
+    def test_judge_text_mode_raw(self):
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset", "--judge-text-mode", "raw"])
+        assert args.judge_text_mode == "raw"
+
+    def test_judge_text_mode_normalized(self):
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset", "--judge-text-mode", "normalized"])
+        assert args.judge_text_mode == "normalized"
+
+    def test_judge_text_mode_rejects_unknown(self):
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["judge", "user/dataset", "--judge-text-mode", "cooked"])
+
+    def test_bench_judge_text_mode(self):
+        parser = build_parser()
+        args = parser.parse_args(["bench", "user/imgs", "user/out"])
+        assert args.judge_text_mode == "normalized"
+        args = parser.parse_args(
+            ["bench", "user/imgs", "user/out", "--judge-text-mode", "raw"]
+        )
+        assert args.judge_text_mode == "raw"
 
     def test_multiple_models(self):
         parser = build_parser()
@@ -211,13 +245,24 @@ class TestAuditParser:
         assert args.command == "audit"
         assert args.dataset == "user/data"
         assert args.split == "train"
+        assert args.judge_text_mode == "normalized"
         assert args.max_ocr_text_len == 2500
 
     def test_audit_overrides(self):
         args = build_parser().parse_args(
-            ["audit", "user/data", "--split", "test", "--max-ocr-text-len", "500"]
+            [
+                "audit",
+                "user/data",
+                "--split",
+                "test",
+                "--judge-text-mode",
+                "raw",
+                "--max-ocr-text-len",
+                "500",
+            ]
         )
         assert args.split == "test"
+        assert args.judge_text_mode == "raw"
         assert args.max_ocr_text_len == 500
 
 
@@ -364,6 +409,33 @@ class TestResolveResultsRepo:
         assert result is None
 
 
+class TestExistingPreprocessingProvenance:
+    def test_missing_metadata_is_legacy_raw(self):
+        assert _existing_preprocessing_provenance([]) == ("raw", 2500, 1024)
+        assert _existing_preprocessing_provenance([{"source_dataset": "d"}]) == (
+            "raw",
+            2500,
+            1024,
+        )
+
+    def test_reads_latest_recorded_settings(self):
+        rows = [
+            {"judge_text_mode": "raw", "max_ocr_text_len": 2500, "judge_image_dim": 1024},
+            {
+                "judge_text_mode": "normalized",
+                "max_ocr_text_len": 5000,
+                "judge_image_dim": 2048,
+            },
+        ]
+        assert _existing_preprocessing_provenance(rows) == ("normalized", 5000, 2048)
+
+    def test_aligned_none_values_use_legacy_defaults(self):
+        rows = [
+            {"judge_text_mode": None, "max_ocr_text_len": None, "judge_image_dim": None}
+        ]
+        assert _existing_preprocessing_provenance(rows) == ("raw", 2500, 1024)
+
+
 class TestExistingCriteriaProvenance:
     """Reads the criteria/prompt_hash the existing comparisons were judged under."""
 
@@ -449,6 +521,22 @@ class TestConvertResults:
         results = _convert_results(comps, aggregated)
         assert len(results) == 1
         assert results[0].sample_idx == 0
+
+    def test_truncation_flags_propagated(self):
+        comp = Comparison(
+            sample_idx=0,
+            model_a="model-a",
+            model_b="model-b",
+            col_a="col_a",
+            col_b="col_b",
+            swapped=False,
+            messages=[{"role": "user", "content": "test"}],
+            truncated_a=True,
+            truncated_b=False,
+        )
+        results = _convert_results([comp], [{"winner": "A", "reason": "ok"}])
+        assert results[0].truncated_a is True
+        assert results[0].truncated_b is False
 
 
 def _space_var(value: str) -> MagicMock:

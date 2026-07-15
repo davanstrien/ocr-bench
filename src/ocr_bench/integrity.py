@@ -20,7 +20,7 @@ from ocr_bench.dataset import (
     discover_pr_configs,
     load_flat_dataset,
 )
-from ocr_bench.judge import MAX_OCR_TEXT_LENGTH, is_sentinel
+from ocr_bench.judge import MAX_OCR_TEXT_LENGTH, is_sentinel, normalize_for_judge
 
 # A model with more than this fraction of error sentinels is flagged: the run
 # effectively failed on this corpus, so its outputs are not comparable.
@@ -86,19 +86,21 @@ def compute_column_stats(
     model: str,
     texts: list,
     max_ocr_text_len: int = MAX_OCR_TEXT_LENGTH,
+    normalize: bool = True,
 ) -> ColumnStats:
-    """Compute :class:`ColumnStats` for one column's raw text values.
+    """Compute :class:`ColumnStats` for one column's OCR values.
 
-    Rows are partitioned into empty / sentinel / short / normal (non-overlapping),
-    while length statistics are taken over every row's raw character length —
-    matching how the judge truncates ``text[:max_ocr_text_len]``.
+    Rows are partitioned into empty / sentinel / short / normal (non-overlapping).
+    Length statistics use the same normalized-or-raw representation that the
+    judge caps, so audit truncation exposure matches the selected text mode.
     """
     n_empty = n_sentinel = n_short = 0
     lengths: list[int] = []
     for t in texts:
         s = t or ""
-        lengths.append(len(s))
-        stripped = s.strip()
+        measured = normalize_for_judge(s) if normalize else s
+        lengths.append(len(measured))
+        stripped = measured.strip()
         if not stripped:
             n_empty += 1
         elif is_sentinel(s):
@@ -125,6 +127,7 @@ def compute_model_stats(
     dataset: Any,
     ocr_columns: dict[str, str],
     max_ocr_text_len: int = MAX_OCR_TEXT_LENGTH,
+    normalize: bool = True,
 ) -> list[ColumnStats]:
     """Per-model health stats over a loaded (merged or flat) dataset.
 
@@ -132,7 +135,13 @@ def compute_model_stats(
     derive per-model ``failed_outputs`` and the >10% sentinel-rate warning.
     """
     return [
-        compute_column_stats(col, model, _column_values(dataset, col), max_ocr_text_len)
+        compute_column_stats(
+            col,
+            model,
+            _column_values(dataset, col),
+            max_ocr_text_len,
+            normalize=normalize,
+        )
         for col, model in ocr_columns.items()
     ]
 
@@ -157,6 +166,7 @@ class AuditReport:
     configs: list[ConfigAudit]
     alignment: AlignmentResult
     max_ocr_text_len: int
+    judge_text_mode: str = "normalized"
 
     @property
     def flagged_models(self) -> list[str]:
@@ -193,6 +203,7 @@ def audit_repo(
     repo_id: str,
     split: str = "train",
     max_ocr_text_len: int = MAX_OCR_TEXT_LENGTH,
+    judge_text_mode: str = "normalized",
     api: Any | None = None,
 ) -> AuditReport:
     """Run config discovery and compute a health report — no judging, no writes.
@@ -200,6 +211,10 @@ def audit_repo(
     Mirrors the judge's discovery cascade (open PRs + main-branch configs, then
     flat fallback) so the audit sees exactly what a judge run would.
     """
+    if judge_text_mode not in {"normalized", "raw"}:
+        raise ValueError("judge_text_mode must be 'normalized' or 'raw'")
+    normalize = judge_text_mode == "normalized"
+
     pr_configs, pr_revisions = discover_pr_configs(repo_id, api=api)
     main_configs = discover_configs(repo_id)
     config_names = list(pr_configs)
@@ -217,7 +232,11 @@ def audit_repo(
             if text_col is None:  # filtered into `usable` above; narrows the type
                 continue
             stats = compute_column_stats(
-                lc.config, lc.model_id, _column_values(lc.ds, text_col), max_ocr_text_len
+                lc.config,
+                lc.model_id,
+                _column_values(lc.ds, text_col),
+                max_ocr_text_len,
+                normalize=normalize,
             )
             configs.append(ConfigAudit(stats))
     else:
@@ -225,7 +244,9 @@ def audit_repo(
         alignment = AlignmentResult(status="n/a")
         configs = [
             ConfigAudit(stats)
-            for stats in compute_model_stats(ds, ocr_columns, max_ocr_text_len)
+            for stats in compute_model_stats(
+                ds, ocr_columns, max_ocr_text_len, normalize=normalize
+            )
         ]
 
     return AuditReport(
@@ -233,4 +254,5 @@ def audit_repo(
         configs=configs,
         alignment=alignment,
         max_ocr_text_len=max_ocr_text_len,
+        judge_text_mode=judge_text_mode,
     )

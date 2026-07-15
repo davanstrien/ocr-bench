@@ -96,12 +96,23 @@ def _run_judge(
         *argv_extra,
     ]
     args = build_parser().parse_args(argv)
+    existing_meta = []
+    if existing:
+        existing_meta = [
+            {
+                "criteria": "default",
+                "prompt_hash": prompt_hash(CRITERIA_PROFILES["default"]),
+                "judge_text_mode": "normalized",
+                "max_ocr_text_len": 2500,
+                "judge_image_dim": 1024,
+            }
+        ]
 
     with (
         patch.object(cli, "load_flat_dataset", return_value=(ds, ocr_columns)),
         patch.object(cli, "parse_judge_spec", return_value=judge),
         patch.object(cli, "load_existing_comparisons", return_value=existing or []),
-        patch.object(cli, "load_existing_metadata", return_value=[]),
+        patch.object(cli, "load_existing_metadata", return_value=existing_meta),
         patch.object(cli, "publish_results") as m_publish,
         patch.object(cli, "publish_checkpoint") as m_checkpoint,
     ):
@@ -403,7 +414,7 @@ class TestCriteriaProvenanceGuard:
     _DEFAULT_HASH = prompt_hash(CRITERIA_PROFILES["default"])
     _TABLE_HASH = prompt_hash(CRITERIA_PROFILES["table-fidelity"])
 
-    def _run(self, argv_extra, *, existing, existing_meta):
+    def _run(self, argv_extra, *, existing, existing_meta, legacy_preprocessing=False):
         """Drive cmd_judge with a 2-model dataset, catching a guard SystemExit."""
         ds, ocr = make_ds(n=4, models=("a", "b"))
         judge = FakeJudge()
@@ -413,6 +424,16 @@ class TestCriteriaProvenanceGuard:
             "--checkpoint-every", "0", *argv_extra,
         ]
         args = build_parser().parse_args(argv)
+        if not legacy_preprocessing:
+            existing_meta = [
+                {
+                    "judge_text_mode": "normalized",
+                    "max_ocr_text_len": 2500,
+                    "judge_image_dim": 1024,
+                    **row,
+                }
+                for row in existing_meta
+            ]
         exit_code: int | str | None = None
         with (
             patch.object(cli, "load_flat_dataset", return_value=(ds, ocr)),
@@ -434,6 +455,38 @@ class TestCriteriaProvenanceGuard:
         return [
             ComparisonResult(sample_idx=0, model_a="model-a", model_b="model-b", winner="A")
         ]
+
+    def test_legacy_raw_results_block_normalized_incremental_run(self):
+        judge, m_publish, code = self._run(
+            [],
+            existing=self._existing_one_pair(),
+            existing_meta=[{"criteria": "default", "prompt_hash": self._DEFAULT_HASH}],
+            legacy_preprocessing=True,
+        )
+        assert code == 1
+        assert judge.judged == 0
+        m_publish.assert_not_called()
+
+    def test_legacy_raw_results_allow_explicit_raw_resume(self):
+        judge, m_publish, code = self._run(
+            ["--judge-text-mode", "raw"],
+            existing=self._existing_one_pair(),
+            existing_meta=[{"criteria": "default", "prompt_hash": self._DEFAULT_HASH}],
+            legacy_preprocessing=True,
+        )
+        assert code is None
+        assert judge.judged > 0
+        m_publish.assert_called_once()
+
+    def test_changed_text_cap_blocks_incremental_run(self):
+        judge, m_publish, code = self._run(
+            ["--max-ocr-text-len", "5000"],
+            existing=self._existing_one_pair(),
+            existing_meta=[{"criteria": "default", "prompt_hash": self._DEFAULT_HASH}],
+        )
+        assert code == 1
+        assert judge.judged == 0
+        m_publish.assert_not_called()
 
     def test_mismatch_exits_without_judging_or_publishing(self):
         judge, m_publish, code = self._run(

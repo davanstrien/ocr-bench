@@ -36,6 +36,7 @@ from ocr_bench.judge import (
     CRITERIA_PROFILES,
     DEFAULT_CRITERIA,
     DEFAULT_MIN_CHARS,
+    MAX_IMAGE_DIM,
     MAX_OCR_TEXT_LENGTH,
     Comparison,
     _normalize_pair,
@@ -176,6 +177,38 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MAX_TOKENS,
         help=f"Max tokens for judge response (default: {DEFAULT_MAX_TOKENS})",
     )
+    judge.add_argument(
+        "--max-ocr-text-len",
+        type=_positive_int,
+        default=MAX_OCR_TEXT_LENGTH,
+        help=(
+            "Per-output character cap (applied after HTML normalization) for "
+            f"each OCR text in the prompt (default: {MAX_OCR_TEXT_LENGTH}). "
+            "Table-dense corpora may need a larger value."
+        ),
+    )
+    judge.add_argument(
+        "--judge-image-dim",
+        type=_positive_int,
+        default=MAX_IMAGE_DIM,
+        help=(
+            "Longer-side pixel cap for the judge image "
+            f"(default: {MAX_IMAGE_DIM}). Dense broadsheets may need 1536-2048."
+        ),
+    )
+    judge.add_argument(
+        "--judge-text-mode",
+        choices=["normalized", "raw"],
+        default="normalized",
+        help=(
+            "How OCR text is prepared for the judge (default: normalized). "
+            "'normalized' flattens HTML to bare content before the char cap so "
+            "the cap is format-neutral (the default, because raw mode lets "
+            "HTML-verbose outputs burn the cap on markup — the #45 bias). "
+            "'raw' skips normalization and caps text as-is — use it to judge "
+            "markup quality itself or to audit the harness's transformation."
+        ),
+    )
 
     # Output
     judge.add_argument(
@@ -287,6 +320,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     bench.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
     bench.add_argument(
+        "--judge-text-mode",
+        choices=["normalized", "raw"],
+        default="normalized",
+        help="OCR text prep for the judge (default: normalized; see `judge --help`).",
+    )
+    bench.add_argument(
         "--no-publish", action="store_true", help="Don't publish results (skips the viewer)"
     )
     bench.add_argument("--port", type=int, default=7860, help="Viewer port (default: 7860)")
@@ -300,8 +339,14 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("dataset", help="HF dataset repo id with OCR outputs")
     audit.add_argument("--split", default="train", help="Dataset split (default: train)")
     audit.add_argument(
+        "--judge-text-mode",
+        choices=["normalized", "raw"],
+        default="normalized",
+        help="Measure judge input after HTML normalization (default) or as raw OCR text.",
+    )
+    audit.add_argument(
         "--max-ocr-text-len",
-        type=int,
+        type=_positive_int,
         default=MAX_OCR_TEXT_LENGTH,
         help=(
             "Text length above which the judge truncates an output "
@@ -439,6 +484,8 @@ def _convert_results(
                 text_b=comp.text_b,
                 col_a=comp.col_a,
                 col_b=comp.col_b,
+                truncated_a=comp.truncated_a,
+                truncated_b=comp.truncated_b,
             )
         )
     return results
@@ -611,6 +658,23 @@ def _existing_criteria_provenance(meta_rows: list[dict]) -> tuple[str, str]:
     return (last.get("criteria") or DEFAULT_CRITERIA, last.get("prompt_hash") or default_hash)
 
 
+def _existing_preprocessing_provenance(meta_rows: list[dict]) -> tuple[str, int, int]:
+    """Return text mode, text cap, and image cap used by existing comparisons.
+
+    Results written before #45 used raw text with the original fixed caps. Treat
+    missing metadata as that legacy configuration so the new normalized default
+    cannot silently mix old raw verdicts with newly normalized ones.
+    """
+    if not meta_rows:
+        return "raw", MAX_OCR_TEXT_LENGTH, MAX_IMAGE_DIM
+    last = meta_rows[-1]
+    return (
+        last.get("judge_text_mode") or "raw",
+        int(last.get("max_ocr_text_len") or MAX_OCR_TEXT_LENGTH),
+        int(last.get("judge_image_dim") or MAX_IMAGE_DIM),
+    )
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Orchestrate: load → compare → judge → elo → print → publish."""
     # --- Resolve flags ---
@@ -619,6 +683,15 @@ def cmd_judge(args: argparse.Namespace) -> None:
     results_repo = _resolve_results_repo(args.dataset, args.save_results, args.no_publish)
     from_prs = False  # track for metadata
     max_comparisons = args.max_comparisons  # global budget; None = uncapped
+    normalize = args.judge_text_mode == "normalized"
+    if not normalize:
+        console.print(
+            "[yellow]judge-text-mode=raw:[/yellow] OCR text is capped WITHOUT HTML "
+            "normalization, so HTML-verbose outputs (tables) burn the char cap on "
+            "markup and get truncated mid-content while compact formats fit whole — "
+            "the #45 format bias. 'normalized' is the default for exactly this "
+            "reason; use raw only to judge markup quality or audit the transformation."
+        )
 
     # Judge criteria profile: the prompt template every comparison is built with,
     # plus a stable hash of it recorded in the results metadata for provenance.
@@ -719,7 +792,12 @@ def cmd_judge(args: argparse.Namespace) -> None:
     # Error sentinels (e.g. "[OCR ERROR]") are excluded from judging by
     # build_comparisons; here we count them per model for the metadata + card
     # and warn loudly when a model's run largely failed on this corpus.
-    model_stats = compute_model_stats(ds, ocr_columns, max_ocr_text_len=MAX_OCR_TEXT_LENGTH)
+    model_stats = compute_model_stats(
+        ds,
+        ocr_columns,
+        max_ocr_text_len=args.max_ocr_text_len,
+        normalize=normalize,
+    )
     failed_outputs = failed_output_counts(model_stats)
     # A fully sentinel-backed run has no comparable OCR output at all. Keep it
     # visible as FAILED, but never assign it an arbitrary disconnected ELO/rank.
@@ -838,6 +916,28 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     f"everything under '{criteria}'."
                 )
                 sys.exit(1)
+
+            previous_preprocessing = _existing_preprocessing_provenance(existing_meta_rows)
+            requested_preprocessing = (
+                args.judge_text_mode,
+                args.max_ocr_text_len,
+                args.judge_image_dim,
+            )
+            if previous_preprocessing != requested_preprocessing:
+                prev_mode, prev_text_cap, prev_image_cap = previous_preprocessing
+                console.print(
+                    f"[red]Error:[/red] judge preprocessing mismatch — "
+                    f"[bold]{results_repo}[/bold] was judged with "
+                    f"text_mode={prev_mode}, max_ocr_text_len={prev_text_cap}, "
+                    f"judge_image_dim={prev_image_cap}, but this run requested "
+                    f"text_mode={args.judge_text_mode}, "
+                    f"max_ocr_text_len={args.max_ocr_text_len}, "
+                    f"judge_image_dim={args.judge_image_dim}. Mixing these verdicts "
+                    "would make the leaderboard incomparable. Re-run with matching "
+                    "settings, or use [bold]--full-rejudge[/bold]."
+                )
+                sys.exit(1)
+
             skip_samples = {}
             for r in existing_results:
                 skip_samples.setdefault(_normalize_pair(r.model_a, r.model_b), set()).add(
@@ -931,6 +1031,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 seed=args.seed,
                 min_chars=args.min_chars,
                 prompt_template=prompt_template,
+                max_ocr_text_len=args.max_ocr_text_len,
+                judge_image_dim=args.judge_image_dim,
+                normalize=normalize,
             )
             if not batch_comps:
                 continue
@@ -1022,6 +1125,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
             skip_samples=skip_samples,
             min_chars=args.min_chars,
             prompt_template=prompt_template,
+            max_ocr_text_len=args.max_ocr_text_len,
+            judge_image_dim=args.judge_image_dim,
+            normalize=normalize,
         )
 
         # Global budget: judge at most N pairs, keeping every auto-tie (they
@@ -1068,6 +1174,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     failed_models=failed_models,
                     criteria=criteria,
                     prompt_hash=criteria_prompt_hash,
+                    max_ocr_text_len=args.max_ocr_text_len,
+                    judge_image_dim=args.judge_image_dim,
+                    judge_text_mode=args.judge_text_mode,
                 )
                 publish_results(
                     results_repo,
@@ -1175,6 +1284,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
             failed_models=failed_models,
             criteria=criteria,
             prompt_hash=criteria_prompt_hash,
+            max_ocr_text_len=args.max_ocr_text_len,
+            judge_image_dim=args.judge_image_dim,
+            judge_text_mode=args.judge_text_mode,
         )
         publish_results(
             results_repo,
@@ -1437,7 +1549,8 @@ def cmd_bench(args: argparse.Namespace) -> None:
 
     # --- Phase 2: judge the OCR outputs (from the PRs the run just opened) ---
     judge_argv = [
-        "judge", args.output_repo, "--from-prs", "--seed", str(args.seed)
+        "judge", args.output_repo, "--from-prs", "--seed", str(args.seed),
+        "--judge-text-mode", args.judge_text_mode,
     ]
     for model in args.judge_models or []:
         judge_argv += ["--model", model]
@@ -1499,6 +1612,7 @@ def cmd_audit(args: argparse.Namespace) -> None:
             args.dataset,
             split=args.split,
             max_ocr_text_len=args.max_ocr_text_len,
+            judge_text_mode=args.judge_text_mode,
         )
     except (DatasetError, OSError, OpenAIError, ValueError) as exc:
         # Couldn't even run the check (repo missing, no OCR columns, network /
@@ -1512,7 +1626,10 @@ def cmd_audit(args: argparse.Namespace) -> None:
         sys.exit(_AUDIT_EXIT_OPERATIONAL)
 
     align = report.alignment
-    table = Table(title=f"OCR input audit — {args.dataset}", show_lines=False)
+    table = Table(
+        title=f"OCR input audit — {args.dataset} ({args.judge_text_mode} judge text)",
+        show_lines=False,
+    )
     table.add_column("Config", style="cyan")
     table.add_column("Model")
     table.add_column("Rows", justify="right")

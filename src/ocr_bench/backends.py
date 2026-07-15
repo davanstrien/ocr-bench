@@ -102,7 +102,12 @@ class JudgeBackend(abc.ABC):
         return results
 
 
-DEFAULT_MAX_TOKENS = 1024
+# The verdict JSON needs only ~154 tokens, but reasoning models spend the rest
+# of the budget thinking before emitting it — at 1024 the reasoning consumed the
+# whole budget and the JSON was cut off, causing parse failures. 4096 measured
+# clean on 18k-token comparisons (2026-07-09 scout). This is a ceiling, not
+# spend: non-reasoning judges still stop at the ~154-token verdict.
+DEFAULT_MAX_TOKENS = 4096
 
 
 class InferenceProviderJudge(JudgeBackend):

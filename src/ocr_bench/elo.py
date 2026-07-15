@@ -31,6 +31,8 @@ class ComparisonResult:
     text_b: str = ""
     col_a: str = ""
     col_b: str = ""
+    truncated_a: bool = False
+    truncated_b: bool = False
 
 
 @dataclass
@@ -305,6 +307,10 @@ def compute_elo(
                 "text_b": r.text_b,
                 "col_a": r.col_a,
                 "col_b": r.col_b,
+                # Keyed to model_a/model_b (like text_a/text_b), so no swap
+                # flip: truncated_a is always about model_a's output.
+                "truncated_a": r.truncated_a,
+                "truncated_b": r.truncated_b,
             }
         )
 

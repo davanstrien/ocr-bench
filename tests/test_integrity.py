@@ -46,6 +46,17 @@ class TestComputeColumnStats:
         assert s.median_len == 2
         assert s.max_len == 4
 
+    def test_normalized_mode_measures_content_not_html_markup(self):
+        html = "<table><tr><td>alpha</td><td>beta</td></tr></table>"
+        normalized = compute_column_stats("cfg", "m", [html], max_ocr_text_len=20)
+        raw = compute_column_stats(
+            "cfg", "m", [html], max_ocr_text_len=20, normalize=False
+        )
+        assert normalized.max_len == len("alpha | beta")
+        assert normalized.n_over_max == 0
+        assert raw.max_len == len(html)
+        assert raw.n_over_max == 1
+
     def test_empty_input(self):
         s = compute_column_stats("cfg", "m", [])
         assert s.n_rows == 0
@@ -209,5 +220,6 @@ class TestAuditRepo:
         mock_flat.return_value = (ds, {"ocr": "model-x"})
         report = audit_repo("user/repo")
         assert report.alignment.status == "n/a"
+        assert report.judge_text_mode == "normalized"
         assert len(report.configs) == 1
         assert report.has_problems  # 50% sentinels
