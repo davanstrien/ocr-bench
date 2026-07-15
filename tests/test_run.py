@@ -49,7 +49,7 @@ class TestModelConfig:
 
 class TestModelRegistry:
     def test_has_core_models(self):
-        assert len(MODEL_REGISTRY) == 14
+        assert len(MODEL_REGISTRY) == 16
 
     def test_default_models_exist_in_registry(self):
         for slug in DEFAULT_MODELS:
@@ -66,6 +66,26 @@ class TestModelRegistry:
         cfg = MODEL_REGISTRY["deepseek-ocr"]
         assert "--prompt-mode" in cfg.default_args
         assert "free" in cfg.default_args
+
+    def test_compact_models_use_standard_l4_launch(self):
+        expected = {
+            "falcon-ocr": ("tiiuae/Falcon-OCR", "0.3B", "falcon-ocr.py"),
+            "ovis-ocr2": ("ATH-MaaS/OvisOCR2", "0.9B", "ovis-ocr2.py"),
+        }
+        for slug, (model_id, size, script_name) in expected.items():
+            cfg = MODEL_REGISTRY[slug]
+            assert cfg.model_id == model_id
+            assert cfg.size == size
+            assert cfg.script.endswith(f"/{script_name}")
+            assert cfg.default_flavor == "l4x1"
+            assert cfg.default_args == []
+            assert cfg.image is None
+            assert cfg.python is None
+            assert cfg.env is None
+
+    def test_compact_models_are_opt_in(self):
+        assert "falcon-ocr" not in DEFAULT_MODELS
+        assert "ovis-ocr2" not in DEFAULT_MODELS
 
     def test_image_mode_models_configured(self):
         # NuExtract3 and PaddleOCR-VL-1.6 need the prebuilt-kernel image on a100.
@@ -290,12 +310,14 @@ class TestCLIParser:
         assert args.output_repo == "output/repo"
         assert args.max_samples == 50
 
-    def test_run_list_models(self):
+    def test_run_list_models_without_repo_arguments(self):
         from ocr_bench.cli import build_parser
 
         parser = build_parser()
-        args = parser.parse_args(["run", "in", "out", "--list-models"])
+        args = parser.parse_args(["run", "--list-models"])
         assert args.list_models is True
+        assert args.input_dataset is None
+        assert args.output_repo is None
 
     def test_run_dry_run(self):
         from ocr_bench.cli import build_parser

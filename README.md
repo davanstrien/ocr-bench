@@ -75,7 +75,7 @@ To avoid wasting judge calls on uninformative pairs, the judge skips comparisons
 
 ## Available models
 
-ocr-bench ships with 5 OCR models ready to run:
+ocr-bench ships with 16 registered OCR models. Five form the default set:
 
 | Model           | Size | Best for                   | Notes                        |
 | --------------- | ---- | -------------------------- | ---------------------------- |
@@ -85,12 +85,18 @@ ocr-bench ships with 5 OCR models ready to run:
 | `deepseek-ocr`  | 4B   | Diverse documents          | Most consistent across types |
 | `dots-ocr`      | 1.7B | General                    | Struggles on historical text |
 
-All model scripts are available at [uv-scripts/ocr](https://huggingface.co/datasets/uv-scripts/ocr) on the Hub.
-
-By default all 5 run. To pick specific models:
+The opt-in registry also includes compact models at different quality/cost points, including `falcon-ocr` (0.3B) and `ovis-ocr2` (0.9B). List every available model with:
 
 ```bash
-ocr-bench run <dataset> <output> --models glm-ocr lighton-ocr-2
+ocr-bench run --list-models
+```
+
+All model scripts are available at [uv-scripts/ocr](https://huggingface.co/datasets/uv-scripts/ocr) on the Hub.
+
+By default all 5 models in the table run. To pick specific models:
+
+```bash
+ocr-bench run <dataset> <output> --models tesseract falcon-ocr ovis-ocr2
 ```
 
 ## Example results

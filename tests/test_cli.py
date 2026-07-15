@@ -872,6 +872,20 @@ class TestCmdBench:
 class TestCmdRun:
     """cmd_run returns the launched jobs and prints a per-job status summary."""
 
+    def test_list_models_needs_no_repo_arguments(self, capsys):
+        args = build_parser().parse_args(["run", "--list-models"])
+        assert cli.cmd_run(args) == []
+        out = capsys.readouterr().out
+        assert "falcon-ocr" in out
+        assert "ovis-ocr2" in out
+
+    def test_missing_repo_arguments_fails_cleanly(self, capsys):
+        args = build_parser().parse_args(["run"])
+        with pytest.raises(SystemExit) as exc:
+            cli.cmd_run(args)
+        assert exc.value.code == 2
+        assert "requires INPUT_DATASET and OUTPUT_REPO" in capsys.readouterr().out
+
     def _run(self, monkeypatch, statuses):
         from ocr_bench.run import JobRun
 

@@ -249,10 +249,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     # --- run subcommand ---
     run = sub.add_parser("run", help="Launch OCR models on a dataset via HF Jobs")
-    run.add_argument("input_dataset", help="HF dataset repo id with images")
-    run.add_argument("output_repo", help="Output dataset repo (all models push here)")
     run.add_argument(
-        "--models", nargs="+", default=None, help="Model slugs to run (default: all 4 core)"
+        "input_dataset",
+        nargs="?",
+        help="HF dataset repo id with images (not needed with --list-models)",
+    )
+    run.add_argument(
+        "output_repo",
+        nargs="?",
+        help="Output dataset repo (not needed with --list-models)",
+    )
+    run.add_argument(
+        "--models", nargs="+", default=None, help="Model slugs to run (default: core set)"
     )
     run.add_argument("--max-samples", type=int, default=None, help="Per-model sample limit")
     run.add_argument("--split", default="train", help="Dataset split (default: train)")
@@ -1348,6 +1356,13 @@ def cmd_run(args: argparse.Namespace) -> list[JobRun]:
         console.print(table)
         console.print(f"\nDefault set: {', '.join(DEFAULT_MODELS)}")
         return []
+
+    if not args.input_dataset or not args.output_repo:
+        console.print(
+            "[red]Error:[/red] run requires INPUT_DATASET and OUTPUT_REPO "
+            "unless --list-models is used."
+        )
+        raise SystemExit(2)
 
     selected = args.models or DEFAULT_MODELS
     for slug in selected:
