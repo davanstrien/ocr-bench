@@ -245,13 +245,24 @@ class TestAuditParser:
         assert args.command == "audit"
         assert args.dataset == "user/data"
         assert args.split == "train"
+        assert args.judge_text_mode == "normalized"
         assert args.max_ocr_text_len == 2500
 
     def test_audit_overrides(self):
         args = build_parser().parse_args(
-            ["audit", "user/data", "--split", "test", "--max-ocr-text-len", "500"]
+            [
+                "audit",
+                "user/data",
+                "--split",
+                "test",
+                "--judge-text-mode",
+                "raw",
+                "--max-ocr-text-len",
+                "500",
+            ]
         )
         assert args.split == "test"
+        assert args.judge_text_mode == "raw"
         assert args.max_ocr_text_len == 500
 
 

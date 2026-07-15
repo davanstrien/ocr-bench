@@ -339,6 +339,12 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("dataset", help="HF dataset repo id with OCR outputs")
     audit.add_argument("--split", default="train", help="Dataset split (default: train)")
     audit.add_argument(
+        "--judge-text-mode",
+        choices=["normalized", "raw"],
+        default="normalized",
+        help="Measure judge input after HTML normalization (default) or as raw OCR text.",
+    )
+    audit.add_argument(
         "--max-ocr-text-len",
         type=_positive_int,
         default=MAX_OCR_TEXT_LENGTH,
@@ -786,7 +792,12 @@ def cmd_judge(args: argparse.Namespace) -> None:
     # Error sentinels (e.g. "[OCR ERROR]") are excluded from judging by
     # build_comparisons; here we count them per model for the metadata + card
     # and warn loudly when a model's run largely failed on this corpus.
-    model_stats = compute_model_stats(ds, ocr_columns, max_ocr_text_len=MAX_OCR_TEXT_LENGTH)
+    model_stats = compute_model_stats(
+        ds,
+        ocr_columns,
+        max_ocr_text_len=args.max_ocr_text_len,
+        normalize=normalize,
+    )
     failed_outputs = failed_output_counts(model_stats)
     # A fully sentinel-backed run has no comparable OCR output at all. Keep it
     # visible as FAILED, but never assign it an arbitrary disconnected ELO/rank.
@@ -1601,6 +1612,7 @@ def cmd_audit(args: argparse.Namespace) -> None:
             args.dataset,
             split=args.split,
             max_ocr_text_len=args.max_ocr_text_len,
+            judge_text_mode=args.judge_text_mode,
         )
     except (DatasetError, OSError, OpenAIError, ValueError) as exc:
         # Couldn't even run the check (repo missing, no OCR columns, network /
@@ -1614,7 +1626,10 @@ def cmd_audit(args: argparse.Namespace) -> None:
         sys.exit(_AUDIT_EXIT_OPERATIONAL)
 
     align = report.alignment
-    table = Table(title=f"OCR input audit — {args.dataset}", show_lines=False)
+    table = Table(
+        title=f"OCR input audit — {args.dataset} ({args.judge_text_mode} judge text)",
+        show_lines=False,
+    )
     table.add_column("Config", style="cyan")
     table.add_column("Model")
     table.add_column("Rows", justify="right")
