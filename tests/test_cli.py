@@ -11,16 +11,18 @@ from openai import OpenAIError
 from ocr_bench import cli
 from ocr_bench.cli import (
     _convert_results,
+    _existing_criteria_provenance,
     _merge_auto_ties,
     _refresh_viewer_space,
+    _resolve_criteria,
     _resolve_results_repo,
     _trim_to_budget,
     build_parser,
 )
-from ocr_bench.dataset import AlignmentResult
+from ocr_bench.dataset import AlignmentResult, DatasetError
 from ocr_bench.elo import compute_elo
 from ocr_bench.integrity import AuditReport, ColumnStats, ConfigAudit
-from ocr_bench.judge import Comparison
+from ocr_bench.judge import CRITERIA_PROFILES, DEFAULT_CRITERIA, Comparison, prompt_hash
 
 
 class TestBuildParser:
@@ -124,6 +126,83 @@ class TestBuildParser:
         parser = build_parser()
         args = parser.parse_args(["judge", "user/dataset"])
         assert args.full_rejudge is False
+
+    def test_criteria_default_is_none_sentinel(self):
+        # Parser default is the None sentinel; _resolve_criteria maps it to
+        # DEFAULT_CRITERIA (so explicit-vs-unset is distinguishable).
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset"])
+        assert args.criteria is None
+        assert _resolve_criteria(args)[0] == "default"
+
+    def test_criteria_accepts_table_fidelity(self):
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset", "--criteria", "table-fidelity"])
+        assert args.criteria == "table-fidelity"
+
+    def test_criteria_rejects_unknown(self):
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["judge", "user/dataset", "--criteria", "nonsense"])
+
+    def test_criteria_file_default_none(self):
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset"])
+        assert args.criteria_file is None
+
+    def test_criteria_file_parses(self):
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset", "--criteria-file", "my/rubric.txt"])
+        assert args.criteria_file == "my/rubric.txt"
+        assert args.criteria is None  # unset sentinel when only the file is given
+
+    def test_criteria_and_criteria_file_conflict_errors(self):
+        # Exclusivity is enforced in _resolve_criteria (not the argparse layer,
+        # which is unreliable on Python 3.13.0), so both parse cleanly and the
+        # conflict surfaces as a DatasetError.
+        args = build_parser().parse_args(
+            ["judge", "user/dataset", "--criteria", "default", "--criteria-file", "r.txt"]
+        )
+        with pytest.raises(DatasetError, match="mutually exclusive"):
+            _resolve_criteria(args)
+
+
+class TestResolveCriteria:
+    def test_builtin_default(self):
+        args = build_parser().parse_args(["judge", "user/ds"])
+        name, tmpl, phash = _resolve_criteria(args)
+        assert name == "default"
+        assert tmpl == CRITERIA_PROFILES["default"]
+        assert phash == prompt_hash(CRITERIA_PROFILES["default"])
+
+    def test_builtin_table_fidelity(self):
+        args = build_parser().parse_args(["judge", "user/ds", "--criteria", "table-fidelity"])
+        name, tmpl, phash = _resolve_criteria(args)
+        assert name == "table-fidelity"
+        assert phash == prompt_hash(CRITERIA_PROFILES["table-fidelity"])
+
+    def test_custom_file(self, tmp_path):
+        f = tmp_path / "table-rubric.txt"
+        f.write_text("Judge these. A: {ocr_text_a} B: {ocr_text_b}")
+        args = build_parser().parse_args(["judge", "user/ds", "--criteria-file", str(f)])
+        name, tmpl, phash = _resolve_criteria(args)
+        assert name == "custom:table-rubric.txt"
+        assert tmpl == f.read_text()
+        assert phash == prompt_hash(tmpl)
+
+    def test_custom_file_invalid_template_raises(self, tmp_path):
+        f = tmp_path / "bad.txt"
+        f.write_text("missing the b placeholder: {ocr_text_a}")
+        args = build_parser().parse_args(["judge", "user/ds", "--criteria-file", str(f)])
+        with pytest.raises(DatasetError, match="ocr_text_b"):
+            _resolve_criteria(args)
+
+    def test_custom_file_missing_raises(self, tmp_path):
+        args = build_parser().parse_args(
+            ["judge", "user/ds", "--criteria-file", str(tmp_path / "nope.txt")]
+        )
+        with pytest.raises(DatasetError, match="could not read"):
+            _resolve_criteria(args)
 
 
 class TestAuditParser:
@@ -283,6 +362,32 @@ class TestResolveResultsRepo:
     def test_no_publish_overrides_explicit(self):
         result = _resolve_results_repo("user/my-dataset", "user/custom", True)
         assert result is None
+
+
+class TestExistingCriteriaProvenance:
+    """Reads the criteria/prompt_hash the existing comparisons were judged under."""
+
+    _DEFAULT_HASH = prompt_hash(CRITERIA_PROFILES[DEFAULT_CRITERIA])
+
+    def test_no_rows_is_default(self):
+        assert _existing_criteria_provenance([]) == (DEFAULT_CRITERIA, self._DEFAULT_HASH)
+
+    def test_reads_last_row(self):
+        rows = [
+            {"criteria": "default", "prompt_hash": self._DEFAULT_HASH},
+            {"criteria": "table-fidelity", "prompt_hash": "fe138e71ecc3"},
+        ]
+        assert _existing_criteria_provenance(rows) == ("table-fidelity", "fe138e71ecc3")
+
+    def test_none_values_treated_as_default(self):
+        # Post-alignment old rows carry explicit None for the new columns.
+        rows = [{"criteria": None, "prompt_hash": None}]
+        assert _existing_criteria_provenance(rows) == (DEFAULT_CRITERIA, self._DEFAULT_HASH)
+
+    def test_missing_keys_treated_as_default(self):
+        # Genuinely pre-#44 rows lack the columns entirely.
+        rows = [{"source_dataset": "d", "judge_models": "[]"}]
+        assert _existing_criteria_provenance(rows) == (DEFAULT_CRITERIA, self._DEFAULT_HASH)
 
 
 _AUTO_TIE = {"winner": "tie", "reason": "identical outputs — auto-tie", "agreement": "auto"}
@@ -497,6 +602,8 @@ class TestBenchParser:
         assert args.output_repo == "user/out"
         assert args.models is None
         assert args.judge_models is None
+        assert args.criteria is None  # None sentinel; resolves to default later
+        assert args.criteria_file is None
         assert args.max_samples is None
         assert args.seed == 42
         assert args.no_publish is False
@@ -596,6 +703,64 @@ class TestCmdBench:
         assert judge_a.models == ["novita:org/m"]  # judge --model, dest=models
         assert judge_a.max_samples == 25
         assert judge_a.seed == 7
+
+    def test_threads_criteria_to_judge(self, monkeypatch):
+        """bench --criteria reaches the judge phase's namespace."""
+        calls = self._patch(monkeypatch)
+        args = build_parser().parse_args(
+            ["bench", "user/imgs", "user/out", "--criteria", "table-fidelity"]
+        )
+        cli.cmd_bench(args)
+        judge_a = calls[1][1]
+        assert judge_a.criteria == "table-fidelity"
+
+    def test_criteria_defaults_to_default_in_judge(self, monkeypatch):
+        # Neither flag given → bench forwards nothing → the judge phase applies
+        # its own default (criteria=None sentinel, resolved to 'default').
+        calls = self._patch(monkeypatch)
+        args = build_parser().parse_args(["bench", "user/imgs", "user/out"])
+        cli.cmd_bench(args)
+        judge_a = calls[1][1]
+        assert judge_a.criteria is None
+        assert judge_a.criteria_file is None
+
+    def test_threads_criteria_file_to_judge(self, monkeypatch, tmp_path):
+        """bench --criteria-file is forwarded (not --criteria) to the judge phase.
+
+        Uses a real, valid file since cmd_bench validates it before launching.
+        """
+        calls = self._patch(monkeypatch)
+        f = tmp_path / "rubric.txt"
+        f.write_text("Judge. A={ocr_text_a} B={ocr_text_b}")
+        args = build_parser().parse_args(
+            ["bench", "user/imgs", "user/out", "--criteria-file", str(f)]
+        )
+        cli.cmd_bench(args)
+        judge_a = calls[1][1]
+        assert judge_a.criteria_file == str(f)
+
+    def test_invalid_criteria_file_errors_before_running(self, monkeypatch, tmp_path):
+        """A bad custom prompt file fails fast — before any OCR job is launched."""
+        calls = self._patch(monkeypatch)
+        f = tmp_path / "bad.txt"
+        f.write_text("missing the b placeholder: {ocr_text_a}")
+        args = build_parser().parse_args(
+            ["bench", "user/imgs", "user/out", "--criteria-file", str(f)]
+        )
+        with pytest.raises(DatasetError, match="ocr_text_b"):
+            cli.cmd_bench(args)
+        assert calls == []  # never reached the run phase
+
+    def test_conflicting_criteria_flags_error_before_running(self, monkeypatch):
+        """bench --criteria + --criteria-file fails fast (before launching jobs)."""
+        calls = self._patch(monkeypatch)
+        args = build_parser().parse_args(
+            ["bench", "user/imgs", "user/out", "--criteria", "default",
+             "--criteria-file", "r.txt"]
+        )
+        with pytest.raises(DatasetError, match="mutually exclusive"):
+            cli.cmd_bench(args)
+        assert calls == []  # nothing ran — not even the OCR phase
 
     def test_aborts_when_a_job_fails(self, monkeypatch, capsys):
         """A failed OCR job must stop bench before judging — a partial

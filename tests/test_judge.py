@@ -2,9 +2,12 @@
 
 import json
 
+import pytest
 from PIL import Image
 
 from ocr_bench.judge import (
+    CRITERIA_PROFILES,
+    DEFAULT_CRITERIA,
     Comparison,
     build_comparisons,
     build_messages,
@@ -12,7 +15,17 @@ from ocr_bench.judge import (
     image_to_base64,
     is_sentinel,
     parse_judge_output,
+    prompt_hash,
+    validate_prompt_template,
 )
+
+# sha256(prompt template)[:12] — pins the exact bytes of each criteria profile.
+# If a prompt is edited, the matching test fails loudly; a new value is
+# intentional churn, not an accident. The DEFAULT hash must never change (it is
+# byte-identical to the pre-#44 hardcoded prompt); update the table-fidelity one
+# deliberately when its prompt changes.
+DEFAULT_PROMPT_HASH = "8d86832723b5"
+TABLE_FIDELITY_PROMPT_HASH = "fe138e71ecc3"
 
 
 class TestImageToBase64:
@@ -49,6 +62,112 @@ class TestImageToBase64:
         assert result.size == (200, 100)
 
 
+class TestCriteriaProfiles:
+    def test_default_profile_present(self):
+        assert DEFAULT_CRITERIA == "default"
+        assert "default" in CRITERIA_PROFILES
+
+    def test_default_profile_byte_equal(self):
+        """The default profile must be the original prompt, byte-for-byte."""
+        assert prompt_hash(CRITERIA_PROFILES["default"]) == DEFAULT_PROMPT_HASH
+
+    def test_table_fidelity_profile_present(self):
+        assert "table-fidelity" in CRITERIA_PROFILES
+
+    def test_table_fidelity_byte_equal(self):
+        """Pin the table-fidelity prompt bytes; edits must update this hash."""
+        assert prompt_hash(CRITERIA_PROFILES["table-fidelity"]) == TABLE_FIDELITY_PROMPT_HASH
+
+    def test_table_fidelity_criteria_ordering(self):
+        """Table fidelity is criterion 3 (below completeness, above accuracy);
+        accuracy and reading order shift to 4 and 5. Position now matches the
+        intended severity, so no override language is needed."""
+        tf = CRITERIA_PROFILES["table-fidelity"]
+        for label in (
+            "1. Faithfulness",
+            "2. Completeness",
+            "3. Table fidelity",
+            "4. Accuracy",
+            "5. Reading order",
+        ):
+            assert label in tf
+        # Ordering holds positionally, and the old severity-override phrasing is gone.
+        assert tf.index("2. Completeness") < tf.index("3. Table fidelity")
+        assert tf.index("3. Table fidelity") < tf.index("4. Accuracy")
+        assert "rank it just below completeness" not in tf
+
+    def test_table_fidelity_criterion_content(self):
+        tf = CRITERIA_PROFILES["table-fidelity"]
+        assert "row and column" in tf
+        assert "significant error" in tf
+        # Markup style stays neutral — the relationships are judged, not syntax.
+        assert "plain-text table" in tf
+        assert "<|ref|>" in tf  # bbox-tag-ignore note retained
+        # The default's structure-neutralising criterion 5 is gone.
+        assert "5. Formatting" not in tf
+
+    def test_table_fidelity_tie_line_covers_non_table_pages(self):
+        """The tie line must not require table structure on pages without tables;
+        it gates on tables only 'where tables are present'."""
+        tf = CRITERIA_PROFILES["table-fidelity"]
+        assert "where tables are present" in tf
+
+    def test_profiles_have_distinct_prompts(self):
+        assert CRITERIA_PROFILES["default"] != CRITERIA_PROFILES["table-fidelity"]
+
+    def test_all_profiles_have_placeholders(self):
+        for tmpl in CRITERIA_PROFILES.values():
+            assert "{ocr_text_a}" in tmpl
+            assert "{ocr_text_b}" in tmpl
+
+
+class TestPromptHash:
+    def test_is_12_hex_chars(self):
+        h = prompt_hash("anything")
+        assert len(h) == 12
+        assert all(c in "0123456789abcdef" for c in h)
+
+    def test_deterministic(self):
+        assert prompt_hash("same") == prompt_hash("same")
+
+    def test_differs_between_profiles(self):
+        assert prompt_hash(CRITERIA_PROFILES["default"]) != prompt_hash(
+            CRITERIA_PROFILES["table-fidelity"]
+        )
+
+
+class TestValidatePromptTemplate:
+    def test_valid_template_passes(self):
+        validate_prompt_template("Judge A: {ocr_text_a} vs B: {ocr_text_b}")  # no raise
+
+    def test_builtin_profiles_pass(self):
+        for tmpl in CRITERIA_PROFILES.values():
+            validate_prompt_template(tmpl)  # includes escaped {{ }} JSON example
+
+    def test_escaped_braces_allowed(self):
+        validate_prompt_template('{ocr_text_a} {ocr_text_b} reply {{"winner": "A"}}')
+
+    def test_missing_ocr_text_a(self):
+        with pytest.raises(ValueError, match=r"\{ocr_text_a\}"):
+            validate_prompt_template("only b: {ocr_text_b}")
+
+    def test_missing_ocr_text_b(self):
+        with pytest.raises(ValueError, match=r"\{ocr_text_b\}"):
+            validate_prompt_template("only a: {ocr_text_a}")
+
+    def test_missing_both(self):
+        with pytest.raises(ValueError, match="missing required placeholder"):
+            validate_prompt_template("no placeholders here")
+
+    def test_unknown_format_field(self):
+        with pytest.raises(ValueError, match="not a valid format string"):
+            validate_prompt_template("{ocr_text_a} {ocr_text_b} {surprise}")
+
+    def test_stray_unescaped_brace(self):
+        with pytest.raises(ValueError, match="escape any literal brace"):
+            validate_prompt_template("{ocr_text_a} {ocr_text_b} and a lone {")
+
+
 class TestBuildPrompt:
     def test_not_swapped(self):
         prompt, swapped = build_prompt("text A", "text B", swapped=False)
@@ -71,6 +190,20 @@ class TestBuildPrompt:
         assert "x" * 5000 not in prompt
         # But 2500 chars should
         assert "x" * 2500 in prompt
+
+    def test_defaults_to_default_profile(self):
+        """With no template arg, build_prompt uses the default criteria."""
+        prompt, _ = build_prompt("a", "b", swapped=False)
+        assert "5. Formatting" in prompt
+        assert "5. Table fidelity" not in prompt
+
+    def test_threads_explicit_template(self):
+        prompt, _ = build_prompt(
+            "a", "b", swapped=False, prompt_template=CRITERIA_PROFILES["table-fidelity"]
+        )
+        assert "3. Table fidelity" in prompt
+        assert "a" in prompt
+        assert "b" in prompt
 
 
 class TestBuildMessages:
@@ -254,6 +387,27 @@ class TestBuildComparisons:
         comp = comps[0]
         assert comp.text_a == "text from model A"
         assert comp.text_b == "text from model B"
+
+    def test_defaults_to_default_criteria(self):
+        ds = self._make_dataset()
+        ocr_columns = {"ocr_model_a": "ModelA", "ocr_model_b": "ModelB"}
+        # min_chars=0 isolates this from the blank-pair filter (toy text is short)
+        comps = build_comparisons(ds, ocr_columns, min_chars=0)
+        prompt_text = comps[0].messages[0]["content"][1]["text"]
+        assert "5. Formatting" in prompt_text
+        assert "5. Table fidelity" not in prompt_text
+
+    def test_threads_prompt_template_into_messages(self):
+        """The selected criteria profile reaches each comparison's judge prompt."""
+        ds = self._make_dataset()
+        ocr_columns = {"ocr_model_a": "ModelA", "ocr_model_b": "ModelB"}
+        # min_chars=0 isolates this from the blank-pair filter (toy text is short)
+        comps = build_comparisons(
+            ds, ocr_columns, prompt_template=CRITERIA_PROFILES["table-fidelity"], min_chars=0
+        )
+        prompt_text = comps[0].messages[0]["content"][1]["text"]
+        assert "3. Table fidelity" in prompt_text
+        assert "5. Formatting" not in prompt_text
 
     def test_skips_empty_text(self):
         ds = [

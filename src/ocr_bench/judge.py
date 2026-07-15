@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import logging
@@ -63,9 +64,23 @@ def is_sentinel(text: str | None) -> bool:
     return len(stripped[1:-1].split()) <= _MAX_SENTINEL_WORDS
 
 
-# --- Judge prompt ---
+# --- Judge prompt profiles ---
+#
+# Named criteria profiles select the pairwise judge prompt. "default" is tuned
+# for prose corpora — it deliberately neutralises structure so cosmetic markup
+# can't win. "table-fidelity" keeps criteria 1-4 identical but swaps criterion 5
+# for an explicit table criterion, because on table-dense corpora the main
+# quality signal is whether a pipeline preserves row/column cell association
+# rather than flattening it. Add a profile by adding a key here; the CLI exposes
+# them via ``--criteria`` and records the chosen profile + a prompt hash in the
+# results metadata so two boards judged under different prompts are
+# distinguishable. See GitHub issue #44.
 
-PAIRWISE_PROMPT = """\
+# The profile chosen when ``--criteria`` is not given (and the default template
+# for direct callers of ``build_prompt`` / ``build_comparisons``).
+DEFAULT_CRITERIA = "default"
+
+_DEFAULT_PROMPT = """\
 You are an expert OCR quality evaluator. You are given a document image and \
 TWO OCR outputs (A and B) extracted from that same image.
 
@@ -109,6 +124,100 @@ Output B:
 Respond with JSON only (no markdown fences, no extra text):
 {{"winner": "A", "reason": "brief explanation"}}
 Use "A", "B", or "tie" for the winner field."""
+
+_TABLE_FIDELITY_PROMPT = """\
+You are an expert OCR quality evaluator. You are given a document image and \
+TWO OCR outputs (A and B) extracted from that same image.
+
+Compare them and decide which extraction is better overall.
+
+Evaluation criteria (in priority order):
+
+1. Faithfulness: The output must ONLY contain text actually visible in the document. \
+Hallucinating text that is not in the image (garbled strings, repeated tokens, \
+nonsensical output) is the most serious error. Added commentary or notes \
+(e.g. "it appears the text says...") is also an error, but less severe than \
+hallucination. If a page is blank or has minimal text, saying so is acceptable — \
+fabricating content is always worse.
+
+2. Completeness: ALL visible text must be captured — headers, footers, marginalia, \
+stamps, handwritten notes. Missing any section of text is a significant penalty.
+
+3. Table fidelity: When the document contains tabular data, the extraction must \
+preserve the table's row and column structure — each value must stay associated \
+with its correct row and column headers. A flattened table that runs cells \
+together so it is no longer clear which value belongs to which row or column is a \
+significant error. Markup style is neutral: a well-aligned plain-text table \
+(using spacing or simple separators) that preserves the cell relationships is just \
+as good as a markdown or HTML table — judge the preserved row/column relationships, \
+not the syntax used to express them.
+
+4. Accuracy: Correct characters, no garbled or fabricated words.
+
+5. Reading order: Text flows naturally as a human would read the document.
+
+Ignore bounding box tags like <|ref|> <|det|> if present. For non-tabular text, \
+do not penalise or reward markdown formatting markers (#, **, *, etc.) — plain \
+text and markdown-formatted text that contain the same words are equivalent.
+
+If both outputs capture the same text — including, where tables are present, the \
+same table structure — with similar accuracy, respond with "tie". Only pick a \
+winner when there is a clear quality difference.
+
+Output A:
+---
+{ocr_text_a}
+---
+
+Output B:
+---
+{ocr_text_b}
+---
+
+Respond with JSON only (no markdown fences, no extra text):
+{{"winner": "A", "reason": "brief explanation"}}
+Use "A", "B", or "tie" for the winner field."""
+
+CRITERIA_PROFILES: dict[str, str] = {
+    "default": _DEFAULT_PROMPT,
+    "table-fidelity": _TABLE_FIDELITY_PROMPT,
+}
+
+
+def prompt_hash(prompt_template: str) -> str:
+    """Stable 12-hex-char sha256 fingerprint of a judge prompt template.
+
+    Hashes the template (with its ``{ocr_text_a}`` placeholders intact), not a
+    formatted instance, so every run using the same profile yields the same
+    hash. Recorded in the results metadata for provenance.
+    """
+    return hashlib.sha256(prompt_template.encode()).hexdigest()[:12]
+
+
+def validate_prompt_template(template: str) -> None:
+    """Raise ``ValueError`` if a prompt template won't work with ``build_prompt``.
+
+    A valid template must contain both ``{ocr_text_a}`` and ``{ocr_text_b}`` and
+    no other format fields — any unknown ``{field}`` or a stray unescaped brace
+    would crash ``str.format`` at judge time. This mirrors how ``build_prompt``
+    formats the template, so a template that passes here is safe to judge with.
+    Used to vet user-supplied ``--criteria-file`` templates before a run starts.
+    """
+    try:
+        template.format(ocr_text_a="A", ocr_text_b="B")
+    except (KeyError, IndexError, ValueError) as exc:
+        raise ValueError(
+            f"template is not a valid format string ({exc!s}). Only "
+            "{ocr_text_a} and {ocr_text_b} may appear as placeholders; escape "
+            "any literal brace as {{ or }}"
+        ) from exc
+    missing = [f for f in ("{ocr_text_a}", "{ocr_text_b}") if f not in template]
+    if missing:
+        raise ValueError(
+            f"template is missing required placeholder(s): {', '.join(missing)} "
+            "(see the default profile for the expected shape)"
+        )
+
 
 JUDGE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -176,8 +285,17 @@ class Comparison:
     auto_result: dict[str, str] | None = None
 
 
-def build_prompt(text_a: str, text_b: str, swapped: bool) -> tuple[str, bool]:
+def build_prompt(
+    text_a: str,
+    text_b: str,
+    swapped: bool,
+    prompt_template: str = CRITERIA_PROFILES[DEFAULT_CRITERIA],
+) -> tuple[str, bool]:
     """Build the pairwise comparison prompt, applying position-bias swap.
+
+    ``prompt_template`` is a criteria profile template (see ``CRITERIA_PROFILES``)
+    with ``{ocr_text_a}``/``{ocr_text_b}`` placeholders; it defaults to the
+    ``default`` profile so existing callers and tests are unaffected.
 
     Returns (prompt_text, swapped).
     """
@@ -185,7 +303,7 @@ def build_prompt(text_a: str, text_b: str, swapped: bool) -> tuple[str, bool]:
     b = text_b[:MAX_OCR_TEXT_LENGTH]
     if swapped:
         a, b = b, a
-    return PAIRWISE_PROMPT.format(ocr_text_a=a, ocr_text_b=b), swapped
+    return prompt_template.format(ocr_text_a=a, ocr_text_b=b), swapped
 
 
 def build_messages(image_b64: str, prompt: str) -> list[dict[str, Any]]:
@@ -237,6 +355,7 @@ def build_comparisons(
     skip_samples: dict[tuple[str, str], set[int]] | None = None,
     indices: list[int] | None = None,
     min_chars: int = DEFAULT_MIN_CHARS,
+    prompt_template: str = CRITERIA_PROFILES[DEFAULT_CRITERIA],
 ) -> list[Comparison]:
     """Build pairwise comparison prompts from a dataset.
 
@@ -259,6 +378,9 @@ def build_comparisons(
         min_chars: Skip a pair when BOTH outputs are shorter than this (after
             stripping) — neither model produced meaningful text. Set to 0 to
             disable the filter.
+        prompt_template: Criteria profile template (see ``CRITERIA_PROFILES``)
+            used to build each comparison prompt. Defaults to the ``default``
+            profile.
 
     Returns:
         List of Comparison objects. Pairs needing a judge carry pre-built chat
@@ -357,7 +479,7 @@ def build_comparisons(
                 continue
 
             swapped = rng.random() < 0.5
-            prompt, swapped = build_prompt(text_a, text_b, swapped)
+            prompt, swapped = build_prompt(text_a, text_b, swapped, prompt_template)
             messages = build_messages(image_b64, prompt)
 
             comparisons.append(
