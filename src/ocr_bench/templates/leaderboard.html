@@ -37,6 +37,7 @@
         {{ row.model_short }}
         {% if row.status == "failed" %}<strong style="color: #e06666;">FAILED</strong>
         {% elif row.status == "degraded" %}<span title="{{ row.failed_outputs }} failed output(s)" style="color: #f6b26b;">⚠</span>{% endif %}
+        {% if row.preferred_over %}<span title="Parameter-efficient practical preference over {{ row.preferred_over }}; overlapping CIs, not an equivalence claim" style="color: #6fa8dc;">★</span>{% endif %}
       </td>
       <td class="num">{{ row.params if row.params else "—" }}</td>
       <td class="num">{{ row.elo if row.elo is not none else "—" }}</td>

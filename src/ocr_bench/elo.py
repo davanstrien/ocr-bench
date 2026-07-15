@@ -48,8 +48,8 @@ class Leaderboard:
 
     @property
     def ranked(self) -> list[tuple[str, float]]:
-        """Models sorted by ELO rating, descending."""
-        return sorted(self.elo.items(), key=lambda x: x[1], reverse=True)
+        """Models sorted by ELO descending, with model name as a stable tie-break."""
+        return sorted(self.elo.items(), key=lambda item: (-item[1], item[0]))
 
     def win_pct(self, model: str) -> float | None:
         """Win percentage for a model, or None if no comparisons."""

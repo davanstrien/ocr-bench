@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,6 +14,14 @@ from openai import OpenAIError
 from rich.console import Console
 from rich.table import Table
 
+from ocr_bench.adaptive import (
+    AdjacentPairDecision,
+    classify_adjacent_pairs,
+    comparison_pair_counts,
+    model_parameter_counts,
+    practical_preferences,
+    unresolved_pairs,
+)
 from ocr_bench.backends import (
     DEFAULT_JUDGE,
     DEFAULT_MAX_TOKENS,
@@ -25,7 +35,7 @@ from ocr_bench.dataset import (
     load_config_dataset,
     load_flat_dataset,
 )
-from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo, rankings_resolved
+from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo
 from ocr_bench.integrity import (
     SENTINEL_FLAG_RATE,
     audit_repo,
@@ -75,6 +85,14 @@ def _non_negative_int(value: str) -> int:
     if ivalue < 0:
         raise argparse.ArgumentTypeError(f"must be >= 0, got {ivalue}")
     return ivalue
+
+
+def _float_greater_than_one(value: str) -> float:
+    """argparse type: float > 1 for meaningful size ratios."""
+    fvalue = float(value)
+    if not math.isfinite(fvalue) or fvalue <= 1:
+        raise argparse.ArgumentTypeError(f"must be greater than 1, got {fvalue}")
+    return fvalue
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -241,6 +259,38 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable adaptive stopping (default: adaptive is on)",
     )
     judge.add_argument(
+        "--adaptive-strategy",
+        choices=["balanced", "targeted"],
+        default="balanced",
+        help=(
+            "Adaptive allocation strategy (default: balanced). 'balanced' keeps "
+            "judging every model pair in each page batch; 'targeted' is opt-in and, "
+            "after an initial balanced evidence threshold, tops up only adjacent pairs "
+            "whose 95%% CIs remain unresolved."
+        ),
+    )
+    judge.add_argument(
+        "--size-tie-ratio",
+        type=_float_greater_than_one,
+        default=None,
+        metavar="RATIO",
+        help=(
+            "Treat an unresolved adjacent pair as a practical smaller-model "
+            "preference when its parameter-count ratio is at least RATIO. This "
+            "can stop targeted sampling but does not alter ELO or claim equivalence."
+        ),
+    )
+    judge.add_argument(
+        "--size-tie-min-samples",
+        type=_positive_int,
+        default=10,
+        metavar="N",
+        help=(
+            "Minimum direct comparisons before --size-tie-ratio may stop sampling "
+            "a pair (default: 10)."
+        ),
+    )
+    judge.add_argument(
         "--concurrency",
         type=int,
         default=1,
@@ -334,6 +384,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="OCR text prep for the judge (default: normalized; see `judge --help`).",
     )
     bench.add_argument(
+        "--adaptive-strategy",
+        choices=["balanced", "targeted"],
+        default="balanced",
+        help="Judge allocation strategy (default: balanced; see `judge --help`).",
+    )
+    bench.add_argument(
+        "--size-tie-ratio",
+        type=_float_greater_than_one,
+        default=None,
+        metavar="RATIO",
+        help="Optional practical smaller-model stopping ratio (see `judge --help`).",
+    )
+    bench.add_argument(
+        "--size-tie-min-samples",
+        type=_positive_int,
+        default=10,
+        metavar="N",
+        help="Minimum direct pair comparisons for the size rule (default: 10).",
+    )
+    bench.add_argument(
         "--no-publish", action="store_true", help="Don't publish results (skips the viewer)"
     )
     bench.add_argument("--port", type=int, default=7860, help="Viewer port (default: 7860)")
@@ -365,15 +435,45 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _decisions_for_board(
+    board: Leaderboard,
+    comparisons: Iterable[object] | None,
+    *,
+    size_tie_ratio: float | None,
+    size_tie_min_samples: int,
+) -> list[AdjacentPairDecision]:
+    """Classify the board's adjacent pairs under the selected stopping rule."""
+    return classify_adjacent_pairs(
+        board,
+        comparison_pair_counts(
+            comparisons if comparisons is not None else board.comparison_log
+        ),
+        size_tie_ratio=size_tie_ratio,
+        size_tie_min_samples=size_tie_min_samples,
+        parameter_counts=model_parameter_counts(),
+    )
+
+
 def print_leaderboard(
     board: Leaderboard,
     failed_models: list[str] | None = None,
     failed_outputs: dict[str, int] | None = None,
+    *,
+    size_tie_ratio: float | None = None,
+    size_tie_min_samples: int = 10,
 ) -> None:
     """Print leaderboard as a Rich table, leaving failed runs unranked."""
     from ocr_bench.publish import _get_model_sizes
 
     sizes = _get_model_sizes()
+    preferences = practical_preferences(
+        _decisions_for_board(
+            board,
+            None,
+            size_tie_ratio=size_tie_ratio,
+            size_tie_min_samples=size_tie_min_samples,
+        )
+    )
     table = Table(title="OCR Model Leaderboard")
     table.add_column("Rank", style="bold")
     table.add_column("Model")
@@ -401,7 +501,11 @@ def print_leaderboard(
             elo_str = f"{round(elo)} ({round(lo)}\u2013{round(hi)})"
         else:
             elo_str = str(round(elo))
-        model_label = f"{model} ⚠" if (failed_outputs or {}).get(model) else model
+        model_label = model
+        if (failed_outputs or {}).get(model):
+            model_label += " ⚠"
+        if model in preferences:
+            model_label += " ★"
         table.add_row(
             str(rank),
             model_label,
@@ -426,6 +530,19 @@ def print_leaderboard(
         )
 
     console.print(table)
+    if preferences:
+        console.print(
+            "[dim]★ Parameter-efficient practical preference: adjacent 95% CIs overlap, "
+            "but this model is sufficiently smaller under --size-tie-ratio. "
+            "This does not change ELO/rank or prove equivalence.[/dim]"
+        )
+        for smaller, decisions in preferences.items():
+            for decision in decisions:
+                console.print(
+                    f"  [dim]{smaller} over {decision.larger_model}: "
+                    f"{decision.size_ratio:.1f}× fewer parameters after "
+                    f"{decision.direct_comparisons} direct comparisons[/dim]"
+                )
 
 
 def _merge_auto_ties(
@@ -597,24 +714,24 @@ def _checkpoint(
         console.print(f"  [yellow]Checkpoint failed (continuing): {exc}[/yellow]")
 
 
-def _unresolved_adjacent_pairs(board: Leaderboard) -> list[str]:
-    """Adjacent-rank model pairs whose 95% CIs still overlap.
-
-    Used to report what a budget-capped run left statistically unresolved.
-    Empty when CIs are unavailable or every adjacent pair is separated.
-    """
-    if not board.elo_ci:
-        return []
-    ranked = board.ranked
-    pairs: list[str] = []
-    for i in range(len(ranked) - 1):
-        hi_model, _ = ranked[i]
-        lo_model, _ = ranked[i + 1]
-        hi_ci = board.elo_ci.get(hi_model)
-        lo_ci = board.elo_ci.get(lo_model)
-        if hi_ci and lo_ci and lo_ci[1] >= hi_ci[0]:
-            pairs.append(f"{hi_model} vs {lo_model}")
-    return pairs
+def _unresolved_adjacent_pairs(
+    board: Leaderboard,
+    *,
+    size_tie_ratio: float | None = None,
+    size_tie_min_samples: int = 10,
+) -> list[str]:
+    """Adjacent pairs still unresolved under the selected adaptive rule."""
+    decisions = _decisions_for_board(
+        board,
+        None,
+        size_tie_ratio=size_tie_ratio,
+        size_tie_min_samples=size_tie_min_samples,
+    )
+    return [
+        f"{decision.higher_model} vs {decision.lower_model}"
+        for decision in decisions
+        if decision.status == "unresolved"
+    ]
 
 
 def _resolve_criteria(args: argparse.Namespace) -> tuple[str, str, str]:
@@ -691,6 +808,15 @@ def cmd_judge(args: argparse.Namespace) -> None:
     results_repo = _resolve_results_repo(args.dataset, args.save_results, args.no_publish)
     from_prs = False  # track for metadata
     max_comparisons = args.max_comparisons  # global budget; None = uncapped
+    adaptive_strategy = args.adaptive_strategy
+    if not adaptive and adaptive_strategy != "balanced":
+        raise DatasetError("--adaptive-strategy targeted requires adaptive mode")
+    if adaptive_strategy == "targeted":
+        console.print(
+            "[yellow]Targeted adaptive allocation is opt-in:[/yellow] after the initial "
+            "balanced evidence threshold, only unresolved adjacent pairs receive "
+            "more samples. The allocation strategy is recorded in results metadata."
+        )
     normalize = args.judge_text_mode == "normalized"
     if not normalize:
         console.print(
@@ -828,6 +954,10 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 f"{consequence}.[/yellow]"
             )
 
+    # Stable ordering matters when ELOs tie: adjacency drives targeted sampling.
+    model_names = sorted(set(ocr_columns.values()) - set(failed_models))
+    current_models = set(model_names)
+
     # --- Incremental: load existing comparisons ---
     existing_results: list[ComparisonResult] = []
     existing_meta_rows: list[dict] = []
@@ -863,6 +993,18 @@ def cmd_judge(args: argparse.Namespace) -> None:
         ]
         discarded_failed_model = before_failed_filter - len(existing_results)
 
+        # Results repos can outlive a model-grid change. Drop comparisons for
+        # configs no longer present; otherwise compute_elo would receive models
+        # outside its current board. A newly added model is handled later by a
+        # balanced warm-up before targeted allocation resumes.
+        before_current_filter = len(existing_results)
+        existing_results = [
+            result
+            for result in existing_results
+            if result.model_a in current_models and result.model_b in current_models
+        ]
+        discarded_stale_model = before_current_filter - len(existing_results)
+
         # Preserve the append-only metadata history even when integrity filtering
         # removes every old comparison.
         existing_meta_rows = load_existing_metadata(results_repo)
@@ -888,6 +1030,16 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 repo=results_repo,
                 n=discarded_failed_model,
                 models=failed_models,
+            )
+        if discarded_stale_model:
+            console.print(
+                f"[bold yellow]Discarded {discarded_stale_model} historical comparison(s) "
+                "for models outside the current OCR config set.[/bold yellow]"
+            )
+            logger.warning(
+                "discarded_out_of_grid_comparisons",
+                repo=results_repo,
+                n=discarded_stale_model,
             )
 
         if existing_results:
@@ -956,15 +1108,13 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 f"across {len(skip_samples)} model pairs — skipping already-judged "
                 f"(pair, sample) combinations, topping up the rest."
             )
-        elif discarded_sentinels or discarded_failed_model:
+        elif discarded_sentinels or discarded_failed_model or discarded_stale_model:
             console.print(
                 "\nNo reusable existing comparisons remain after integrity filtering — "
                 "rebuilding from the current OCR outputs."
             )
         else:
             console.print("\nNo existing comparisons found — full judge run.")
-
-    model_names = list(set(ocr_columns.values()) - set(failed_models))
 
     # --- Judge setup (shared by both paths) ---
     model_specs = args.models or [DEFAULT_JUDGE]
@@ -1006,7 +1156,11 @@ def cmd_judge(args: argparse.Namespace) -> None:
         from itertools import combinations as _combs
 
         all_indices = sample_indices(len(ds), args.max_samples, args.seed)
-        n_pairs = len(list(_combs(model_names, 2)))
+        all_model_pairs = {
+            _normalize_pair(model_a, model_b)
+            for model_a, model_b in _combs(model_names, 2)
+        }
+        n_pairs = len(all_model_pairs)
         batch_samples = 5
         min_before_check = max(3 * n_pairs, 20)
 
@@ -1024,6 +1178,66 @@ def cmd_judge(args: argparse.Namespace) -> None:
         total_comparisons = 0  # judge calls made this run (auto-ties excluded)
         last_checkpoint = 0
         n_auto_total = 0
+        # ``None`` preserves the existing balanced all-pairs behavior. Targeted
+        # mode fills this only AFTER enough balanced evidence exists to compute
+        # a first board, so it never starts from a disconnected sparse graph.
+        active_pairs: set[tuple[str, str]] | None = None
+        existing_models = {
+            model
+            for result in existing_results
+            for model in (result.model_a, result.model_b)
+        }
+        existing_pair_counts = comparison_pair_counts(existing_results)
+        missing_pair_evidence = {
+            pair for pair in all_model_pairs if existing_pair_counts.get(pair, 0) == 0
+        }
+        can_resume_targeted = (
+            existing_models == current_models and not missing_pair_evidence
+        )
+        if (
+            adaptive_strategy == "targeted"
+            and len(existing_results) >= min_before_check
+            and can_resume_targeted
+        ):
+            # Reconstruct the allocation state on resume. The comparison log
+            # records completed (pair, sample) work, not the active pair set;
+            # deriving it from the current board prevents a resumed targeted run
+            # from filling every pair it intentionally deprioritised previously.
+            resumed_board = compute_elo(existing_results, model_names)
+            resumed_decisions = _decisions_for_board(
+                resumed_board,
+                existing_results,
+                size_tie_ratio=args.size_tie_ratio,
+                size_tie_min_samples=args.size_tie_min_samples,
+            )
+            active_pairs = unresolved_pairs(resumed_decisions)
+            if active_pairs:
+                console.print(
+                    f"  [dim]Resume: targeting {len(active_pairs)} unresolved "
+                    f"adjacent pair(s), not all {n_pairs} pairs.[/dim]"
+                )
+            else:
+                console.print(
+                    "[green]Existing comparisons already meet the adaptive "
+                    "stopping criteria.[/green]"
+                )
+                all_indices = []
+        elif (
+            adaptive_strategy == "targeted"
+            and existing_results
+            and not can_resume_targeted
+        ):
+            missing = sorted(current_models - existing_models)
+            reason = (
+                f"new models: {', '.join(missing)}"
+                if missing
+                else f"{len(missing_pair_evidence)} pair(s) have no direct evidence"
+            )
+            console.print(
+                "  [dim]Model grid changed or its balanced warm-up is incomplete; "
+                f"continuing balanced allocation ({reason}).[/dim]"
+            )
+
         for batch_num, batch_start in enumerate(range(0, len(all_indices), batch_samples)):
             # Global budget: stop before a batch we can't afford at all.
             if max_comparisons is not None and total_comparisons >= max_comparisons:
@@ -1035,6 +1249,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 ds,
                 ocr_columns,
                 skip_samples=skip_samples,
+                include_pairs=active_pairs,
                 indices=batch_indices,
                 seed=args.seed,
                 min_chars=args.min_chars,
@@ -1082,35 +1297,57 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 break
 
             if total >= min_before_check:
-                board = compute_elo(existing_results + new_results, model_names)
-                # Show CI gaps for each adjacent pair
-                ranked = board.ranked
-                if board.elo_ci:
-                    gaps: list[str] = []
-                    for i in range(len(ranked) - 1):
-                        hi_model, _ = ranked[i]
-                        lo_model, _ = ranked[i + 1]
-                        hi_ci = board.elo_ci.get(hi_model)
-                        lo_ci = board.elo_ci.get(lo_model)
-                        if hi_ci and lo_ci:
-                            gap = hi_ci[0] - lo_ci[1]  # positive = resolved
-                            if gap > 0:
-                                status = "[green]ok[/green]"
-                            else:
-                                status = f"[yellow]overlap {-gap:.0f}[/yellow]"
-                            gaps.append(f"    {hi_model} vs {lo_model}: gap={gap:+.0f} {status}")
-                    if gaps:
-                        console.print("  CI gaps:")
-                        for g in gaps:
-                            console.print(g)
+                accumulated = existing_results + new_results
+                board = compute_elo(accumulated, model_names)
+                decisions = _decisions_for_board(
+                    board,
+                    accumulated,
+                    size_tie_ratio=args.size_tie_ratio,
+                    size_tie_min_samples=args.size_tie_min_samples,
+                )
 
-                if rankings_resolved(board):
+                if board.elo_ci:
+                    console.print("  CI gaps:")
+                    for decision in decisions:
+                        hi_ci = board.elo_ci.get(decision.higher_model)
+                        lo_ci = board.elo_ci.get(decision.lower_model)
+                        if hi_ci is None or lo_ci is None:
+                            continue
+                        gap = hi_ci[0] - lo_ci[1]  # positive = statistically resolved
+                        if decision.status == "resolved":
+                            status = "[green]ok[/green]"
+                        elif decision.status == "prefer-smaller":
+                            status = (
+                                f"[cyan]prefer {decision.smaller_model} "
+                                f"({decision.size_ratio:.1f}× smaller)[/cyan]"
+                            )
+                        else:
+                            status = f"[yellow]overlap {-gap:.0f}[/yellow]"
+                        console.print(
+                            f"    {decision.higher_model} vs {decision.lower_model}: "
+                            f"gap={gap:+.0f} {status}"
+                        )
+
+                next_pairs = unresolved_pairs(decisions)
+                if not next_pairs:
                     remaining = len(all_indices) - batch_start - len(batch_indices)
+                    skipped_pairs = (
+                        n_pairs
+                        if adaptive_strategy == "balanced" or active_pairs is None
+                        else len(active_pairs)
+                    )
                     console.print(
-                        f"[green]Rankings converged after {total} comparisons! "
-                        f"Skipped ~{remaining * n_pairs} remaining.[/green]"
+                        f"[green]Adaptive stopping criteria met after {total} comparisons! "
+                        f"Skipped up to ~{remaining * skipped_pairs} remaining.[/green]"
                     )
                     break
+
+                if adaptive_strategy == "targeted":
+                    active_pairs = next_pairs
+                    console.print(
+                        f"  [dim]Next batch targets {len(active_pairs)} unresolved "
+                        f"adjacent pair(s), not all {n_pairs} pairs.[/dim]"
+                    )
 
         if budget_exhausted:
             console.print(
@@ -1166,7 +1403,13 @@ def cmd_judge(args: argparse.Namespace) -> None:
             console.print("[green]All pairs already judged — refitting leaderboard.[/green]")
             board = compute_elo(existing_results, model_names)
             console.print()
-            print_leaderboard(board, failed_models, failed_outputs)
+            print_leaderboard(
+                board,
+                failed_models,
+                failed_outputs,
+                size_tie_ratio=args.size_tie_ratio,
+                size_tie_min_samples=args.size_tie_min_samples,
+            )
             if results_repo:
                 metadata = EvalMetadata(
                     source_dataset=args.dataset,
@@ -1185,6 +1428,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     max_ocr_text_len=args.max_ocr_text_len,
                     judge_image_dim=args.judge_image_dim,
                     judge_text_mode=args.judge_text_mode,
+                    adaptive_strategy=adaptive_strategy,
+                    size_tie_ratio=args.size_tie_ratio,
+                    size_tie_min_samples=args.size_tie_min_samples,
                 )
                 publish_results(
                     results_repo,
@@ -1257,13 +1503,23 @@ def cmd_judge(args: argparse.Namespace) -> None:
     all_results = existing_results + new_results
     board = compute_elo(all_results, model_names)
     console.print()
-    print_leaderboard(board, failed_models, failed_outputs)
+    print_leaderboard(
+        board,
+        failed_models,
+        failed_outputs,
+        size_tie_ratio=args.size_tie_ratio,
+        size_tie_min_samples=args.size_tie_min_samples,
+    )
 
     # A budget-capped run may stop before the ranking is statistically settled —
     # surface which adjacent pairs are still unresolved so the operator knows
     # what a top-up run should target.
     if budget_exhausted:
-        unresolved = _unresolved_adjacent_pairs(board)
+        unresolved = _unresolved_adjacent_pairs(
+            board,
+            size_tie_ratio=args.size_tie_ratio,
+            size_tie_min_samples=args.size_tie_min_samples,
+        )
         logger.warning(
             "budget_exhausted",
             limit=max_comparisons,
@@ -1295,6 +1551,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
             max_ocr_text_len=args.max_ocr_text_len,
             judge_image_dim=args.judge_image_dim,
             judge_text_mode=args.judge_text_mode,
+            adaptive_strategy=adaptive_strategy,
+            size_tie_ratio=args.size_tie_ratio,
+            size_tie_min_samples=args.size_tie_min_samples,
         )
         publish_results(
             results_repo,
@@ -1564,9 +1823,20 @@ def cmd_bench(args: argparse.Namespace) -> None:
 
     # --- Phase 2: judge the OCR outputs (from the PRs the run just opened) ---
     judge_argv = [
-        "judge", args.output_repo, "--from-prs", "--seed", str(args.seed),
-        "--judge-text-mode", args.judge_text_mode,
+        "judge",
+        args.output_repo,
+        "--from-prs",
+        "--seed",
+        str(args.seed),
+        "--judge-text-mode",
+        args.judge_text_mode,
+        "--adaptive-strategy",
+        args.adaptive_strategy,
+        "--size-tie-min-samples",
+        str(args.size_tie_min_samples),
     ]
+    if args.size_tie_ratio is not None:
+        judge_argv += ["--size-tie-ratio", str(args.size_tie_ratio)]
     for model in args.judge_models or []:
         judge_argv += ["--model", model]
     # Forward whichever criteria flag was set (at most one — already validated

@@ -357,6 +357,7 @@ def create_app(
                 "win_pct": row.get("win_pct"),
                 "status": status,
                 "failed_outputs": row.get("failed_outputs", 0),
+                "preferred_over": row.get("preferred_over", ""),
                 "human_elo": human_elo,
                 "human_win_pct": human_win_pct,
             })

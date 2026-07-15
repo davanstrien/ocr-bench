@@ -787,6 +787,44 @@ class TestBuildComparisons:
         comps = build_comparisons(ds, ocr_columns, skip_samples=None, min_chars=0)
         assert len(comps) == 3  # All C(3,2) pairs
 
+    def test_include_pairs_builds_only_requested_pairs(self):
+        ds = [
+            {
+                "image": Image.new("RGB", (50, 50)),
+                "col_a": "text from model a",
+                "col_b": "text from model b",
+                "col_c": "text from model c",
+            },
+        ]
+        ocr_columns = {"col_a": "A", "col_b": "B", "col_c": "C"}
+        comps = build_comparisons(
+            ds,
+            ocr_columns,
+            include_pairs={("C", "A")},  # reverse order is accepted
+            min_chars=0,
+        )
+        assert [(c.model_a, c.model_b) for c in comps] == [("A", "C")]
+
+    def test_empty_include_pairs_skips_image_encoding(self):
+        from unittest.mock import patch
+
+        ds = [
+            {
+                "image": Image.new("RGB", (50, 50)),
+                "col_a": "text from model a",
+                "col_b": "text from model b",
+            },
+        ]
+        with patch("ocr_bench.judge.image_to_base64") as mock_img:
+            comps = build_comparisons(
+                ds,
+                {"col_a": "A", "col_b": "B"},
+                include_pairs=set(),
+                min_chars=0,
+            )
+        assert comps == []
+        mock_img.assert_not_called()
+
     def test_skip_all_pairs_skips_image_encoding(self):
         """When all pairs for a row are skipped, image_to_base64 is not called."""
         ds = [

@@ -14,6 +14,7 @@ from PIL import Image
 
 from ocr_bench import cli
 from ocr_bench.cli import build_parser
+from ocr_bench.dataset import DatasetError
 from ocr_bench.elo import ComparisonResult
 from ocr_bench.judge import CRITERIA_PROFILES, _normalize_pair, prompt_hash
 
@@ -165,6 +166,167 @@ class TestArgValidators:
     def test_max_comparisons_one_allowed(self):
         args = build_parser().parse_args(["judge", "user/ds", "--max-comparisons", "1"])
         assert args.max_comparisons == 1
+
+
+class TestTargetedAdaptive:
+    def test_opt_in_targets_only_adjacent_pairs_after_balanced_round(self):
+        # 4 models -> 6 pairs. Round 1 judges all 6 pairs over 5 samples (30).
+        # All-tie CIs overlap, so round 2 targets only 3 adjacent pairs (15),
+        # rather than another full 30-comparison grid.
+        ds, ocr = make_ds(n=10, models=("a", "b", "c", "d"))
+        judge, m_publish, _ = _run_judge(
+            ["--adaptive-strategy", "targeted", "--checkpoint-every", "0"],
+            ds,
+            ocr,
+            judge=FakeJudge(winner="tie"),
+        )
+        assert judge.judged == 45
+        pair_counts = {}
+        for pair in judge.pairs_seen:
+            pair_counts[pair] = pair_counts.get(pair, 0) + 1
+        assert sorted(pair_counts.values()) == [5, 5, 5, 10, 10, 10]
+        meta = _published_metadata(m_publish)
+        assert meta.adaptive_strategy == "targeted"
+        assert meta.size_tie_ratio is None
+
+    def test_resume_reconstructs_target_pairs_without_filling_sparse_grid(self):
+        ds, ocr = make_ds(n=10, models=("a", "b", "c", "d"))
+        _, first_publish, _ = _run_judge(
+            ["--adaptive-strategy", "targeted", "--checkpoint-every", "0"],
+            ds,
+            ocr,
+            judge=FakeJudge(winner="tie"),
+        )
+        first_board = first_publish.call_args.args[1]
+        existing = [
+            ComparisonResult(
+                sample_idx=row["sample_idx"],
+                model_a=row["model_a"],
+                model_b=row["model_b"],
+                winner=row["winner"],
+                reason=row.get("reason", ""),
+                agreement=row.get("agreement", "1/1"),
+            )
+            for row in first_board.comparison_log
+        ]
+
+        resumed_judge, resumed_publish, _ = _run_judge(
+            ["--adaptive-strategy", "targeted", "--checkpoint-every", "0"],
+            ds,
+            ocr,
+            existing=existing,
+            judge=FakeJudge(winner="tie"),
+        )
+        assert len(existing) == 45
+        assert resumed_judge.judged == 0
+        resumed_board = resumed_publish.call_args.args[1]
+        assert len(resumed_board.comparison_log) == 45
+
+    def test_added_model_gets_balanced_warmup_before_targeting(self):
+        ds, ocr = make_ds(n=10, models=("a", "b", "c", "d"))
+        existing = [
+            ComparisonResult(
+                sample_idx=sample_idx,
+                model_a=f"model-{left}",
+                model_b=f"model-{right}",
+                winner="tie",
+            )
+            for sample_idx in range(10)
+            for left, right in (("a", "b"), ("a", "c"), ("b", "c"))
+        ]
+        judge, _, _ = _run_judge(
+            ["--adaptive-strategy", "targeted", "--checkpoint-every", "0"],
+            ds,
+            ocr,
+            existing=existing,
+            judge=FakeJudge(winner="tie"),
+        )
+        pairs_with_new_model = {
+            pair for pair in judge.pairs_seen if "model-d" in pair
+        }
+        assert pairs_with_new_model == {
+            ("model-a", "model-d"),
+            ("model-b", "model-d"),
+            ("model-c", "model-d"),
+        }
+
+    def test_interrupted_new_model_warmup_stays_balanced_on_resume(self):
+        ds, ocr = make_ds(n=10, models=("a", "b", "c", "d"))
+        existing = [
+            ComparisonResult(
+                sample_idx=sample_idx,
+                model_a=f"model-{left}",
+                model_b=f"model-{right}",
+                winner="tie",
+            )
+            for sample_idx in range(10)
+            for left, right in (("a", "b"), ("a", "c"), ("b", "c"))
+        ]
+        # Simulate a budget/kill after the first new-model comparison: model-d
+        # appears in the log, but two of its three pairs have no evidence yet.
+        existing.append(ComparisonResult(0, "model-a", "model-d", "tie"))
+
+        judge, _, _ = _run_judge(
+            ["--adaptive-strategy", "targeted", "--checkpoint-every", "0"],
+            ds,
+            ocr,
+            existing=existing,
+            judge=FakeJudge(winner="tie"),
+        )
+        assert ("model-b", "model-d") in judge.pairs_seen
+        assert ("model-c", "model-d") in judge.pairs_seen
+
+    def test_balanced_default_still_judges_all_pairs_each_round(self):
+        ds, ocr = make_ds(n=10, models=("a", "b", "c", "d"))
+        judge, m_publish, _ = _run_judge(
+            ["--checkpoint-every", "0"],
+            ds,
+            ocr,
+            judge=FakeJudge(winner="tie"),
+        )
+        assert judge.judged == 60
+        assert _published_metadata(m_publish).adaptive_strategy == "balanced"
+
+    def test_size_rule_can_stop_after_minimum_direct_evidence(self):
+        model_ids = (
+            "PaddlePaddle/PP-OCRv6_medium",  # 34.5M
+            "tiiuae/Falcon-OCR",  # 0.3B
+            "lightonai/LightOnOCR-2-1B",  # 1B
+            "deepseek-ai/DeepSeek-OCR",  # 4B
+        )
+        ds, _ = make_ds(n=10, models=("a", "b", "c", "d"))
+        ocr = {
+            f"col_{name}": model_id
+            for name, model_id in zip(("a", "b", "c", "d"), model_ids)
+        }
+        judge, m_publish, _ = _run_judge(
+            [
+                "--adaptive-strategy",
+                "targeted",
+                "--size-tie-ratio",
+                "3",
+                "--size-tie-min-samples",
+                "5",
+                "--checkpoint-every",
+                "0",
+            ],
+            ds,
+            ocr,
+            judge=FakeJudge(winner="tie"),
+        )
+        assert judge.judged == 30  # one balanced 5-sample round, then stop
+        meta = _published_metadata(m_publish)
+        assert meta.size_tie_ratio == 3.0
+        assert meta.size_tie_min_samples == 5
+
+    def test_targeted_strategy_rejects_no_adaptive(self):
+        ds, ocr = make_ds()
+        with pytest.raises(DatasetError, match="requires adaptive mode"):
+            _run_judge(
+                ["--no-adaptive", "--adaptive-strategy", "targeted"],
+                ds,
+                ocr,
+            )
 
 
 class TestBudget:

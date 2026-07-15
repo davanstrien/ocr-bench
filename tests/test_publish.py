@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from ocr_bench.adaptive import AdjacentPairDecision
 from ocr_bench.elo import ComparisonResult, Leaderboard
 from ocr_bench.publish import (
     EvalMetadata,
@@ -84,6 +85,25 @@ class TestBuildLeaderboardRows:
         assert model_a["elo"] == 1550
         assert model_a["failed_outputs"] == 1
 
+    def test_parameter_preference_is_annotation_only(self):
+        board = _make_board()
+        decision = AdjacentPairDecision(
+            higher_model="model-a",
+            lower_model="model-c",
+            status="prefer-smaller",
+            direct_comparisons=10,
+            smaller_model="model-c",
+            larger_model="model-a",
+            size_ratio=4.0,
+        )
+        rows = build_leaderboard_rows(
+            board,
+            parameter_preferences={"model-c": [decision]},
+        )
+        assert [row["model"] for row in rows] == ["model-a", "model-c", "model-b"]
+        model_c = next(row for row in rows if row["model"] == "model-c")
+        assert model_c["preferred_over"] == "model-a (4.0x, n=10)"
+
 
 class TestBuildMetadataRow:
     def test_auto_timestamp(self):
@@ -137,6 +157,37 @@ class TestBuildMetadataRow:
         row = build_metadata_row(meta)
         assert row["max_comparisons"] is None
         assert row["budget_exhausted"] is False
+
+    def test_adaptive_fields_default(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=[],
+            seed=42,
+            max_samples=0,
+            total_comparisons=0,
+            valid_comparisons=0,
+        )
+        row = build_metadata_row(meta)
+        assert row["adaptive_strategy"] == "balanced"
+        assert row["size_tie_ratio"] is None
+        assert row["size_tie_min_samples"] == 10
+
+    def test_adaptive_fields_recorded(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=["j"],
+            seed=42,
+            max_samples=10,
+            total_comparisons=12,
+            valid_comparisons=12,
+            adaptive_strategy="targeted",
+            size_tie_ratio=3,
+            size_tie_min_samples=5,
+        )
+        row = build_metadata_row(meta)
+        assert row["adaptive_strategy"] == "targeted"
+        assert row["size_tie_ratio"] == 3
+        assert row["size_tie_min_samples"] == 5
 
     def test_budget_fields_recorded(self):
         meta = EvalMetadata(
@@ -721,6 +772,43 @@ class TestBuildReadme:
         assert "**Judge text mode**: normalized" in readme
         assert "**OCR text cap**: 2500 characters per output" in readme
         assert "**Judge image cap**: 1024px" in readme
+
+    def test_surfaces_targeted_strategy_and_parameter_preference(self):
+        from ocr_bench.publish import _build_readme
+
+        board = Leaderboard(
+            elo={"tiiuae/Falcon-OCR": 1510.0, "deepseek-ai/DeepSeek-OCR": 1500.0},
+            elo_ci={
+                "tiiuae/Falcon-OCR": (1480.0, 1540.0),
+                "deepseek-ai/DeepSeek-OCR": (1490.0, 1530.0),
+            },
+            wins={"tiiuae/Falcon-OCR": 5, "deepseek-ai/DeepSeek-OCR": 5},
+            losses={"tiiuae/Falcon-OCR": 5, "deepseek-ai/DeepSeek-OCR": 5},
+            ties={"tiiuae/Falcon-OCR": 0, "deepseek-ai/DeepSeek-OCR": 0},
+        )
+        decision = AdjacentPairDecision(
+            higher_model="tiiuae/Falcon-OCR",
+            lower_model="deepseek-ai/DeepSeek-OCR",
+            status="prefer-smaller",
+            direct_comparisons=10,
+            smaller_model="tiiuae/Falcon-OCR",
+            larger_model="deepseek-ai/DeepSeek-OCR",
+            size_ratio=13.3,
+        )
+        rows = build_leaderboard_rows(
+            board,
+            parameter_preferences={"tiiuae/Falcon-OCR": [decision]},
+        )
+        meta = self._make_metadata()
+        meta.adaptive_strategy = "targeted"
+        meta.size_tie_ratio = 3
+        readme = _build_readme("user/results", rows, board, meta)
+        assert "tiiuae/Falcon-OCR ★" in readme
+        assert "## ★ Parameter-efficient practical preferences" in readme
+        assert "deepseek-ai/DeepSeek-OCR (13.3x, n=10)" in readme
+        assert "**Adaptive strategy**: targeted" in readme
+        assert "**Size-aware stopping**: 3x parameter ratio" in readme
+        assert "not** a statistical-equivalence claim" in readme
 
     def _board_two_models(self) -> Leaderboard:
         return Leaderboard(

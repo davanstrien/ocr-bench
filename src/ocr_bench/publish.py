@@ -10,6 +10,13 @@ import structlog
 from datasets import Dataset, load_dataset
 from huggingface_hub import HfApi
 
+from ocr_bench.adaptive import (
+    AdjacentPairDecision,
+    classify_adjacent_pairs,
+    comparison_pair_counts,
+    model_parameter_counts,
+    practical_preferences,
+)
 from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo
 from ocr_bench.judge import MAX_IMAGE_DIM, MAX_OCR_TEXT_LENGTH
 from ocr_bench.run import MODEL_REGISTRY
@@ -64,6 +71,13 @@ class EvalMetadata:
     # "normalized" (HTML flattened before the cap) or "raw" (capped as-is).
     # Changes verdicts, so it's provenance alongside the caps.
     judge_text_mode: str = "normalized"
+    # Comparison-allocation provenance. ``balanced`` is the historical default;
+    # ``targeted`` tops up only unresolved adjacent pairs after enough balanced evidence.
+    adaptive_strategy: str = "balanced"
+    # Optional practical preference rule for overlapping adjacent CIs. This
+    # affects stopping/annotation only; it never changes ELO or rank.
+    size_tie_ratio: float | None = None
+    size_tie_min_samples: int = 10
 
     def __post_init__(self):
         if not self.timestamp:
@@ -127,6 +141,7 @@ def build_leaderboard_rows(
     board: Leaderboard,
     failed_models: list[str] | None = None,
     failed_outputs: dict[str, int] | None = None,
+    parameter_preferences: dict[str, list[AdjacentPairDecision]] | None = None,
 ) -> list[dict]:
     """Convert a Leaderboard into rows suitable for a Hub dataset.
 
@@ -138,6 +153,7 @@ def build_leaderboard_rows(
     sizes = _get_model_sizes()
     failed = set(failed_models or [])
     failure_counts = failed_outputs or {}
+    preferences = parameter_preferences or {}
     rows = []
     for model, elo in board.ranked:
         if model in failed:
@@ -153,6 +169,11 @@ def build_leaderboard_rows(
             "win_pct": round(board.wins[model] / total * 100) if total > 0 else 0,
             "status": "degraded" if failure_counts.get(model, 0) else "ranked",
             "failed_outputs": failure_counts.get(model, 0),
+            "preferred_over": "; ".join(
+                f"{decision.larger_model} ({decision.size_ratio:.1f}x, "
+                f"n={decision.direct_comparisons})"
+                for decision in preferences.get(model, [])
+            ),
         }
         if board.elo_ci and model in board.elo_ci:
             lo, hi = board.elo_ci[model]
@@ -172,6 +193,7 @@ def build_leaderboard_rows(
                 "win_pct": None,
                 "status": "failed",
                 "failed_outputs": failure_counts.get(model, 0),
+                "preferred_over": "",
             }
         )
     return rows
@@ -198,6 +220,9 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
         "max_ocr_text_len": metadata.max_ocr_text_len,
         "judge_image_dim": metadata.judge_image_dim,
         "judge_text_mode": metadata.judge_text_mode,
+        "adaptive_strategy": metadata.adaptive_strategy,
+        "size_tie_ratio": metadata.size_tie_ratio,
+        "size_tie_min_samples": metadata.size_tie_min_samples,
     }
 
 
@@ -272,11 +297,21 @@ def publish_results(
         comp_ds.push_to_hub(repo_id, config_name="comparisons")
         logger.info("published_comparisons", repo=repo_id, n=len(board.comparison_log))
 
-    # Leaderboard — dual push: default config + named config
+    # Leaderboard — dual push: default config + named config. Size-aware
+    # preferences are derived from the final board + direct pair counts and
+    # stored as annotations only; they never alter ELO or row order.
+    decisions = classify_adjacent_pairs(
+        board,
+        comparison_pair_counts(board.comparison_log),
+        size_tie_ratio=metadata.size_tie_ratio,
+        size_tie_min_samples=metadata.size_tie_min_samples,
+        parameter_counts=model_parameter_counts(),
+    )
     rows = build_leaderboard_rows(
         board,
         failed_models=metadata.failed_models,
         failed_outputs=metadata.failed_outputs,
+        parameter_preferences=practical_preferences(decisions),
     )
     lb_ds = Dataset.from_list(rows)
     lb_ds.push_to_hub(repo_id)
@@ -400,6 +435,8 @@ def _build_readme(
         status = "failed" if model_name in failed_models else row.get("status", "ranked")
         if model_name in failed_outputs:
             model = f"{model} ⚠"
+        if row.get("preferred_over"):
+            model = f"{model} ★"
         params = row.get("params", "")
 
         if status == "failed":
@@ -430,6 +467,26 @@ def _build_readme(
                 f"| {row['wins']} | {row['losses']} | {row['ties']} "
                 f"| {row['win_pct']}% |"
             )
+
+    preferred_rows = [row for row in rows if row.get("preferred_over")]
+    if preferred_rows:
+        lines += [
+            "",
+            "## ★ Parameter-efficient practical preferences",
+            "",
+            "These adjacent models have overlapping marginal 95% ELO confidence "
+            "intervals, but the starred model has at least the configured parameter "
+            "advantage after the required number of direct comparisons. This is a "
+            "deployment preference — **not** a statistical-equivalence claim, and it "
+            "does not alter ELO scores or ranks.",
+            "",
+            "| Smaller model | Unresolved against |",
+            "|---------------|--------------------|",
+        ]
+        for row in preferred_rows:
+            safe_model = str(row["model"]).replace("|", "\\|")
+            safe_preference = str(row["preferred_over"]).replace("|", "\\|")
+            lines.append(f"| {safe_model} | {safe_preference} |")
 
     if failed_outputs:
         lines += [
@@ -463,6 +520,13 @@ def _build_readme(
         f"- **OCR text cap**: {metadata.max_ocr_text_len} characters per output",
         f"- **Judge image cap**: {metadata.judge_image_dim}px on the longer side",
         f"- **Comparisons**: {comparisons_str}",
+        f"- **Adaptive strategy**: {metadata.adaptive_strategy}",
+        (
+            f"- **Size-aware stopping**: {metadata.size_tie_ratio:g}x parameter ratio, "
+            f"minimum {metadata.size_tie_min_samples} direct comparisons"
+            if metadata.size_tie_ratio is not None
+            else "- **Size-aware stopping**: disabled"
+        ),
         "- **Method**: Bradley-Terry MLE with bootstrap 95% CIs",
         "",
         "## Configs",
