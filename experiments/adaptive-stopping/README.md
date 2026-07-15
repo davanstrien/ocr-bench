@@ -1,8 +1,8 @@
 # Adaptive stopping counterfactual replay
 
-**Recommendation: keep targeted allocation experimental and do not run a live trial yet.** A
-follow-up replay tested stronger per-pair warm-ups, periodic balanced exploration, and separating
-size annotations from sampling. None passed the predeclared fidelity/savings gate.
+**Recommendation: keep targeted allocation experimental and do not run a live trial.** Follow-up
+replays tested stronger adaptive warm-ups/exploration and fixed outcome-independent designs over
+five allocation seeds. No design passed the predeclared fidelity/savings gate robustly.
 
 The opt-in targeted allocator delivers the expected call reduction, but not by stopping early:
 it uses all 10 five-sample rounds while selecting fewer pairs per round. Against the full stored
@@ -44,6 +44,8 @@ The replay:
 5. Uses production `classify_adjacent_pairs`, `unresolved_pairs`, pair counting, model-size
    parsing, and practical-preference helpers.
 6. Recomputes adjacency after every batch, just as the CLI does.
+7. Separately evaluates fixed pair-balanced and mixed-random designs at budgets 700, 1,200, and
+   2,000 over allocation seeds 42–46; these selectors never inspect winner values.
 
 The primary replay intentionally treats all 4,293 published rows as outcomes because that is the
 requested reference board and reproduces the historical leaderboard. The data includes 628 rows
@@ -208,6 +210,38 @@ The exact order of the full board's top three is itself weakly identified—thei
 should not become a universal product criterion. It remains useful here as a deliberately strict
 counterfactual fidelity check, alongside full-order correlation and ELO drift.
 
+## Fixed outcome-independent designs
+
+The next proposed direction was also replayed. Two fixed designs were evaluated at predeclared
+budgets of 700, 1,200, and 2,000 outcomes over seeds 42–46:
+
+- **Pair-balanced:** shuffle outcomes within each model pair, then assign equal per-pair quotas.
+- **Mixed-random:** retain the first five-page balanced warm-up, then fill the budget by seeded
+  pair-balanced exploration independent of interim winners.
+
+Both condition only on which valid stored rows exist; neither reads the winner when allocating.
+The table reports medians and ranges across five seeds. Top-3 columns are counts out of five.
+
+| Design | Budget | Saved | Kendall τ median [range] | Top-3 set/order | Median abs(ΔELO), median | Max abs(ΔELO), median/worst | Min pair evidence | Gate passes |
+|---|---:|---:|---|---:|---:|---:|---:|---:|
+| Pair-balanced | 700 | 83.7% | 0.868 [0.758–0.978] | 1/1 | 34.9 | 75.2 / 116.4 | 7 | 0/5 |
+| Pair-balanced | 1,200 | 72.0% | 0.890 [0.780–0.956] | 2/0 | 18.8 | 49.1 / 89.0 | 13 | 0/5 |
+| Pair-balanced | 2,000 | 53.4% | 0.868 [0.846–0.956] | 1/1 | 17.6 | 37.7 / 61.2 | 21 | 0/5 |
+| Mixed-random | 700 | 83.7% | 0.868 [0.868–0.890] | 5/1 | 48.2 | 146.7 / 191.3 | 7 | 0/5 |
+| Mixed-random | 1,200 | 72.0% | 0.934 [0.934–0.956] | 5/1 | 28.7 | 79.8 / 122.8 | 13 | 0/5 |
+| Mixed-random | 2,000 | 53.4% | 0.956 [0.934–0.978] | 5/2 | 13.7 | 46.3 / 61.4 | 21 | 0/5 |
+
+No fixed design passed the original gate. Mixed-random preserved top-3 **membership** in all 15
+runs and reached median Kendall τ 0.956 at budget 2,000, but that budget saved only 53.4%, exact
+top-3 order held for 2/5 seeds, and worst-seed max ELO drift remained 61.4. At budget 1,200 it
+saved 72.0%, but median max drift was 79.8.
+
+The seed ranges are as important as the medians: a single favorable seed would have overstated
+fidelity. Outcome-independent allocation removes the targeted policy's optional-sampling feedback,
+but does not make a small board equivalent to the full one. The fixed designs also show that
+pair-count balance alone is insufficient; preserving a common balanced warm-up made top-3
+membership much more stable than independently sampling each pair.
+
 ## Current sentinel-policy robustness check
 
 The primary result must use the requested 4,293-row stored board. However, current production
@@ -225,7 +259,11 @@ All three adaptive runs still exhaust the sample batches. The targeted-v2 varian
 predeclared gate under current sentinel handling. The closest on ELO drift—warm-up 5 plus
 exploration 3, annotation-only—uses 1,684 outcomes (54.1% saved), has median/max absolute ELO
 deltas of 18.1/57.0, and still swaps the statistically unresolved models in ranks 2 and 3.
-See [`results-sentinels-excluded.json`](results-sentinels-excluded.json) for full details.
+For the fixed designs under current sentinel handling, mixed-random at budget 1,200 passed the
+gate for 2/5 seeds but not robustly; no design/budget passed for every seed. Mixed-random at 2,000
+had median/worst max ELO drift of 22.3/32.3, but saved only 45.4% and reproduced exact top-3 order
+in 0/5 seeds. See [`results-sentinels-excluded.json`](results-sentinels-excluded.json) for full
+details.
 
 ## Determinism
 
@@ -235,8 +273,11 @@ decisions, final annotations, stop round, and stop reason matched exactly. This 
 deterministic execution in the tested environment, helped by the fixed bootstrap seed and
 deterministic equal-ELO tie-break.
 
-It does not establish reproducibility across different SciPy/NumPy versions or statistical
-validity under repeated data collection.
+The fixed selectors are also deterministic for a fixed seed, with unit tests covering exact
+budgets, pair balance, warm-up preservation, and repeat selection. Their five-seed spread measures
+allocation sensitivity, not repeated-data statistical uncertainty. None of this establishes
+reproducibility across different SciPy/NumPy versions or statistical validity under repeated data
+collection.
 
 ## Limitations
 
@@ -264,22 +305,20 @@ validity under repeated data collection.
 
 ## Recommendation and next experiment
 
-**Keep `targeted` opt-in, retain `balanced` as the default, and do not implement the tested v2
-variants in production.** The follow-up falsified the simple “more warm-up plus periodic balanced
-batches” revision under the predeclared gate.
+**Keep `targeted` opt-in, retain `balanced` as the default, and do not implement the tested v2 or
+fixed designs in production.** Neither threshold tuning nor the tested outcome-independent designs
+passed the predeclared gate robustly.
 
-The next useful direction is a different estimator/design rather than more threshold tuning:
+Do not tune further on Britannica alone. The next useful work is methodological validation:
 
-1. compare fixed balanced subsampling at matched budgets (for example 700, 1,200, and 2,000
-   outcomes) against outcome-conditioned targeting;
-2. test a predeclared mixed allocation with random exploration independent of interim winners;
-3. evaluate top-k membership and pairwise decisions separately from exact ordering among
-   statistically unresolved models; and
-4. use page-clustered, policy-aware uncertainty before considering a live adaptive trial.
+1. replay the mixed-random design on several independent published boards;
+2. predeclare a success criterion based on top-k membership and pairwise decisions, separately
+   from exact ordering among statistically unresolved models;
+3. use page-clustered/design-aware uncertainty and report allocation-seed sensitivity; and
+4. consider one live trial only if a design passes across collections and seeds.
 
-Keep the 3× rule as a post-hoc deployment annotation only during that work. This board does not
-support letting it influence sampling, making it a default, or treating it as statistical
-resolution.
+Keep the 3× rule as a post-hoc deployment annotation only. This board does not support letting it
+influence sampling, making it a default, or treating it as statistical resolution.
 
 ## Reproduce
 
@@ -290,8 +329,8 @@ uv sync --dev
 uv run python experiments/adaptive-stopping/replay.py
 ```
 
-The full primary, sensitivity, and targeted-v2 run takes about eleven minutes on the machine used
-for this report. The pinned dataset
+The full primary, sensitivity, targeted-v2, and fixed-design run takes about eleven minutes on the
+machine used for this report. The pinned dataset
 revision is downloaded read-only. The script contains no judge backend construction and no Hub
 push/upload call.
 
@@ -310,6 +349,7 @@ Generated artifacts:
 - [`strategy-summary.csv`](strategy-summary.csv): strategy-level metrics
 - [`elo-deltas.csv`](elo-deltas.csv): per-model ELO and deltas
 - [`round-history.csv`](round-history.csv): batch-by-batch allocation and decisions
+- [`static-design-summary.csv`](static-design-summary.csv): five-seed fixed-design aggregates
 - [`results-sentinels-excluded.json`](results-sentinels-excluded.json): robustness replay
 
 Validation commands:

@@ -12,6 +12,7 @@ import argparse
 import csv
 import json
 import math
+import random
 import statistics
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
@@ -39,7 +40,7 @@ DEFAULT_REPO = "davanstrien/ocr-bench-britannica-results"
 DEFAULT_REVISION = "48a0f42de26009892d2784a3a97d6d61525f4040"
 BATCH_SAMPLES = 5
 
-StrategyKind = Literal["full", "balanced", "targeted"]
+StrategyKind = Literal["full", "balanced", "targeted", "pair-balanced", "mixed-random"]
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,8 @@ class StrategyConfig:
     warmup_min_per_pair: int | None = None
     balanced_every_n_post_warmup_batches: int | None = None
     size_rule_controls_sampling: bool = True
+    static_budget: int | None = None
+    allocation_seed: int = 42
 
 
 @dataclass
@@ -80,6 +83,21 @@ SENSITIVITY_CONFIGS = (
     StrategyConfig("targeted_size_3_min_5", "targeted", 3.0, 5),
     StrategyConfig("targeted_size_3_min_15", "targeted", 3.0, 15),
     StrategyConfig("targeted_size_5_min_10", "targeted", 5.0, 10),
+)
+
+STATIC_BUDGETS = (700, 1200, 2000)
+STATIC_SEEDS = (42, 43, 44, 45, 46)
+
+STATIC_CONFIGS = tuple(
+    StrategyConfig(
+        f"{kind}_{budget}_seed_{seed}",
+        kind,
+        static_budget=budget,
+        allocation_seed=seed,
+    )
+    for kind in ("pair-balanced", "mixed-random")
+    for budget in STATIC_BUDGETS
+    for seed in STATIC_SEEDS
 )
 
 FOLLOWUP_CONFIGS = (
@@ -150,6 +168,11 @@ def _parse_args() -> argparse.Namespace:
         "--skip-followup",
         action="store_true",
         help="Skip targeted-v2 warm-up and balanced-exploration configurations.",
+    )
+    parser.add_argument(
+        "--skip-static",
+        action="store_true",
+        help="Skip fixed pair-balanced and outcome-independent mixed designs.",
     )
     parser.add_argument(
         "--exclude-sentinel-comparisons",
@@ -257,6 +280,82 @@ def _warmup_ready(
     return len(pair_counts) == n_pairs and min(pair_counts.values(), default=0) >= min_per_pair
 
 
+def _fixed_pair_balanced_sample(
+    stored: Sequence[ComparisonResult],
+    *,
+    budget: int,
+    seed: int,
+    required: Sequence[ComparisonResult] = (),
+) -> list[ComparisonResult]:
+    """Select a fixed-budget, outcome-independent sample balanced across pairs.
+
+    ``required`` supports the mixed design's first balanced page batch. Remaining
+    rows are shuffled within each pair using the fixed allocation seed, then added
+    to the currently least-sampled pairs until the exact budget is reached. Winner
+    values never participate in allocation.
+    """
+    if budget < len(required):
+        raise ValueError(f"Budget {budget} is smaller than {len(required)} required rows")
+    if budget > len(stored):
+        raise ValueError(f"Budget {budget} exceeds {len(stored)} stored rows")
+
+    grouped = _group_by_pair(stored)
+    rng = random.Random(seed)
+    required_keys = {_comparison_key(comparison) for comparison in required}
+    if len(required_keys) != len(required):
+        raise ValueError("Required comparisons contain duplicate pair/sample keys")
+
+    queues: dict[tuple[str, str], list[ComparisonResult]] = {}
+    counts: Counter[tuple[str, str]] = Counter()
+    for comparison in required:
+        counts[normalize_model_pair(comparison.model_a, comparison.model_b)] += 1
+    for pair, comparisons in sorted(grouped.items()):
+        remaining = [
+            comparison
+            for comparison in comparisons
+            if _comparison_key(comparison) not in required_keys
+        ]
+        rng.shuffle(remaining)
+        queues[pair] = remaining
+        counts.setdefault(pair, 0)
+
+    selected = list(required)
+    while len(selected) < budget:
+        eligible = [pair for pair, queue in queues.items() if queue]
+        if not eligible:
+            raise ValueError(f"Only {len(selected)} unique rows available for budget {budget}")
+        minimum = min(counts[pair] for pair in eligible)
+        candidates = sorted(pair for pair in eligible if counts[pair] == minimum)
+        rng.shuffle(candidates)
+        for pair in candidates:
+            if len(selected) >= budget:
+                break
+            selected.append(queues[pair].pop())
+            counts[pair] += 1
+    return selected
+
+
+def _comparison_key(comparison: ComparisonResult) -> tuple[int, tuple[str, str]]:
+    return (
+        comparison.sample_idx,
+        normalize_model_pair(comparison.model_a, comparison.model_b),
+    )
+
+
+def _group_by_pair(
+    comparisons: Sequence[ComparisonResult],
+) -> dict[tuple[str, str], list[ComparisonResult]]:
+    grouped: dict[tuple[str, str], list[ComparisonResult]] = defaultdict(list)
+    seen: set[tuple[int, tuple[str, str]]] = set()
+    for comparison in comparisons:
+        key = _comparison_key(comparison)
+        if key in seen:
+            raise ValueError(f"Duplicate pair/sample comparison: {key}")
+        seen.add(key)
+        grouped[key[1]].append(comparison)
+    return dict(grouped)
+
+
 def replay_strategy(
     stored: Sequence[ComparisonResult],
     model_names: Sequence[str],
@@ -278,6 +377,33 @@ def replay_strategy(
     sample_order = list(range(min(grouped), max(grouped) + 1))
     n_pairs = len(model_names) * (len(model_names) - 1) // 2
     min_before_check = max(3 * n_pairs, 20)
+
+    if config.kind in {"pair-balanced", "mixed-random"}:
+        if config.static_budget is None:
+            raise ValueError(f"{config.kind} requires a static budget")
+        required: list[ComparisonResult] = []
+        if config.kind == "mixed-random":
+            warmup_indices = set(sample_order[:batch_samples])
+            required = [
+                comparison for comparison in stored if comparison.sample_idx in warmup_indices
+            ]
+        comparisons = _fixed_pair_balanced_sample(
+            stored,
+            budget=config.static_budget,
+            seed=config.allocation_seed,
+            required=required,
+        )
+        board = compute_elo(comparisons, list(model_names), n_bootstrap=n_bootstrap)
+        decisions = _classify(board, comparisons, config)
+        return ReplayResult(
+            config=config,
+            comparisons=comparisons,
+            board=board,
+            decisions=decisions,
+            stopping_round=0,
+            stopping_reason="predeclared_static_budget",
+            round_history=[],
+        )
 
     if config.kind == "full":
         comparisons = list(stored)
@@ -491,6 +617,8 @@ def strategy_metrics(
         )
     elif result.config.kind == "full":
         resolution = "reference only; no adaptive stop"
+    elif result.stopping_reason == "predeclared_static_budget":
+        resolution = "predeclared outcome-independent budget; no adaptive stop"
     else:
         resolution = (
             "sample batches exhausted: "
@@ -520,6 +648,8 @@ def strategy_metrics(
             result.config.balanced_every_n_post_warmup_batches
         ),
         "size_rule_controls_sampling": result.config.size_rule_controls_sampling,
+        "static_budget": result.config.static_budget,
+        "allocation_seed": result.config.allocation_seed,
         "comparisons_consumed": len(result.comparisons),
         "comparisons_saved": full_count - len(result.comparisons),
         "percentage_saved": percentage_saved,
@@ -547,6 +677,72 @@ def strategy_metrics(
         "deterministic_across_repeats": deterministic,
         "round_history": result.round_history,
     }
+
+
+def _static_design_aggregates(metrics: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Aggregate fixed-design results across predeclared allocation seeds."""
+    grouped: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+    for metric in metrics:
+        budget = metric.get("static_budget")
+        if metric["kind"] in {"pair-balanced", "mixed-random"} and isinstance(budget, int):
+            grouped[(metric["kind"], budget)].append(metric)
+
+    aggregates: list[dict[str, Any]] = []
+    for (kind, budget), rows in sorted(grouped.items()):
+        taus = [row["kendall_tau"] for row in rows]
+        rhos = [row["spearman_rho"] for row in rows]
+        med_deltas = [row["median_absolute_elo_delta"] for row in rows]
+        max_deltas = [row["max_absolute_elo_delta"] for row in rows]
+        aggregates.append(
+            {
+                "kind": kind,
+                "budget": budget,
+                "seeds": [row["allocation_seed"] for row in rows],
+                "percentage_saved": rows[0]["percentage_saved"],
+                "kendall_tau_median": statistics.median(taus),
+                "kendall_tau_min": min(taus),
+                "kendall_tau_max": max(taus),
+                "spearman_rho_median": statistics.median(rhos),
+                "spearman_rho_min": min(rhos),
+                "spearman_rho_max": max(rhos),
+                "top3_membership_matches": sum(row["top3_membership_matches"] for row in rows),
+                "top3_order_matches": sum(row["top3_order_matches"] for row in rows),
+                "median_absolute_elo_delta_median": statistics.median(med_deltas),
+                "max_absolute_elo_delta_median": statistics.median(max_deltas),
+                "max_absolute_elo_delta_worst": max(max_deltas),
+                "minimum_pair_evidence": min(
+                    row["graph"]["min_direct_comparisons"] for row in rows
+                ),
+                "gate_passes": sum(row["followup_acceptance_gate"]["passed"] for row in rows),
+                "runs": len(rows),
+            }
+        )
+    return aggregates
+
+
+def _write_static_csv(output_dir: Path, aggregates: Sequence[dict[str, Any]]) -> None:
+    fields = [
+        "kind",
+        "budget",
+        "percentage_saved",
+        "kendall_tau_median",
+        "kendall_tau_min",
+        "kendall_tau_max",
+        "spearman_rho_median",
+        "top3_membership_matches",
+        "top3_order_matches",
+        "median_absolute_elo_delta_median",
+        "max_absolute_elo_delta_median",
+        "max_absolute_elo_delta_worst",
+        "minimum_pair_evidence",
+        "gate_passes",
+        "runs",
+    ]
+    with (output_dir / "static-design-summary.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
+        writer.writeheader()
+        for aggregate in aggregates:
+            writer.writerow({field: aggregate[field] for field in fields})
 
 
 def _write_csvs(output_dir: Path, metrics: Sequence[dict[str, Any]]) -> None:
@@ -653,6 +849,8 @@ def main() -> None:
         configs.extend(SENSITIVITY_CONFIGS)
     if not args.skip_followup:
         configs.extend(FOLLOWUP_CONFIGS)
+    if not args.skip_static:
+        configs.extend(STATIC_CONFIGS)
 
     results: dict[str, ReplayResult] = {}
     deterministic: dict[str, bool | None] = {}
@@ -687,6 +885,7 @@ def main() -> None:
         )
         for config in configs
     ]
+    static_aggregates = _static_design_aggregates(metrics)
     payload = {
         "experiment": {
             "source_repo": args.repo,
@@ -704,6 +903,15 @@ def main() -> None:
             "bootstrap_seed": 42,
             "repeats": args.repeats,
             "repeated_strategy_names": sorted(repeat_names & {config.name for config in configs}),
+            "static_design": {
+                "budgets": list(STATIC_BUDGETS),
+                "allocation_seeds": list(STATIC_SEEDS),
+                "pair_balanced": "fixed equal per-pair quotas across all stored samples",
+                "mixed_random": (
+                    "first five-sample balanced batch, then seeded outcome-independent "
+                    "pair-balanced exploration"
+                ),
+            },
             "followup_acceptance_gate": {
                 "top3_order_exact": True,
                 "kendall_tau_minimum": 0.95,
@@ -721,6 +929,7 @@ def main() -> None:
             ],
         },
         "strategies": metrics,
+        "static_design_aggregates": static_aggregates,
     }
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -729,6 +938,7 @@ def main() -> None:
     json_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     if not args.exclude_sentinel_comparisons:
         _write_csvs(args.output_dir, metrics)
+        _write_static_csv(args.output_dir, static_aggregates)
     print(f"Wrote {json_path}")
 
 

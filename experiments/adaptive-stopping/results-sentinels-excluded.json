@@ -49,8 +49,182 @@
     "sentinel_comparisons_excluded": true,
     "source_repo": "davanstrien/ocr-bench-britannica-results",
     "source_revision": "48a0f42de26009892d2784a3a97d6d61525f4040",
+    "static_design": {
+      "allocation_seeds": [
+        42,
+        43,
+        44,
+        45,
+        46
+      ],
+      "budgets": [
+        700,
+        1200,
+        2000
+      ],
+      "mixed_random": "first five-sample balanced batch, then seeded outcome-independent pair-balanced exploration",
+      "pair_balanced": "fixed equal per-pair quotas across all stored samples"
+    },
     "stored_comparisons_at_revision": 4293
   },
+  "static_design_aggregates": [
+    {
+      "budget": 700,
+      "gate_passes": 0,
+      "kendall_tau_max": 0.9487179487179485,
+      "kendall_tau_median": 0.8974358974358972,
+      "kendall_tau_min": 0.846153846153846,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta_median": 90.57457123464246,
+      "max_absolute_elo_delta_worst": 110.50920721914326,
+      "median_absolute_elo_delta_median": 43.21362959287171,
+      "minimum_pair_evidence": 8,
+      "percentage_saved": 80.90040927694406,
+      "runs": 5,
+      "seeds": [
+        42,
+        43,
+        44,
+        45,
+        46
+      ],
+      "spearman_rho_max": 0.989010989010989,
+      "spearman_rho_median": 0.9725274725274725,
+      "spearman_rho_min": 0.945054945054945,
+      "top3_membership_matches": 5,
+      "top3_order_matches": 5
+    },
+    {
+      "budget": 1200,
+      "gate_passes": 2,
+      "kendall_tau_max": 0.9743589743589742,
+      "kendall_tau_median": 0.9230769230769229,
+      "kendall_tau_min": 0.8974358974358972,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta_median": 42.428365126298104,
+      "max_absolute_elo_delta_worst": 57.316679880515494,
+      "median_absolute_elo_delta_median": 18.909684828118543,
+      "minimum_pair_evidence": 15,
+      "percentage_saved": 67.25784447476126,
+      "runs": 5,
+      "seeds": [
+        42,
+        43,
+        44,
+        45,
+        46
+      ],
+      "spearman_rho_max": 0.9945054945054945,
+      "spearman_rho_median": 0.9835164835164836,
+      "spearman_rho_min": 0.967032967032967,
+      "top3_membership_matches": 5,
+      "top3_order_matches": 2
+    },
+    {
+      "budget": 2000,
+      "gate_passes": 0,
+      "kendall_tau_max": 0.9743589743589742,
+      "kendall_tau_median": 0.9487179487179485,
+      "kendall_tau_min": 0.8717948717948716,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta_median": 22.317428443707513,
+      "max_absolute_elo_delta_worst": 32.32713115053002,
+      "median_absolute_elo_delta_median": 9.930725048769546,
+      "minimum_pair_evidence": 25,
+      "percentage_saved": 45.429740791268756,
+      "runs": 5,
+      "seeds": [
+        42,
+        43,
+        44,
+        45,
+        46
+      ],
+      "spearman_rho_max": 0.9945054945054945,
+      "spearman_rho_median": 0.989010989010989,
+      "spearman_rho_min": 0.967032967032967,
+      "top3_membership_matches": 5,
+      "top3_order_matches": 0
+    },
+    {
+      "budget": 700,
+      "gate_passes": 0,
+      "kendall_tau_max": 0.9230769230769229,
+      "kendall_tau_median": 0.846153846153846,
+      "kendall_tau_min": 0.7948717948717947,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta_median": 72.42371763917004,
+      "max_absolute_elo_delta_worst": 102.34154125719442,
+      "median_absolute_elo_delta_median": 22.75104611031111,
+      "minimum_pair_evidence": 8,
+      "percentage_saved": 80.90040927694406,
+      "runs": 5,
+      "seeds": [
+        42,
+        43,
+        44,
+        45,
+        46
+      ],
+      "spearman_rho_max": 0.9835164835164836,
+      "spearman_rho_median": 0.9505494505494506,
+      "spearman_rho_min": 0.9340659340659341,
+      "top3_membership_matches": 3,
+      "top3_order_matches": 0
+    },
+    {
+      "budget": 1200,
+      "gate_passes": 1,
+      "kendall_tau_max": 0.9743589743589742,
+      "kendall_tau_median": 0.8974358974358972,
+      "kendall_tau_min": 0.8717948717948716,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta_median": 52.410771855799794,
+      "max_absolute_elo_delta_worst": 74.96168169932707,
+      "median_absolute_elo_delta_median": 16.47916806097669,
+      "minimum_pair_evidence": 15,
+      "percentage_saved": 67.25784447476126,
+      "runs": 5,
+      "seeds": [
+        42,
+        43,
+        44,
+        45,
+        46
+      ],
+      "spearman_rho_max": 0.9945054945054945,
+      "spearman_rho_median": 0.9725274725274725,
+      "spearman_rho_min": 0.9560439560439561,
+      "top3_membership_matches": 4,
+      "top3_order_matches": 1
+    },
+    {
+      "budget": 2000,
+      "gate_passes": 0,
+      "kendall_tau_max": 0.9487179487179485,
+      "kendall_tau_median": 0.8974358974358972,
+      "kendall_tau_min": 0.846153846153846,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta_median": 29.35659645917508,
+      "max_absolute_elo_delta_worst": 37.693908638986386,
+      "median_absolute_elo_delta_median": 9.460307540245594,
+      "minimum_pair_evidence": 25,
+      "percentage_saved": 45.429740791268756,
+      "runs": 5,
+      "seeds": [
+        42,
+        43,
+        44,
+        45,
+        46
+      ],
+      "spearman_rho_max": 0.989010989010989,
+      "spearman_rho_median": 0.9725274725274725,
+      "spearman_rho_min": 0.945054945054945,
+      "top3_membership_matches": 4,
+      "top3_order_matches": 0
+    }
+  ],
   "strategies": [
     {
       "allocation_decision_statuses": {
@@ -58,6 +232,7 @@
         "resolved": 4,
         "unresolved": 8
       },
+      "allocation_seed": 42,
       "balanced_every_n_post_warmup_batches": null,
       "comparisons_consumed": 3665,
       "comparisons_saved": 0,
@@ -213,6 +388,7 @@
       "size_tie_min_samples": 10,
       "size_tie_ratio": null,
       "spearman_rho": 1.0,
+      "static_budget": null,
       "stopping_reason": "reference_full_stored_board",
       "stopping_round": 10,
       "top3": [
@@ -231,6 +407,7 @@
         "resolved": 4,
         "unresolved": 8
       },
+      "allocation_seed": 42,
       "balanced_every_n_post_warmup_batches": null,
       "comparisons_consumed": 3665,
       "comparisons_saved": 0,
@@ -737,6 +914,7 @@
       "size_tie_min_samples": 10,
       "size_tie_ratio": null,
       "spearman_rho": 1.0,
+      "static_budget": null,
       "stopping_reason": "sample_batches_exhausted",
       "stopping_round": 10,
       "top3": [
@@ -755,6 +933,7 @@
         "resolved": 1,
         "unresolved": 11
       },
+      "allocation_seed": 42,
       "balanced_every_n_post_warmup_batches": null,
       "comparisons_consumed": 753,
       "comparisons_saved": 2912,
@@ -1261,6 +1440,7 @@
       "size_tie_min_samples": 10,
       "size_tie_ratio": null,
       "spearman_rho": 0.9835164835164836,
+      "static_budget": null,
       "stopping_reason": "sample_batches_exhausted",
       "stopping_round": 10,
       "top3": [
@@ -1279,6 +1459,7 @@
         "resolved": 1,
         "unresolved": 5
       },
+      "allocation_seed": 42,
       "balanced_every_n_post_warmup_batches": null,
       "comparisons_consumed": 624,
       "comparisons_saved": 3041,
@@ -1822,6 +2003,7 @@
       "size_tie_min_samples": 10,
       "size_tie_ratio": 3.0,
       "spearman_rho": 0.9725274725274725,
+      "static_budget": null,
       "stopping_reason": "sample_batches_exhausted",
       "stopping_round": 10,
       "top3": [
@@ -1840,6 +2022,7 @@
         "resolved": 1,
         "unresolved": 11
       },
+      "allocation_seed": 42,
       "balanced_every_n_post_warmup_batches": null,
       "comparisons_consumed": 1016,
       "comparisons_saved": 2649,
@@ -2328,6 +2511,7 @@
       "size_tie_min_samples": 10,
       "size_tie_ratio": null,
       "spearman_rho": 0.9780219780219779,
+      "static_budget": null,
       "stopping_reason": "sample_batches_exhausted",
       "stopping_round": 10,
       "top3": [
@@ -2346,6 +2530,7 @@
         "resolved": 1,
         "unresolved": 11
       },
+      "allocation_seed": 42,
       "balanced_every_n_post_warmup_batches": null,
       "comparisons_consumed": 1351,
       "comparisons_saved": 2314,
@@ -2816,6 +3001,7 @@
       "size_tie_min_samples": 10,
       "size_tie_ratio": null,
       "spearman_rho": 0.9780219780219779,
+      "static_budget": null,
       "stopping_reason": "sample_batches_exhausted",
       "stopping_round": 10,
       "top3": [
@@ -2834,6 +3020,7 @@
         "resolved": 1,
         "unresolved": 11
       },
+      "allocation_seed": 42,
       "balanced_every_n_post_warmup_batches": 3,
       "comparisons_consumed": 1756,
       "comparisons_saved": 1909,
@@ -3340,6 +3527,7 @@
       "size_tie_min_samples": 10,
       "size_tie_ratio": null,
       "spearman_rho": 0.989010989010989,
+      "static_budget": null,
       "stopping_reason": "sample_batches_exhausted",
       "stopping_round": 10,
       "top3": [
@@ -3358,6 +3546,7 @@
         "resolved": 2,
         "unresolved": 10
       },
+      "allocation_seed": 42,
       "balanced_every_n_post_warmup_batches": 3,
       "comparisons_consumed": 1684,
       "comparisons_saved": 1981,
@@ -3877,6 +4066,7 @@
       "size_tie_min_samples": 10,
       "size_tie_ratio": 3.0,
       "spearman_rho": 0.9835164835164836,
+      "static_budget": null,
       "stopping_reason": "sample_batches_exhausted",
       "stopping_round": 10,
       "top3": [
@@ -3895,6 +4085,7 @@
         "resolved": 1,
         "unresolved": 11
       },
+      "allocation_seed": 42,
       "balanced_every_n_post_warmup_batches": 3,
       "comparisons_consumed": 1990,
       "comparisons_saved": 1675,
@@ -4402,6 +4593,7 @@
       "size_tie_min_samples": 10,
       "size_tie_ratio": 3.0,
       "spearman_rho": 0.9835164835164836,
+      "static_budget": null,
       "stopping_reason": "sample_batches_exhausted",
       "stopping_round": 10,
       "top3": [
@@ -4420,6 +4612,7 @@
         "resolved": 2,
         "unresolved": 5
       },
+      "allocation_seed": 42,
       "balanced_every_n_post_warmup_batches": 3,
       "comparisons_consumed": 1568,
       "comparisons_saved": 2097,
@@ -4939,6 +5132,7 @@
       "size_tie_min_samples": 10,
       "size_tie_ratio": 3.0,
       "spearman_rho": 0.9835164835164836,
+      "static_budget": null,
       "stopping_reason": "sample_batches_exhausted",
       "stopping_round": 10,
       "top3": [
@@ -4950,6 +5144,5256 @@
       "top3_membership_overlap": 3,
       "top3_order_matches": false,
       "warmup_min_per_pair": 5
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 42,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 700,
+      "comparisons_saved": 2965,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1543.0853037454192,
+        "PaddlePaddle/PP-OCRv6_medium": 1383.2205896308137,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1405.8076830862049,
+        "allenai/olmOCR-2-7B-1025-FP8": 1664.4750629895334,
+        "baidu/Qianfan-OCR": 1480.800164146396,
+        "baidu/Unlimited-OCR": 1506.106657322795,
+        "deepseek-ai/DeepSeek-OCR": 1410.6564592176926,
+        "deepseek-ai/DeepSeek-OCR-2": 1321.3236440930846,
+        "lightonai/LightOnOCR-2-1B": 1722.7967070663603,
+        "numind/NuExtract3": 1672.5046875390235,
+        "rednote-hilab/dots.mocr": 1688.832657435086,
+        "tesseract-5": 969.8331381647815,
+        "zai-org/GLM-OCR": 1730.5572455628094
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1466.045249315543,
+          1622.3820935521
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1309.6839983179932,
+          1456.6324026903649
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1334.2895444966712,
+          1477.8798544064111
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1596.5129217575181,
+          1751.0388422613619
+        ],
+        "baidu/Qianfan-OCR": [
+          1415.7797846004482,
+          1549.2534573873018
+        ],
+        "baidu/Unlimited-OCR": [
+          1440.9752250686329,
+          1578.7883452115877
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1341.0551412900286,
+          1477.2528386932254
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1231.2143665664712,
+          1399.0989776604451
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1647.590191523521,
+          1814.949400771358
+        ],
+        "numind/NuExtract3": [
+          1597.3858323092925,
+          1762.135365605007
+        ],
+        "rednote-hilab/dots.mocr": [
+          1628.0704606859856,
+          1771.2599796342322
+        ],
+        "tesseract-5": [
+          706.0699894010556,
+          1085.190521422589
+        ],
+        "zai-org/GLM-OCR": [
+          1666.6576671962607,
+          1817.1791634900815
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 31.230552733723243,
+        "PaddlePaddle/PP-OCRv6_medium": 36.86322458152745,
+        "PaddlePaddle/PaddleOCR-VL-1.6": -8.467897574690824,
+        "allenai/olmOCR-2-7B-1025-FP8": -9.277916283709146,
+        "baidu/Qianfan-OCR": -43.20588503175759,
+        "baidu/Unlimited-OCR": 8.063213831644816,
+        "deepseek-ai/DeepSeek-OCR": 1.8272141097534131,
+        "deepseek-ai/DeepSeek-OCR-2": -15.541752583512334,
+        "lightonai/LightOnOCR-2-1B": 25.193449382838708,
+        "numind/NuExtract3": 22.75104611031111,
+        "rednote-hilab/dots.mocr": -11.25864286590081,
+        "tesseract-5": -72.80017296098617,
+        "zai-org/GLM-OCR": 34.62356655075837
+      },
+      "final_rank_order": [
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B",
+        "rednote-hilab/dots.mocr",
+        "numind/NuExtract3",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Unlimited-OCR",
+        "baidu/Qianfan-OCR",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 9,
+        "median_direct_comparisons": 9.0,
+        "min_direct_comparisons": 8,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.8205128205128204,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta": 72.80017296098617,
+      "max_absolute_elo_delta_model": "tesseract-5",
+      "median_absolute_elo_delta": 22.75104611031111,
+      "name": "pair-balanced_700_seed_42",
+      "percentage_saved": 80.90040927694406,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9505494505494506,
+      "static_budget": 700,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B",
+        "rednote-hilab/dots.mocr"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 43,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 700,
+      "comparisons_saved": 2965,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1574.7921366784847,
+        "PaddlePaddle/PP-OCRv6_medium": 1340.4724390656875,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1398.6657139152867,
+        "allenai/olmOCR-2-7B-1025-FP8": 1669.6224468701632,
+        "baidu/Qianfan-OCR": 1430.2964101747075,
+        "baidu/Unlimited-OCR": 1499.1555485858391,
+        "deepseek-ai/DeepSeek-OCR": 1340.4724390656875,
+        "deepseek-ai/DeepSeek-OCR-2": 1367.8803083191708,
+        "lightonai/LightOnOCR-2-1B": 1664.2173264404153,
+        "numind/NuExtract3": 1645.1015194404895,
+        "rednote-hilab/dots.mocr": 1725.8410441553094,
+        "tesseract-5": 1045.2074470195134,
+        "zai-org/GLM-OCR": 1798.2752202692454
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1494.544911079249,
+          1655.008076502896
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1261.3042221000546,
+          1405.3726997594952
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1322.3968020932748,
+          1470.1368657080388
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1594.312975262157,
+          1753.5396582980752
+        ],
+        "baidu/Qianfan-OCR": [
+          1353.5773229347055,
+          1503.2414058536729
+        ],
+        "baidu/Unlimited-OCR": [
+          1426.5544578710858,
+          1571.5189072701098
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1269.4874097627999,
+          1399.1977359119624
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1281.1795186508998,
+          1439.881870247457
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1595.7875542373508,
+          1742.412652586529
+        ],
+        "numind/NuExtract3": [
+          1563.9509717704464,
+          1735.212793116971
+        ],
+        "rednote-hilab/dots.mocr": [
+          1658.307221264548,
+          1818.2074791808568
+        ],
+        "tesseract-5": [
+          872.2726715171863,
+          1145.9269178980076
+        ],
+        "zai-org/GLM-OCR": [
+          1726.82952875956,
+          1901.6131963003188
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 62.937385666788714,
+        "PaddlePaddle/PP-OCRv6_medium": -5.884925983598805,
+        "PaddlePaddle/PaddleOCR-VL-1.6": -15.609866745608997,
+        "allenai/olmOCR-2-7B-1025-FP8": -4.1305324030793145,
+        "baidu/Qianfan-OCR": -93.709639003446,
+        "baidu/Unlimited-OCR": 1.1121050946890136,
+        "deepseek-ai/DeepSeek-OCR": -68.35680604225172,
+        "deepseek-ai/DeepSeek-OCR-2": 31.014911642573907,
+        "lightonai/LightOnOCR-2-1B": -33.38593124310637,
+        "numind/NuExtract3": -4.652121988222916,
+        "rednote-hilab/dots.mocr": 25.74974385432256,
+        "tesseract-5": 2.5741358937457335,
+        "zai-org/GLM-OCR": 102.34154125719442
+      },
+      "final_rank_order": [
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "lightonai/LightOnOCR-2-1B",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Unlimited-OCR",
+        "baidu/Qianfan-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 9,
+        "median_direct_comparisons": 9.0,
+        "min_direct_comparisons": 8,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.7948717948717947,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta": 102.34154125719442,
+      "max_absolute_elo_delta_model": "zai-org/GLM-OCR",
+      "median_absolute_elo_delta": 25.74974385432256,
+      "name": "pair-balanced_700_seed_43",
+      "percentage_saved": 80.90040927694406,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9340659340659341,
+      "static_budget": 700,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr",
+        "allenai/olmOCR-2-7B-1025-FP8"
+      ],
+      "top3_membership_matches": false,
+      "top3_membership_overlap": 2,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 44,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 700,
+      "comparisons_saved": 2965,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1512.8863843583702,
+        "PaddlePaddle/PP-OCRv6_medium": 1359.3840135696803,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1479.017396280434,
+        "allenai/olmOCR-2-7B-1025-FP8": 1639.0527964984053,
+        "baidu/Qianfan-OCR": 1511.4006741156516,
+        "baidu/Unlimited-OCR": 1480.6048144058043,
+        "deepseek-ai/DeepSeek-OCR": 1389.1375735715262,
+        "deepseek-ai/DeepSeek-OCR-2": 1323.0492471239172,
+        "lightonai/LightOnOCR-2-1B": 1715.837557249851,
+        "numind/NuExtract3": 1631.4417427030041,
+        "rednote-hilab/dots.mocr": 1678.286516697602,
+        "tesseract-5": 1078.7160531944837,
+        "zai-org/GLM-OCR": 1701.18523023127
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1440.8223270518254,
+          1588.6483537369256
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1279.0518574032308,
+          1429.0258836970718
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1415.1775624514637,
+          1543.4600697147237
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1569.3290409333927,
+          1726.8948913752497
+        ],
+        "baidu/Qianfan-OCR": [
+          1441.3244273434702,
+          1585.183393878468
+        ],
+        "baidu/Unlimited-OCR": [
+          1411.1360512190627,
+          1545.6997208292007
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1311.7641517877544,
+          1453.4899452903237
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1234.7409388892474,
+          1396.9001864596535
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1647.3952468244509,
+          1802.6605364824763
+        ],
+        "numind/NuExtract3": [
+          1559.0478550879304,
+          1714.0606920846744
+        ],
+        "rednote-hilab/dots.mocr": [
+          1620.4494514036846,
+          1752.270701939007
+        ],
+        "tesseract-5": [
+          932.6965649090969,
+          1166.84360762251
+        ],
+        "zai-org/GLM-OCR": [
+          1633.079470625357,
+          1787.8866464630755
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 1.031633346674198,
+        "PaddlePaddle/PP-OCRv6_medium": 13.02664852039402,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 64.74181561953833,
+        "allenai/olmOCR-2-7B-1025-FP8": -34.70018277483723,
+        "baidu/Qianfan-OCR": -12.605375062501935,
+        "baidu/Unlimited-OCR": -17.438629085345838,
+        "deepseek-ai/DeepSeek-OCR": -19.69167153641297,
+        "deepseek-ai/DeepSeek-OCR-2": -13.81614955267969,
+        "lightonai/LightOnOCR-2-1B": 18.234299566329355,
+        "numind/NuExtract3": -18.31189872570826,
+        "rednote-hilab/dots.mocr": -21.80478360338475,
+        "tesseract-5": 36.082742068716016,
+        "zai-org/GLM-OCR": 5.251551219218982
+      },
+      "final_rank_order": [
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 9,
+        "median_direct_comparisons": 9.0,
+        "min_direct_comparisons": 8,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9230769230769229,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta": 64.74181561953833,
+      "max_absolute_elo_delta_model": "PaddlePaddle/PaddleOCR-VL-1.6",
+      "median_absolute_elo_delta": 18.234299566329355,
+      "name": "pair-balanced_700_seed_44",
+      "percentage_saved": 80.90040927694406,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9780219780219779,
+      "static_budget": 700,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 45,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 700,
+      "comparisons_saved": 2965,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1464.16895734602,
+        "PaddlePaddle/PP-OCRv6_medium": 1337.328001168623,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1456.7808660106632,
+        "allenai/olmOCR-2-7B-1025-FP8": 1648.5956919064101,
+        "baidu/Qianfan-OCR": 1515.2190723660028,
+        "baidu/Unlimited-OCR": 1500.7135625399076,
+        "deepseek-ai/DeepSeek-OCR": 1415.3770515845151,
+        "deepseek-ai/DeepSeek-OCR-2": 1338.7670919288284,
+        "lightonai/LightOnOCR-2-1B": 1722.9541336433388,
+        "numind/NuExtract3": 1628.5686934952653,
+        "rednote-hilab/dots.mocr": 1718.56084159372,
+        "tesseract-5": 1059.2507318356475,
+        "zai-org/GLM-OCR": 1693.715304581058
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1377.4038536749513,
+          1535.4068064042242
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1256.047714755538,
+          1406.4141851294328
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1389.9114159560297,
+          1523.4545979363024
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1581.2015323811443,
+          1736.0509245789842
+        ],
+        "baidu/Qianfan-OCR": [
+          1454.1752561463052,
+          1583.6496670182676
+        ],
+        "baidu/Unlimited-OCR": [
+          1439.0909483328019,
+          1563.7248866311295
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1345.7852516672972,
+          1477.576251819647
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1244.1726844414409,
+          1409.8982946176322
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1654.0940052359365,
+          1809.013911350066
+        ],
+        "numind/NuExtract3": [
+          1559.788774463211,
+          1710.5013592023004
+        ],
+        "rednote-hilab/dots.mocr": [
+          1655.5928859093326,
+          1801.4765677819962
+        ],
+        "tesseract-5": [
+          860.3163307607956,
+          1155.0126441161904
+        ],
+        "zai-org/GLM-OCR": [
+          1621.5360265984705,
+          1772.4547149298999
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": -47.685793665675874,
+        "PaddlePaddle/PP-OCRv6_medium": -9.029363880663368,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 42.50528534976752,
+        "allenai/olmOCR-2-7B-1025-FP8": -25.157287366832406,
+        "baidu/Qianfan-OCR": -8.78697681215067,
+        "baidu/Unlimited-OCR": 2.670119048757442,
+        "deepseek-ai/DeepSeek-OCR": 6.547806476575943,
+        "deepseek-ai/DeepSeek-OCR-2": 1.9016952522315478,
+        "lightonai/LightOnOCR-2-1B": 25.35087595981713,
+        "numind/NuExtract3": -21.18494793344712,
+        "rednote-hilab/dots.mocr": 18.469541292733084,
+        "tesseract-5": 16.617420709879752,
+        "zai-org/GLM-OCR": -2.2183744309929807
+      },
+      "final_rank_order": [
+        "lightonai/LightOnOCR-2-1B",
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "FireRedTeam/FireRed-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 9,
+        "median_direct_comparisons": 9.0,
+        "min_direct_comparisons": 8,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9230769230769229,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta": 47.685793665675874,
+      "max_absolute_elo_delta_model": "FireRedTeam/FireRed-OCR",
+      "median_absolute_elo_delta": 16.617420709879752,
+      "name": "pair-balanced_700_seed_45",
+      "percentage_saved": 80.90040927694406,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9835164835164836,
+      "static_budget": 700,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "lightonai/LightOnOCR-2-1B",
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 46,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 700,
+      "comparisons_saved": 2965,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1448.9443247812612,
+        "PaddlePaddle/PP-OCRv6_medium": 1340.0792124885024,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1413.5984847161192,
+        "allenai/olmOCR-2-7B-1025-FP8": 1746.1766969124126,
+        "baidu/Qianfan-OCR": 1552.296404700822,
+        "baidu/Unlimited-OCR": 1437.2572110941214,
+        "deepseek-ai/DeepSeek-OCR": 1376.0664061117,
+        "deepseek-ai/DeepSeek-OCR-2": 1325.8981760418128,
+        "lightonai/LightOnOCR-2-1B": 1696.6063227541244,
+        "numind/NuExtract3": 1679.4964304623486,
+        "rednote-hilab/dots.mocr": 1691.2848643406123,
+        "tesseract-5": 1046.1187686837504,
+        "zai-org/GLM-OCR": 1746.1766969124126
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1368.6765419961835,
+          1524.4039398624093
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1248.2778249749335,
+          1414.3599327104557
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1338.6343967799205,
+          1486.058993188094
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1672.3956866439821,
+          1851.4431166178958
+        ],
+        "baidu/Qianfan-OCR": [
+          1484.7265386817367,
+          1617.9877061285774
+        ],
+        "baidu/Unlimited-OCR": [
+          1369.0518234214767,
+          1502.3171510449208
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1296.8844782456201,
+          1442.3235625751624
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1233.8398109886257,
+          1404.408385077436
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1631.2314308345467,
+          1784.622190982807
+        ],
+        "numind/NuExtract3": [
+          1600.8820055477165,
+          1769.6098646328123
+        ],
+        "rednote-hilab/dots.mocr": [
+          1622.3816843967938,
+          1772.317500987505
+        ],
+        "tesseract-5": [
+          880.1074907624222,
+          1148.3780857067377
+        ],
+        "zai-org/GLM-OCR": [
+          1673.9621222535159,
+          1833.5349645593951
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": -62.91042623043472,
+        "PaddlePaddle/PP-OCRv6_medium": -6.2781525607838375,
+        "PaddlePaddle/PaddleOCR-VL-1.6": -0.6770959447765108,
+        "allenai/olmOCR-2-7B-1025-FP8": 72.42371763917004,
+        "baidu/Qianfan-OCR": 28.290355522668506,
+        "baidu/Unlimited-OCR": -60.7862323970287,
+        "deepseek-ai/DeepSeek-OCR": -32.762838996239225,
+        "deepseek-ai/DeepSeek-OCR-2": -10.967220634784098,
+        "lightonai/LightOnOCR-2-1B": -0.9969349293971845,
+        "numind/NuExtract3": 29.7427890336362,
+        "rednote-hilab/dots.mocr": -8.806435960374529,
+        "tesseract-5": 3.485457557982727,
+        "zai-org/GLM-OCR": 50.243017900361565
+      },
+      "final_rank_order": [
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B",
+        "rednote-hilab/dots.mocr",
+        "numind/NuExtract3",
+        "baidu/Qianfan-OCR",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 9,
+        "median_direct_comparisons": 9.0,
+        "min_direct_comparisons": 8,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.846153846153846,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta": 72.42371763917004,
+      "max_absolute_elo_delta_model": "allenai/olmOCR-2-7B-1025-FP8",
+      "median_absolute_elo_delta": 28.290355522668506,
+      "name": "pair-balanced_700_seed_46",
+      "percentage_saved": 80.90040927694406,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.945054945054945,
+      "static_budget": 700,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B"
+      ],
+      "top3_membership_matches": false,
+      "top3_membership_overlap": 2,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "allocation_seed": 42,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 1200,
+      "comparisons_saved": 2465,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1547.3228097547958,
+        "PaddlePaddle/PP-OCRv6_medium": 1367.614025640857,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1399.473651845994,
+        "allenai/olmOCR-2-7B-1025-FP8": 1662.4845389730026,
+        "baidu/Qianfan-OCR": 1522.1895051795816,
+        "baidu/Unlimited-OCR": 1483.4461099341195,
+        "deepseek-ai/DeepSeek-OCR": 1373.0737034403448,
+        "deepseek-ai/DeepSeek-OCR-2": 1312.4397570411727,
+        "lightonai/LightOnOCR-2-1B": 1741.63011614823,
+        "numind/NuExtract3": 1663.6672299682727,
+        "rednote-hilab/dots.mocr": 1713.7010315528473,
+        "tesseract-5": 993.6650874385243,
+        "zai-org/GLM-OCR": 1719.292433082258
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1489.0890536988481,
+          1601.7546487385234
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1299.2871685714892,
+          1425.3115639702698
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1340.8980672996072,
+          1454.8969231659053
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1612.9858584985582,
+          1719.3818791458064
+        ],
+        "baidu/Qianfan-OCR": [
+          1475.6859765051402,
+          1570.005098511732
+        ],
+        "baidu/Unlimited-OCR": [
+          1428.9520326188335,
+          1534.3809474722475
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1313.0743576665368,
+          1429.308629519766
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1248.5348082030284,
+          1370.2436024936842
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1684.1291985190585,
+          1803.5016518745329
+        ],
+        "numind/NuExtract3": [
+          1609.3065535349651,
+          1729.1641823155987
+        ],
+        "rednote-hilab/dots.mocr": [
+          1664.280790014529,
+          1769.7536852679652
+        ],
+        "tesseract-5": [
+          855.3476737109352,
+          1085.9462518426121
+        ],
+        "zai-org/GLM-OCR": [
+          1664.5086859824953,
+          1787.6494532885354
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 35.468058743099846,
+        "PaddlePaddle/PP-OCRv6_medium": 21.256660591570835,
+        "PaddlePaddle/PaddleOCR-VL-1.6": -14.801928814901657,
+        "allenai/olmOCR-2-7B-1025-FP8": -11.268440300239945,
+        "baidu/Qianfan-OCR": -1.8165439985718876,
+        "baidu/Unlimited-OCR": -14.597333557030652,
+        "deepseek-ai/DeepSeek-OCR": -35.75554166759434,
+        "deepseek-ai/DeepSeek-OCR-2": -24.425639635424204,
+        "lightonai/LightOnOCR-2-1B": 44.02685846470831,
+        "numind/NuExtract3": 13.913588539560351,
+        "rednote-hilab/dots.mocr": 13.609731251860467,
+        "tesseract-5": -48.96822368724338,
+        "zai-org/GLM-OCR": 23.358754070206942
+      },
+      "final_rank_order": [
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr",
+        "numind/NuExtract3",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 16,
+        "median_direct_comparisons": 15.0,
+        "min_direct_comparisons": 15,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.8974358974358972,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta": 48.96822368724338,
+      "max_absolute_elo_delta_model": "tesseract-5",
+      "median_absolute_elo_delta": 21.256660591570835,
+      "name": "pair-balanced_1200_seed_42",
+      "percentage_saved": 67.25784447476126,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9725274725274725,
+      "static_budget": 1200,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 43,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 1200,
+      "comparisons_saved": 2465,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1551.7349136238274,
+        "PaddlePaddle/PP-OCRv6_medium": 1339.0153766639796,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1399.1357609573547,
+        "allenai/olmOCR-2-7B-1025-FP8": 1692.0462580233188,
+        "baidu/Qianfan-OCR": 1471.5952773223537,
+        "baidu/Unlimited-OCR": 1486.4535648600647,
+        "deepseek-ai/DeepSeek-OCR": 1390.6583979431405,
+        "deepseek-ai/DeepSeek-OCR-2": 1325.3796256029702,
+        "lightonai/LightOnOCR-2-1B": 1682.0025336876813,
+        "numind/NuExtract3": 1651.6801391725207,
+        "rednote-hilab/dots.mocr": 1720.4714958091326,
+        "tesseract-5": 1052.8107786651858,
+        "zai-org/GLM-OCR": 1737.01587766847
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1497.1005016764639,
+          1612.5125797204664
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1279.2319835319195,
+          1396.6316589301775
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1343.923605406217,
+          1450.1854194128719
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1639.1698021602708,
+          1755.679983190647
+        ],
+        "baidu/Qianfan-OCR": [
+          1420.3619583617697,
+          1524.9171322982404
+        ],
+        "baidu/Unlimited-OCR": [
+          1434.6409185566858,
+          1539.130680079567
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1337.618076104956,
+          1440.4919694685407
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1257.7399524184427,
+          1384.843617809355
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1629.7405793001967,
+          1742.524500814699
+        ],
+        "numind/NuExtract3": [
+          1595.7163062038476,
+          1720.3218785829445
+        ],
+        "rednote-hilab/dots.mocr": [
+          1665.0771367783823,
+          1785.267289341399
+        ],
+        "tesseract-5": [
+          935.6234734821086,
+          1134.3936426564674
+        ],
+        "zai-org/GLM-OCR": [
+          1685.062517761773,
+          1800.624770374371
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 39.88016261213147,
+        "PaddlePaddle/PP-OCRv6_medium": -7.341988385306649,
+        "PaddlePaddle/PaddleOCR-VL-1.6": -15.13981970354098,
+        "allenai/olmOCR-2-7B-1025-FP8": 18.293278750076297,
+        "baidu/Qianfan-OCR": -52.410771855799794,
+        "baidu/Unlimited-OCR": -11.589878631085412,
+        "deepseek-ai/DeepSeek-OCR": -18.170847164798715,
+        "deepseek-ai/DeepSeek-OCR-2": -11.485771073626665,
+        "lightonai/LightOnOCR-2-1B": -15.600723995840326,
+        "numind/NuExtract3": 1.9264977438083406,
+        "rednote-hilab/dots.mocr": 20.38019550814579,
+        "tesseract-5": 10.177467539418103,
+        "zai-org/GLM-OCR": 41.082198656418996
+      },
+      "final_rank_order": [
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "lightonai/LightOnOCR-2-1B",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Unlimited-OCR",
+        "baidu/Qianfan-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 16,
+        "median_direct_comparisons": 15.0,
+        "min_direct_comparisons": 15,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.8717948717948716,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta": 52.410771855799794,
+      "max_absolute_elo_delta_model": "baidu/Qianfan-OCR",
+      "median_absolute_elo_delta": 15.600723995840326,
+      "name": "pair-balanced_1200_seed_43",
+      "percentage_saved": 67.25784447476126,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9560439560439561,
+      "static_budget": 1200,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr",
+        "allenai/olmOCR-2-7B-1025-FP8"
+      ],
+      "top3_membership_matches": false,
+      "top3_membership_overlap": 2,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "allocation_seed": 44,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 1200,
+      "comparisons_saved": 2465,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1527.7167110632138,
+        "PaddlePaddle/PP-OCRv6_medium": 1337.1781342276731,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1453.4783830936715,
+        "allenai/olmOCR-2-7B-1025-FP8": 1641.6110671619392,
+        "baidu/Qianfan-OCR": 1508.424857301885,
+        "baidu/Unlimited-OCR": 1496.0549358764658,
+        "deepseek-ai/DeepSeek-OCR": 1379.14059902558,
+        "deepseek-ai/DeepSeek-OCR-2": 1318.3661810110073,
+        "lightonai/LightOnOCR-2-1B": 1709.5907081811063,
+        "numind/NuExtract3": 1649.4373293405176,
+        "rednote-hilab/dots.mocr": 1687.7108101624913,
+        "tesseract-5": 1100.7348520040146,
+        "zai-org/GLM-OCR": 1690.5554315504344
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1472.1512315733326,
+          1583.3507273768362
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1274.7273836144732,
+          1388.1753438657247
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1399.2842969190287,
+          1507.7959019201237
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1587.973049479066,
+          1702.7638325835626
+        ],
+        "baidu/Qianfan-OCR": [
+          1456.420346162897,
+          1561.5128184598805
+        ],
+        "baidu/Unlimited-OCR": [
+          1440.0829543918019,
+          1548.827840491773
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1325.6492124159627,
+          1426.7510102013691
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1253.8526197658773,
+          1377.5543568506664
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1656.4579383807568,
+          1776.9567300692459
+        ],
+        "numind/NuExtract3": [
+          1594.5421584035598,
+          1714.7558674664144
+        ],
+        "rednote-hilab/dots.mocr": [
+          1637.9815371183342,
+          1741.0134174540603
+        ],
+        "tesseract-5": [
+          996.3041024231352,
+          1170.699141004421
+        ],
+        "zai-org/GLM-OCR": [
+          1638.0680451740366,
+          1752.080307125966
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 15.861960051517826,
+        "PaddlePaddle/PP-OCRv6_medium": -9.179230821613146,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 39.2028024327758,
+        "allenai/olmOCR-2-7B-1025-FP8": -32.14191211130333,
+        "baidu/Qianfan-OCR": -15.581191876268576,
+        "baidu/Unlimited-OCR": -1.9885076146842948,
+        "deepseek-ai/DeepSeek-OCR": -29.688646082359128,
+        "deepseek-ai/DeepSeek-OCR-2": -18.499215665589645,
+        "lightonai/LightOnOCR-2-1B": 11.987450497584632,
+        "numind/NuExtract3": -0.3163120881947634,
+        "rednote-hilab/dots.mocr": -12.380490138495588,
+        "tesseract-5": 58.10154087824685,
+        "zai-org/GLM-OCR": -5.378247461616638
+      },
+      "final_rank_order": [
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr",
+        "numind/NuExtract3",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 16,
+        "median_direct_comparisons": 15.0,
+        "min_direct_comparisons": 15,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.8974358974358972,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta": 58.10154087824685,
+      "max_absolute_elo_delta_model": "tesseract-5",
+      "median_absolute_elo_delta": 15.581191876268576,
+      "name": "pair-balanced_1200_seed_44",
+      "percentage_saved": 67.25784447476126,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9725274725274725,
+      "static_budget": 1200,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "allocation_seed": 45,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 1200,
+      "comparisons_saved": 2465,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1507.0882022800595,
+        "PaddlePaddle/PP-OCRv6_medium": 1307.4299549870389,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1451.2613235479266,
+        "allenai/olmOCR-2-7B-1025-FP8": 1685.3874723343267,
+        "baidu/Qianfan-OCR": 1525.656715249995,
+        "baidu/Unlimited-OCR": 1474.8591947916398,
+        "deepseek-ai/DeepSeek-OCR": 1392.3500770469625,
+        "deepseek-ai/DeepSeek-OCR-2": 1359.9235404178542,
+        "lightonai/LightOnOCR-2-1B": 1704.6925445570932,
+        "numind/NuExtract3": 1659.174710936634,
+        "rednote-hilab/dots.mocr": 1720.121826265433,
+        "tesseract-5": 1010.3644839503829,
+        "zai-org/GLM-OCR": 1701.6899536346539
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1450.5488522646758,
+          1564.5215828455684
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1244.2761291331637,
+          1359.6865799227073
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1396.3207880458588,
+          1504.0320926978943
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1632.82254173296,
+          1746.6560100273991
+        ],
+        "baidu/Qianfan-OCR": [
+          1475.5147973746277,
+          1582.035200435875
+        ],
+        "baidu/Unlimited-OCR": [
+          1426.9288805623446,
+          1523.9541535388898
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1335.0102156259356,
+          1445.663334472061
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1299.2758265730465,
+          1417.2257932098732
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1648.1983753968666,
+          1775.7609608705627
+        ],
+        "numind/NuExtract3": [
+          1608.233445224852,
+          1722.1646657017905
+        ],
+        "rednote-hilab/dots.mocr": [
+          1669.0685650761827,
+          1786.6624210531377
+        ],
+        "tesseract-5": [
+          874.8443084918018,
+          1095.6765831944635
+        ],
+        "zai-org/GLM-OCR": [
+          1654.198116776979,
+          1763.4195060266547
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": -4.766548731636476,
+        "PaddlePaddle/PP-OCRv6_medium": -38.92741006224742,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 36.98574288703094,
+        "allenai/olmOCR-2-7B-1025-FP8": 11.634493061084186,
+        "baidu/Qianfan-OCR": 1.6506660718414423,
+        "baidu/Unlimited-OCR": -23.184248699510363,
+        "deepseek-ai/DeepSeek-OCR": -16.47916806097669,
+        "deepseek-ai/DeepSeek-OCR-2": 23.058143741257254,
+        "lightonai/LightOnOCR-2-1B": 7.089286873571609,
+        "numind/NuExtract3": 9.42106950792163,
+        "rednote-hilab/dots.mocr": 20.030525964446042,
+        "tesseract-5": -32.268827175384786,
+        "zai-org/GLM-OCR": 5.756274622602859
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "baidu/Qianfan-OCR",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": true,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": true,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": true
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 16,
+        "median_direct_comparisons": 15.0,
+        "min_direct_comparisons": 15,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9743589743589742,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta": 38.92741006224742,
+      "max_absolute_elo_delta_model": "PaddlePaddle/PP-OCRv6_medium",
+      "median_absolute_elo_delta": 16.47916806097669,
+      "name": "pair-balanced_1200_seed_45",
+      "percentage_saved": 67.25784447476126,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9945054945054945,
+      "static_budget": 1200,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": true,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "allocation_seed": 46,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 1200,
+      "comparisons_saved": 2465,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1473.9975452834951,
+        "PaddlePaddle/PP-OCRv6_medium": 1349.1478341210855,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1404.9969901112029,
+        "allenai/olmOCR-2-7B-1025-FP8": 1688.3086825002492,
+        "baidu/Qianfan-OCR": 1522.708140669344,
+        "baidu/Unlimited-OCR": 1475.8005702021514,
+        "deepseek-ai/DeepSeek-OCR": 1347.8108880183515,
+        "deepseek-ai/DeepSeek-OCR-2": 1304.6092072192018,
+        "lightonai/LightOnOCR-2-1B": 1689.4922760955706,
+        "numind/NuExtract3": 1685.8775892812982,
+        "rednote-hilab/dots.mocr": 1711.5585295555043,
+        "tesseract-5": 1074.7963862311672,
+        "zai-org/GLM-OCR": 1770.895360711378
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1415.2364291739018,
+          1531.187683394298
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1290.75351074685,
+          1404.1376214836387
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1347.9654963094656,
+          1459.6765903489345
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1636.5150172825583,
+          1749.5506251030138
+        ],
+        "baidu/Qianfan-OCR": [
+          1470.906754489091,
+          1575.0617775633414
+        ],
+        "baidu/Unlimited-OCR": [
+          1427.6232617631929,
+          1526.9448537816827
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1290.5818512265516,
+          1398.6836911655355
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1236.9960731438723,
+          1359.896618964595
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1634.5585552465113,
+          1752.3715467809893
+        ],
+        "numind/NuExtract3": [
+          1629.3000514758191,
+          1751.7825227349028
+        ],
+        "rednote-hilab/dots.mocr": [
+          1667.3089520826893,
+          1769.7785250046854
+        ],
+        "tesseract-5": [
+          974.6551553662375,
+          1149.8932838512928
+        ],
+        "zai-org/GLM-OCR": [
+          1716.640298376799,
+          1837.4414612207738
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": -37.857205728200825,
+        "PaddlePaddle/PP-OCRv6_medium": 2.79046907179918,
+        "PaddlePaddle/PaddleOCR-VL-1.6": -9.278590549692808,
+        "allenai/olmOCR-2-7B-1025-FP8": 14.555703227006688,
+        "baidu/Qianfan-OCR": -1.2979085088095417,
+        "baidu/Unlimited-OCR": -22.24287328899868,
+        "deepseek-ai/DeepSeek-OCR": -61.01835708958765,
+        "deepseek-ai/DeepSeek-OCR-2": -32.25618945739507,
+        "lightonai/LightOnOCR-2-1B": -8.110981587951073,
+        "numind/NuExtract3": 36.12394785258584,
+        "rednote-hilab/dots.mocr": 11.467229254517406,
+        "tesseract-5": 32.16307510539946,
+        "zai-org/GLM-OCR": 74.96168169932707
+      },
+      "final_rank_order": [
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "FireRedTeam/FireRed-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 16,
+        "median_direct_comparisons": 15.0,
+        "min_direct_comparisons": 15,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.8974358974358972,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta": 74.96168169932707,
+      "max_absolute_elo_delta_model": "zai-org/GLM-OCR",
+      "median_absolute_elo_delta": 22.24287328899868,
+      "name": "pair-balanced_1200_seed_46",
+      "percentage_saved": 67.25784447476126,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9725274725274725,
+      "static_budget": 1200,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 3,
+        "unresolved": 9
+      },
+      "allocation_seed": 42,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 2000,
+      "comparisons_saved": 1665,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 3,
+        "unresolved": 9
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1538.857583317062,
+        "PaddlePaddle/PP-OCRv6_medium": 1353.4379218563915,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1392.623887199742,
+        "allenai/olmOCR-2-7B-1025-FP8": 1682.72120876899,
+        "baidu/Qianfan-OCR": 1529.3704679298387,
+        "baidu/Unlimited-OCR": 1491.5465685365257,
+        "deepseek-ai/DeepSeek-OCR": 1408.4806373466429,
+        "deepseek-ai/DeepSeek-OCR-2": 1326.473045104206,
+        "lightonai/LightOnOCR-2-1B": 1697.9898265432876,
+        "numind/NuExtract3": 1634.967697705266,
+        "rednote-hilab/dots.mocr": 1693.8404494575589,
+        "tesseract-5": 1031.3931966696923,
+        "zai-org/GLM-OCR": 1718.2975095647969
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1494.7505478839082,
+          1580.2323111328824
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1307.698772420618,
+          1396.5846887670746
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1350.957576893178,
+          1433.3788298069123
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1645.3677666094577,
+          1727.6091411285893
+        ],
+        "baidu/Qianfan-OCR": [
+          1492.3392738210323,
+          1566.9154810072905
+        ],
+        "baidu/Unlimited-OCR": [
+          1451.01039505498,
+          1528.298711480445
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1366.283363046864,
+          1449.139316391026
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1278.8383041230527,
+          1374.8428696028807
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1659.9653054567696,
+          1747.982911236205
+        ],
+        "numind/NuExtract3": [
+          1593.8905512418435,
+          1679.6400905461055
+        ],
+        "rednote-hilab/dots.mocr": [
+          1652.215744260047,
+          1738.1381950215948
+        ],
+        "tesseract-5": [
+          935.1959267150929,
+          1094.9443950951277
+        ],
+        "zai-org/GLM-OCR": [
+          1677.0667595607442,
+          1766.356899189886
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 27.002832305366155,
+        "PaddlePaddle/PP-OCRv6_medium": 7.080556807105268,
+        "PaddlePaddle/PaddleOCR-VL-1.6": -21.651693461153627,
+        "allenai/olmOCR-2-7B-1025-FP8": 8.968229495747437,
+        "baidu/Qianfan-OCR": 5.364418751685207,
+        "baidu/Unlimited-OCR": -6.496874954624445,
+        "deepseek-ai/DeepSeek-OCR": -0.3486077612963072,
+        "deepseek-ai/DeepSeek-OCR-2": -10.392351572390908,
+        "lightonai/LightOnOCR-2-1B": 0.38656885976593003,
+        "numind/NuExtract3": -14.785943723446508,
+        "rednote-hilab/dots.mocr": -6.2508508434279975,
+        "tesseract-5": -11.24011445607539,
+        "zai-org/GLM-OCR": 22.363830552745867
+      },
+      "final_rank_order": [
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B",
+        "rednote-hilab/dots.mocr",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 26,
+        "median_direct_comparisons": 26.0,
+        "min_direct_comparisons": 25,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.8717948717948716,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta": 27.002832305366155,
+      "max_absolute_elo_delta_model": "FireRedTeam/FireRed-OCR",
+      "median_absolute_elo_delta": 8.968229495747437,
+      "name": "pair-balanced_2000_seed_42",
+      "percentage_saved": 45.429740791268756,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.967032967032967,
+      "static_budget": 2000,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B",
+        "rednote-hilab/dots.mocr"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 3,
+        "unresolved": 9
+      },
+      "allocation_seed": 43,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 2000,
+      "comparisons_saved": 1665,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 3,
+        "unresolved": 9
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1521.7873516451434,
+        "PaddlePaddle/PP-OCRv6_medium": 1350.8776242485956,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1398.77607829941,
+        "allenai/olmOCR-2-7B-1025-FP8": 1703.1095757324176,
+        "baidu/Qianfan-OCR": 1500.1895890750861,
+        "baidu/Unlimited-OCR": 1490.7558125754242,
+        "deepseek-ai/DeepSeek-OCR": 1403.7816912782237,
+        "deepseek-ai/DeepSeek-OCR-2": 1325.5231978332424,
+        "lightonai/LightOnOCR-2-1B": 1679.4657777930283,
+        "numind/NuExtract3": 1664.1522085782112,
+        "rednote-hilab/dots.mocr": 1697.3664968587675,
+        "tesseract-5": 1038.9617923935948,
+        "zai-org/GLM-OCR": 1725.2528036888555
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1477.9220882255418,
+          1560.9077964158332
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1305.9225874128538,
+          1395.0462423031468
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1357.8919707213138,
+          1439.2924601151954
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1660.7810254033582,
+          1750.9697397243494
+        ],
+        "baidu/Qianfan-OCR": [
+          1459.7885648263148,
+          1543.4408567150228
+        ],
+        "baidu/Unlimited-OCR": [
+          1455.8384453020121,
+          1529.2022222704777
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1362.3432654814562,
+          1439.8420144555942
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1279.4394297225429,
+          1372.9301209814896
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1638.2311729366154,
+          1724.1073848833275
+        ],
+        "numind/NuExtract3": [
+          1622.3309192623628,
+          1712.3684802355542
+        ],
+        "rednote-hilab/dots.mocr": [
+          1658.590883139834,
+          1744.4416236104396
+        ],
+        "tesseract-5": [
+          950.6969989591065,
+          1100.545596366913
+        ],
+        "zai-org/GLM-OCR": [
+          1685.242574653562,
+          1771.0715595807144
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 9.932600633447464,
+        "PaddlePaddle/PP-OCRv6_medium": 4.520259199309294,
+        "PaddlePaddle/PaddleOCR-VL-1.6": -15.499502361485611,
+        "allenai/olmOCR-2-7B-1025-FP8": 29.35659645917508,
+        "baidu/Qianfan-OCR": -23.816460103067357,
+        "baidu/Unlimited-OCR": -7.287630915725913,
+        "deepseek-ai/DeepSeek-OCR": -5.047553829715525,
+        "deepseek-ai/DeepSeek-OCR-2": -11.342198843354481,
+        "lightonai/LightOnOCR-2-1B": -18.137479890493296,
+        "numind/NuExtract3": 14.398567149498831,
+        "rednote-hilab/dots.mocr": -2.724803442219354,
+        "tesseract-5": -3.671518732172899,
+        "zai-org/GLM-OCR": 29.31912467680445
+      },
+      "final_rank_order": [
+        "zai-org/GLM-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 26,
+        "median_direct_comparisons": 26.0,
+        "min_direct_comparisons": 25,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.846153846153846,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta": 29.35659645917508,
+      "max_absolute_elo_delta_model": "allenai/olmOCR-2-7B-1025-FP8",
+      "median_absolute_elo_delta": 11.342198843354481,
+      "name": "pair-balanced_2000_seed_43",
+      "percentage_saved": 45.429740791268756,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.945054945054945,
+      "static_budget": 2000,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "zai-org/GLM-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "rednote-hilab/dots.mocr"
+      ],
+      "top3_membership_matches": false,
+      "top3_membership_overlap": 2,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "allocation_seed": 44,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 2000,
+      "comparisons_saved": 1665,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1524.165845793165,
+        "PaddlePaddle/PP-OCRv6_medium": 1345.6834162636842,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1442.2993313650516,
+        "allenai/olmOCR-2-7B-1025-FP8": 1675.8186523501097,
+        "baidu/Qianfan-OCR": 1507.35207576401,
+        "baidu/Unlimited-OCR": 1486.9103797506498,
+        "deepseek-ai/DeepSeek-OCR": 1393.2232487410406,
+        "deepseek-ai/DeepSeek-OCR-2": 1326.8153235658697,
+        "lightonai/LightOnOCR-2-1B": 1701.7710686061757,
+        "numind/NuExtract3": 1670.254563988339,
+        "rednote-hilab/dots.mocr": 1693.8104922469818,
+        "tesseract-5": 1047.612459834112,
+        "zai-org/GLM-OCR": 1684.2831417308107
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1476.4702880353739,
+          1567.476873266488
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1300.9579615128414,
+          1388.0583319235175
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1399.9123229370134,
+          1481.1017778598155
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1629.2104178096715,
+          1726.1061424756986
+        ],
+        "baidu/Qianfan-OCR": [
+          1470.308005312484,
+          1549.2741895164052
+        ],
+        "baidu/Unlimited-OCR": [
+          1449.2449384997462,
+          1527.8067161728113
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1352.0160861710015,
+          1436.1618946539413
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1277.0644543867377,
+          1371.4502999507124
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1659.9331165791177,
+          1751.1231369297077
+        ],
+        "numind/NuExtract3": [
+          1628.1925437725486,
+          1714.320949784218
+        ],
+        "rednote-hilab/dots.mocr": [
+          1656.4547513411744,
+          1741.808965554938
+        ],
+        "tesseract-5": [
+          959.8792854436724,
+          1111.30325902957
+        ],
+        "zai-org/GLM-OCR": [
+          1642.1379043457646,
+          1727.126780488196
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 12.311094781469137,
+        "PaddlePaddle/PP-OCRv6_medium": -0.6739487856020787,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 28.023750704155873,
+        "allenai/olmOCR-2-7B-1025-FP8": 2.0656730768671423,
+        "baidu/Qianfan-OCR": -16.653973414143593,
+        "baidu/Unlimited-OCR": -11.133063740500347,
+        "deepseek-ai/DeepSeek-OCR": -15.60599636689858,
+        "deepseek-ai/DeepSeek-OCR-2": -10.050073110727226,
+        "lightonai/LightOnOCR-2-1B": 4.167810922654098,
+        "numind/NuExtract3": 20.500922559626588,
+        "rednote-hilab/dots.mocr": -6.280808054005092,
+        "tesseract-5": 4.979148708344383,
+        "zai-org/GLM-OCR": -11.650537281240304
+      },
+      "final_rank_order": [
+        "lightonai/LightOnOCR-2-1B",
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 26,
+        "median_direct_comparisons": 26.0,
+        "min_direct_comparisons": 25,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9487179487179485,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta": 28.023750704155873,
+      "max_absolute_elo_delta_model": "PaddlePaddle/PaddleOCR-VL-1.6",
+      "median_absolute_elo_delta": 11.133063740500347,
+      "name": "pair-balanced_2000_seed_44",
+      "percentage_saved": 45.429740791268756,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.989010989010989,
+      "static_budget": 2000,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "lightonai/LightOnOCR-2-1B",
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "allocation_seed": 45,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 2000,
+      "comparisons_saved": 1665,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1491.1997693554488,
+        "PaddlePaddle/PP-OCRv6_medium": 1348.769130022881,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1440.3745190642467,
+        "allenai/olmOCR-2-7B-1025-FP8": 1682.7527475192317,
+        "baidu/Qianfan-OCR": 1524.534186598011,
+        "baidu/Unlimited-OCR": 1498.2724714345277,
+        "deepseek-ai/DeepSeek-OCR": 1417.0689124545254,
+        "deepseek-ai/DeepSeek-OCR-2": 1352.424540828758,
+        "lightonai/LightOnOCR-2-1B": 1699.0811991844396,
+        "numind/NuExtract3": 1660.2056326921897,
+        "rednote-hilab/dots.mocr": 1686.7713698803502,
+        "tesseract-5": 1004.9394024867813,
+        "zai-org/GLM-OCR": 1693.6061184786092
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1443.346903290222,
+          1536.090790626268
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1300.1114295713753,
+          1391.3365295387339
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1399.8915293336129,
+          1482.3570260433362
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1643.6559749763096,
+          1730.7832919011566
+        ],
+        "baidu/Qianfan-OCR": [
+          1487.8025028995573,
+          1563.842539541392
+        ],
+        "baidu/Unlimited-OCR": [
+          1460.3537665395197,
+          1536.492111152623
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1375.785778578611,
+          1456.6425077749514
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1306.5248088169192,
+          1399.4023296829137
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1659.1023809375245,
+          1744.642808355164
+        ],
+        "numind/NuExtract3": [
+          1617.5624319845904,
+          1704.8442509695028
+        ],
+        "rednote-hilab/dots.mocr": [
+          1646.3208175119648,
+          1733.6457170317678
+        ],
+        "tesseract-5": [
+          906.3657464615923,
+          1075.0239955546404
+        ],
+        "zai-org/GLM-OCR": [
+          1654.7466074699862,
+          1737.5545056226724
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": -20.654981656247173,
+        "PaddlePaddle/PP-OCRv6_medium": 2.4117649735946998,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 26.098938403350985,
+        "allenai/olmOCR-2-7B-1025-FP8": 8.999768245989117,
+        "baidu/Qianfan-OCR": 0.5281374198575577,
+        "baidu/Unlimited-OCR": 0.2290279433775595,
+        "deepseek-ai/DeepSeek-OCR": 8.239667346586202,
+        "deepseek-ai/DeepSeek-OCR-2": 15.559144152161025,
+        "lightonai/LightOnOCR-2-1B": 1.4779415009179502,
+        "numind/NuExtract3": 10.451991263477339,
+        "rednote-hilab/dots.mocr": -13.319930420636638,
+        "tesseract-5": -37.693908638986386,
+        "zai-org/GLM-OCR": -2.3275605334417833
+      },
+      "final_rank_order": [
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "FireRedTeam/FireRed-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 26,
+        "median_direct_comparisons": 26.0,
+        "min_direct_comparisons": 25,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.8974358974358972,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta": 37.693908638986386,
+      "max_absolute_elo_delta_model": "tesseract-5",
+      "median_absolute_elo_delta": 8.999768245989117,
+      "name": "pair-balanced_2000_seed_45",
+      "percentage_saved": 45.429740791268756,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9725274725274725,
+      "static_budget": 2000,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 3,
+        "unresolved": 9
+      },
+      "allocation_seed": 46,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 2000,
+      "comparisons_saved": 1665,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 3,
+        "unresolved": 9
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1493.668874417381,
+        "PaddlePaddle/PP-OCRv6_medium": 1368.1079283592187,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1407.5377552284708,
+        "allenai/olmOCR-2-7B-1025-FP8": 1684.761324012015,
+        "baidu/Qianfan-OCR": 1530.9660740724503,
+        "baidu/Unlimited-OCR": 1494.063714500483,
+        "deepseek-ai/DeepSeek-OCR": 1373.9442532554858,
+        "deepseek-ai/DeepSeek-OCR-2": 1315.3094674528193,
+        "lightonai/LightOnOCR-2-1B": 1692.2421007900132,
+        "numind/NuExtract3": 1652.1510807850323,
+        "rednote-hilab/dots.mocr": 1709.5516078412325,
+        "tesseract-5": 1046.0163995282362,
+        "zai-org/GLM-OCR": 1731.679419757162
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1450.095961038773,
+          1538.017840426799
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1321.4293648214912,
+          1409.244570108095
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1366.9658134273302,
+          1449.9893067725357
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1644.5060493856463,
+          1730.458251379344
+        ],
+        "baidu/Qianfan-OCR": [
+          1494.1141577328522,
+          1568.4325567872977
+        ],
+        "baidu/Unlimited-OCR": [
+          1452.0196886713504,
+          1531.857353234493
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1331.2558932693016,
+          1413.995622068187
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1266.8957274190134,
+          1364.6116497774183
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1651.799663309388,
+          1739.3541811968144
+        ],
+        "numind/NuExtract3": [
+          1608.2351652789444,
+          1700.5774477203788
+        ],
+        "rednote-hilab/dots.mocr": [
+          1671.5900196312284,
+          1755.6988874825554
+        ],
+        "tesseract-5": [
+          962.8870515783669,
+          1106.2276734802024
+        ],
+        "zai-org/GLM-OCR": [
+          1688.0122651847669,
+          1784.2963390107006
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": -18.185876594315005,
+        "PaddlePaddle/PP-OCRv6_medium": 21.75056330993243,
+        "PaddlePaddle/PaddleOCR-VL-1.6": -6.73782543242487,
+        "allenai/olmOCR-2-7B-1025-FP8": 11.008344738772394,
+        "baidu/Qianfan-OCR": 6.960024894296794,
+        "baidu/Unlimited-OCR": -3.9797289906671267,
+        "deepseek-ai/DeepSeek-OCR": -34.88499185245337,
+        "deepseek-ai/DeepSeek-OCR-2": -21.55592922377764,
+        "lightonai/LightOnOCR-2-1B": -5.361156893508451,
+        "numind/NuExtract3": 2.3974393563198646,
+        "rednote-hilab/dots.mocr": 9.460307540245594,
+        "tesseract-5": 3.383088402468502,
+        "zai-org/GLM-OCR": 35.74574074511088
+      },
+      "final_rank_order": [
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "FireRedTeam/FireRed-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 26,
+        "median_direct_comparisons": 26.0,
+        "min_direct_comparisons": 25,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9230769230769229,
+      "kind": "pair-balanced",
+      "max_absolute_elo_delta": 35.74574074511088,
+      "max_absolute_elo_delta_model": "zai-org/GLM-OCR",
+      "median_absolute_elo_delta": 9.460307540245594,
+      "name": "pair-balanced_2000_seed_46",
+      "percentage_saved": 45.429740791268756,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9780219780219779,
+      "static_budget": 2000,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 42,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 700,
+      "comparisons_saved": 2965,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1568.3757724381894,
+        "PaddlePaddle/PP-OCRv6_medium": 1372.6037660424795,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1457.4892102537674,
+        "allenai/olmOCR-2-7B-1025-FP8": 1614.3477910012941,
+        "baidu/Qianfan-OCR": 1541.0898563482947,
+        "baidu/Unlimited-OCR": 1515.822715600171,
+        "deepseek-ai/DeepSeek-OCR": 1362.2153634275935,
+        "deepseek-ai/DeepSeek-OCR-2": 1312.7402175488392,
+        "lightonai/LightOnOCR-2-1B": 1731.8007034875268,
+        "numind/NuExtract3": 1559.17907019407,
+        "rednote-hilab/dots.mocr": 1764.4251393752568,
+        "tesseract-5": 1055.33672269336,
+        "zai-org/GLM-OCR": 1644.5736715891576
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1496.3547402393422,
+          1648.8433022876313
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1290.7691539706468,
+          1447.7349290855161
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1392.1410811116982,
+          1521.088426838953
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1541.5939270938645,
+          1704.3921322017554
+        ],
+        "baidu/Qianfan-OCR": [
+          1478.661833340298,
+          1605.7169773607923
+        ],
+        "baidu/Unlimited-OCR": [
+          1449.9471703220042,
+          1586.3009912501102
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1287.5264137939591,
+          1423.899044589451
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1222.9357344317048,
+          1386.988613524616
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1664.1863142765455,
+          1819.7426928985083
+        ],
+        "numind/NuExtract3": [
+          1493.4043754771592,
+          1631.403840399588
+        ],
+        "rednote-hilab/dots.mocr": [
+          1699.212516081395,
+          1859.192926870087
+        ],
+        "tesseract-5": [
+          890.9562318279883,
+          1141.6790342969243
+        ],
+        "zai-org/GLM-OCR": [
+          1581.817951475659,
+          1725.9754546610106
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 56.52102142649346,
+        "PaddlePaddle/PP-OCRv6_medium": 26.24640099319322,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 43.21362959287171,
+        "allenai/olmOCR-2-7B-1025-FP8": -59.40518827194842,
+        "baidu/Qianfan-OCR": 17.0838071701412,
+        "baidu/Unlimited-OCR": 17.779272109020894,
+        "deepseek-ai/DeepSeek-OCR": -46.613881680345685,
+        "deepseek-ai/DeepSeek-OCR-2": -24.125179127757747,
+        "lightonai/LightOnOCR-2-1B": 34.197445804005156,
+        "numind/NuExtract3": -90.57457123464246,
+        "rednote-hilab/dots.mocr": 64.33383907426992,
+        "tesseract-5": 12.703411567592184,
+        "zai-org/GLM-OCR": -51.36000742289343
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "FireRedTeam/FireRed-OCR",
+        "numind/NuExtract3",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": true
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 9,
+        "median_direct_comparisons": 9.0,
+        "min_direct_comparisons": 8,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9230769230769229,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta": 90.57457123464246,
+      "max_absolute_elo_delta_model": "numind/NuExtract3",
+      "median_absolute_elo_delta": 43.21362959287171,
+      "name": "mixed-random_700_seed_42",
+      "percentage_saved": 80.90040927694406,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9780219780219779,
+      "static_budget": 700,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": true,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 43,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 700,
+      "comparisons_saved": 2965,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1622.3639582308392,
+        "PaddlePaddle/PP-OCRv6_medium": 1363.2004436785749,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1482.9399814877208,
+        "allenai/olmOCR-2-7B-1025-FP8": 1591.7638685849531,
+        "baidu/Qianfan-OCR": 1521.3465930257587,
+        "baidu/Unlimited-OCR": 1450.5643292612099,
+        "deepseek-ai/DeepSeek-OCR": 1338.8554476431773,
+        "deepseek-ai/DeepSeek-OCR-2": 1358.9796608417946,
+        "lightonai/LightOnOCR-2-1B": 1715.8441711987007,
+        "numind/NuExtract3": 1554.536382443841,
+        "rednote-hilab/dots.mocr": 1791.688717805248,
+        "tesseract-5": 1000.7676763323984,
+        "zai-org/GLM-OCR": 1707.1487694657835
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1554.7083559567911,
+          1703.2632627067576
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1282.5604799914254,
+          1434.6533122401245
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1412.8485727053098,
+          1549.8415170872393
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1520.6335928841825,
+          1673.292178649122
+        ],
+        "baidu/Qianfan-OCR": [
+          1453.8121283475193,
+          1590.681990026472
+        ],
+        "baidu/Unlimited-OCR": [
+          1382.291385526643,
+          1519.4771589362122
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1249.3922243826955,
+          1411.0767386536086
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1267.531994853869,
+          1443.7263508759709
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1650.343256648463,
+          1801.1043049885423
+        ],
+        "numind/NuExtract3": [
+          1487.040500977108,
+          1637.3314655027746
+        ],
+        "rednote-hilab/dots.mocr": [
+          1715.8501937005003,
+          1904.290313752627
+        ],
+        "tesseract-5": [
+          810.6160457503508,
+          1101.6364742807891
+        ],
+        "zai-org/GLM-OCR": [
+          1643.1404499762884,
+          1794.973657541364
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 110.50920721914326,
+        "PaddlePaddle/PP-OCRv6_medium": 16.843078629288584,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 68.66440082682516,
+        "allenai/olmOCR-2-7B-1025-FP8": -81.98911068828943,
+        "baidu/Qianfan-OCR": -2.659456152394796,
+        "baidu/Unlimited-OCR": -47.47911422994025,
+        "deepseek-ai/DeepSeek-OCR": -69.9737974647619,
+        "deepseek-ai/DeepSeek-OCR-2": 22.11426416519771,
+        "lightonai/LightOnOCR-2-1B": 18.240913515179045,
+        "numind/NuExtract3": -95.21725898487148,
+        "rednote-hilab/dots.mocr": 91.5974175042611,
+        "tesseract-5": -41.86563479336928,
+        "zai-org/GLM-OCR": 11.2150904537325
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "FireRedTeam/FireRed-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "baidu/Qianfan-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "deepseek-ai/DeepSeek-OCR",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": true
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 9,
+        "median_direct_comparisons": 9.0,
+        "min_direct_comparisons": 8,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.846153846153846,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta": 110.50920721914326,
+      "max_absolute_elo_delta_model": "FireRedTeam/FireRed-OCR",
+      "median_absolute_elo_delta": 47.47911422994025,
+      "name": "mixed-random_700_seed_43",
+      "percentage_saved": 80.90040927694406,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.945054945054945,
+      "static_budget": 700,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": true,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 44,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 700,
+      "comparisons_saved": 2965,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1552.3361144375635,
+        "PaddlePaddle/PP-OCRv6_medium": 1380.2230399407642,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1462.7814852704466,
+        "allenai/olmOCR-2-7B-1025-FP8": 1584.907048969294,
+        "baidu/Qianfan-OCR": 1523.718989319802,
+        "baidu/Unlimited-OCR": 1455.5179210293159,
+        "deepseek-ai/DeepSeek-OCR": 1347.9936569341887,
+        "deepseek-ai/DeepSeek-OCR-2": 1377.3423583284175,
+        "lightonai/LightOnOCR-2-1B": 1700.7532963850583,
+        "numind/NuExtract3": 1570.3597410322045,
+        "rednote-hilab/dots.mocr": 1770.5600655637809,
+        "tesseract-5": 1080.2462803212627,
+        "zai-org/GLM-OCR": 1693.260002467901
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1483.588142810978,
+          1628.5705711364437
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1302.7633478116786,
+          1444.1531551495086
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1391.2948902277958,
+          1535.84929115151
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1517.8955227007111,
+          1663.8159006800574
+        ],
+        "baidu/Qianfan-OCR": [
+          1456.8459416146193,
+          1588.7477701372572
+        ],
+        "baidu/Unlimited-OCR": [
+          1397.6989591220072,
+          1525.8979424580248
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1266.712431435876,
+          1417.6698925876744
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1291.8094864965956,
+          1455.3981883431748
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1629.659895499414,
+          1792.682426618349
+        ],
+        "numind/NuExtract3": [
+          1504.4589733738942,
+          1650.969867809129
+        ],
+        "rednote-hilab/dots.mocr": [
+          1701.6443649403611,
+          1864.8212967833938
+        ],
+        "tesseract-5": [
+          929.9924444271518,
+          1173.315710826951
+        ],
+        "zai-org/GLM-OCR": [
+          1626.6888432782316,
+          1775.1024622052391
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 40.481363425867585,
+        "PaddlePaddle/PP-OCRv6_medium": 33.865674891477966,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 48.50590460955095,
+        "allenai/olmOCR-2-7B-1025-FP8": -88.84593030394853,
+        "baidu/Qianfan-OCR": -0.28705985835154024,
+        "baidu/Unlimited-OCR": -42.52552246183427,
+        "deepseek-ai/DeepSeek-OCR": -60.835588173750466,
+        "deepseek-ai/DeepSeek-OCR-2": 40.4769616518206,
+        "lightonai/LightOnOCR-2-1B": 3.150038701536687,
+        "numind/NuExtract3": -79.39390039650789,
+        "rednote-hilab/dots.mocr": 70.46876526279402,
+        "tesseract-5": 37.612969195495,
+        "zai-org/GLM-OCR": -2.673676544150112
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "deepseek-ai/DeepSeek-OCR",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": true
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 9,
+        "median_direct_comparisons": 9.0,
+        "min_direct_comparisons": 8,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.8974358974358972,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta": 88.84593030394853,
+      "max_absolute_elo_delta_model": "allenai/olmOCR-2-7B-1025-FP8",
+      "median_absolute_elo_delta": 40.481363425867585,
+      "name": "mixed-random_700_seed_44",
+      "percentage_saved": 80.90040927694406,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9725274725274725,
+      "static_budget": 700,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": true,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 45,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 700,
+      "comparisons_saved": 2965,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1574.1980891844792,
+        "PaddlePaddle/PP-OCRv6_medium": 1428.5449755534469,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1476.803446811303,
+        "allenai/olmOCR-2-7B-1025-FP8": 1622.052253698868,
+        "baidu/Qianfan-OCR": 1556.130413953367,
+        "baidu/Unlimited-OCR": 1473.151527471005,
+        "deepseek-ai/DeepSeek-OCR": 1357.189073847404,
+        "deepseek-ai/DeepSeek-OCR-2": 1283.755241089148,
+        "lightonai/LightOnOCR-2-1B": 1690.1423556478014,
+        "numind/NuExtract3": 1540.2789890621548,
+        "rednote-hilab/dots.mocr": 1754.013304240449,
+        "tesseract-5": 1059.356874479118,
+        "zai-org/GLM-OCR": 1684.3834549614555
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1505.1686136521687,
+          1650.907826550792
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1357.9027353482095,
+          1494.044443203509
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1409.165574412068,
+          1546.6476567043285
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1549.3350001507965,
+          1707.1113334445222
+        ],
+        "baidu/Qianfan-OCR": [
+          1491.145698781296,
+          1625.499055122809
+        ],
+        "baidu/Unlimited-OCR": [
+          1401.6094005954362,
+          1540.8218023676934
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1278.6855592036768,
+          1427.707792872336
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1188.0816228220724,
+          1361.5512135537163
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1625.0891046943523,
+          1771.8953768983483
+        ],
+        "numind/NuExtract3": [
+          1465.8094639878063,
+          1614.8377510328721
+        ],
+        "rednote-hilab/dots.mocr": [
+          1688.983705247469,
+          1843.7598706405752
+        ],
+        "tesseract-5": [
+          910.3883946026476,
+          1145.19588667258
+        ],
+        "zai-org/GLM-OCR": [
+          1616.7957600226764,
+          1766.1502938665328
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 62.343338172783206,
+        "PaddlePaddle/PP-OCRv6_medium": 82.1876105041606,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 62.52786615040736,
+        "allenai/olmOCR-2-7B-1025-FP8": -51.700725574374474,
+        "baidu/Qianfan-OCR": 32.12436477521351,
+        "baidu/Unlimited-OCR": -24.891916020145118,
+        "deepseek-ai/DeepSeek-OCR": -51.640171260535226,
+        "deepseek-ai/DeepSeek-OCR-2": -53.110155587448844,
+        "lightonai/LightOnOCR-2-1B": -7.46090203572021,
+        "numind/NuExtract3": -109.47465236655762,
+        "rednote-hilab/dots.mocr": 53.92200393946223,
+        "tesseract-5": 16.7235633533503,
+        "zai-org/GLM-OCR": -11.550224050595489
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "numind/NuExtract3",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": true
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 9,
+        "median_direct_comparisons": 9.0,
+        "min_direct_comparisons": 8,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.8717948717948716,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta": 109.47465236655762,
+      "max_absolute_elo_delta_model": "numind/NuExtract3",
+      "median_absolute_elo_delta": 51.700725574374474,
+      "name": "mixed-random_700_seed_45",
+      "percentage_saved": 80.90040927694406,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.967032967032967,
+      "static_budget": 700,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": true,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 46,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 700,
+      "comparisons_saved": 2965,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1581.724770859182,
+        "PaddlePaddle/PP-OCRv6_medium": 1373.4795593190702,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1473.319483064947,
+        "allenai/olmOCR-2-7B-1025-FP8": 1618.9957597180755,
+        "baidu/Qianfan-OCR": 1520.5568869193578,
+        "baidu/Unlimited-OCR": 1465.9593975757891,
+        "deepseek-ai/DeepSeek-OCR": 1381.5926058078226,
+        "deepseek-ai/DeepSeek-OCR-2": 1299.6610887445422,
+        "lightonai/LightOnOCR-2-1B": 1692.9120868932694,
+        "numind/NuExtract3": 1618.9957597180755,
+        "rednote-hilab/dots.mocr": 1727.8533746725998,
+        "tesseract-5": 1055.7385954711401,
+        "zai-org/GLM-OCR": 1689.2106312361288
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1513.1526855645286,
+          1657.3646772635414
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1295.7747121581199,
+          1439.572619229316
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1400.55264919696,
+          1538.5312859626893
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1550.9871995041055,
+          1695.5259097587375
+        ],
+        "baidu/Qianfan-OCR": [
+          1456.9042394633,
+          1583.0780917370782
+        ],
+        "baidu/Unlimited-OCR": [
+          1400.6532565993557,
+          1529.397325986483
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1304.4793889966727,
+          1452.8497533707289
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1205.4723377632806,
+          1379.4863410629396
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1627.0023098645079,
+          1771.588503606129
+        ],
+        "numind/NuExtract3": [
+          1548.8604650994473,
+          1691.8070879611935
+        ],
+        "rednote-hilab/dots.mocr": [
+          1654.206002939988,
+          1822.2015254954906
+        ],
+        "tesseract-5": [
+          883.4305881582985,
+          1149.032935787121
+        ],
+        "zai-org/GLM-OCR": [
+          1615.6196052872967,
+          1776.425865923446
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 69.87001984748599,
+        "PaddlePaddle/PP-OCRv6_medium": 27.122194269783904,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 59.04390240405132,
+        "allenai/olmOCR-2-7B-1025-FP8": -54.75721955516701,
+        "baidu/Qianfan-OCR": -3.4491622587956954,
+        "baidu/Unlimited-OCR": -32.084045915361,
+        "deepseek-ai/DeepSeek-OCR": -27.23663930011662,
+        "deepseek-ai/DeepSeek-OCR-2": -37.20430793205469,
+        "lightonai/LightOnOCR-2-1B": -4.691170790252272,
+        "numind/NuExtract3": -30.757881710636866,
+        "rednote-hilab/dots.mocr": 27.762074371612925,
+        "tesseract-5": 13.10528434537241,
+        "zai-org/GLM-OCR": -6.7230477759221685
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "baidu/Unlimited-OCR",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": true
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 9,
+        "median_direct_comparisons": 9.0,
+        "min_direct_comparisons": 8,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9487179487179485,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta": 69.87001984748599,
+      "max_absolute_elo_delta_model": "FireRedTeam/FireRed-OCR",
+      "median_absolute_elo_delta": 27.762074371612925,
+      "name": "mixed-random_700_seed_46",
+      "percentage_saved": 80.90040927694406,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.989010989010989,
+      "static_budget": 700,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": true,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 42,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 1200,
+      "comparisons_saved": 2465,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1542.2731534480074,
+        "PaddlePaddle/PP-OCRv6_medium": 1382.291356420484,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1426.0889761592027,
+        "allenai/olmOCR-2-7B-1025-FP8": 1642.042263243064,
+        "baidu/Qianfan-OCR": 1518.4803305893438,
+        "baidu/Unlimited-OCR": 1516.195289490195,
+        "deepseek-ai/DeepSeek-OCR": 1389.9195602798206,
+        "deepseek-ai/DeepSeek-OCR-2": 1322.2778553166315,
+        "lightonai/LightOnOCR-2-1B": 1711.4527261826724,
+        "numind/NuExtract3": 1620.6754071255164,
+        "rednote-hilab/dots.mocr": 1740.5536595747546,
+        "tesseract-5": 1000.2049459994696,
+        "zai-org/GLM-OCR": 1687.544476170838
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1485.8996057490763,
+          1599.3520794028423
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1321.2852105548461,
+          1433.734069471369
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1371.8201333005281,
+          1478.3677820068328
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1581.3976592864024,
+          1707.9396991315373
+        ],
+        "baidu/Qianfan-OCR": [
+          1466.8963319920836,
+          1573.5692170904779
+        ],
+        "baidu/Unlimited-OCR": [
+          1463.4085733065629,
+          1568.5396889669098
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1338.9070126068314,
+          1439.00419631303
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1256.8421348767001,
+          1386.7006805197536
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1661.2181970395723,
+          1772.970724632413
+        ],
+        "numind/NuExtract3": [
+          1565.7145302939534,
+          1683.7900394381052
+        ],
+        "rednote-hilab/dots.mocr": [
+          1691.3440161647995,
+          1799.6982576875512
+        ],
+        "tesseract-5": [
+          867.8041501788628,
+          1095.6333089284033
+        ],
+        "zai-org/GLM-OCR": [
+          1635.68868674211,
+          1750.4648126716709
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 30.418402436311453,
+        "PaddlePaddle/PP-OCRv6_medium": 35.933991371197635,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 11.813395498307045,
+        "allenai/olmOCR-2-7B-1025-FP8": -31.710716030178446,
+        "baidu/Qianfan-OCR": -5.525718588809696,
+        "baidu/Unlimited-OCR": 18.15184599904478,
+        "deepseek-ai/DeepSeek-OCR": -18.909684828118543,
+        "deepseek-ai/DeepSeek-OCR-2": -14.587541359965371,
+        "lightonai/LightOnOCR-2-1B": 13.849468499150817,
+        "numind/NuExtract3": -29.07823430319604,
+        "rednote-hilab/dots.mocr": 40.46235927376779,
+        "tesseract-5": -42.428365126298104,
+        "zai-org/GLM-OCR": -8.389202841213091
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": true,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": true,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": true
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 16,
+        "median_direct_comparisons": 15.0,
+        "min_direct_comparisons": 15,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9743589743589742,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta": 42.428365126298104,
+      "max_absolute_elo_delta_model": "tesseract-5",
+      "median_absolute_elo_delta": 18.909684828118543,
+      "name": "mixed-random_1200_seed_42",
+      "percentage_saved": 67.25784447476126,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9945054945054945,
+      "static_budget": 1200,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": true,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 43,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 1200,
+      "comparisons_saved": 2465,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1569.1714308922114,
+        "PaddlePaddle/PP-OCRv6_medium": 1359.3915639665847,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1419.2478138109495,
+        "allenai/olmOCR-2-7B-1025-FP8": 1623.96015573092,
+        "baidu/Qianfan-OCR": 1519.1174171344292,
+        "baidu/Unlimited-OCR": 1492.2312304002107,
+        "deepseek-ai/DeepSeek-OCR": 1353.6007170597934,
+        "deepseek-ai/DeepSeek-OCR-2": 1337.1508314261428,
+        "lightonai/LightOnOCR-2-1B": 1696.0407600997837,
+        "numind/NuExtract3": 1625.6646806220829,
+        "rednote-hilab/dots.mocr": 1744.473083052518,
+        "tesseract-5": 1057.3664809912548,
+        "zai-org/GLM-OCR": 1702.583834813119
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1513.6465118390133,
+          1624.8411394984337
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1295.045911927137,
+          1414.3894949861112
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1364.4773899632696,
+          1467.97269280944
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1570.2706195953403,
+          1684.4318233376619
+        ],
+        "baidu/Qianfan-OCR": [
+          1468.6519977366952,
+          1570.293446819824
+        ],
+        "baidu/Unlimited-OCR": [
+          1443.5345332356258,
+          1542.968989464483
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1290.0553139824422,
+          1406.4265737728708
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1269.506660935207,
+          1395.2976962955306
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1646.2946232512365,
+          1757.9851595660728
+        ],
+        "numind/NuExtract3": [
+          1567.8999289967057,
+          1684.8864648271763
+        ],
+        "rednote-hilab/dots.mocr": [
+          1688.545286060514,
+          1810.7767215024596
+        ],
+        "tesseract-5": [
+          948.3393427962795,
+          1131.2003703829998
+        ],
+        "zai-org/GLM-OCR": [
+          1652.5115729291774,
+          1766.5741345000856
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 57.316679880515494,
+        "PaddlePaddle/PP-OCRv6_medium": 13.034198917298454,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 4.972233150053853,
+        "allenai/olmOCR-2-7B-1025-FP8": -49.792823542322594,
+        "baidu/Qianfan-OCR": -4.8886320437243285,
+        "baidu/Unlimited-OCR": -5.8122130909393945,
+        "deepseek-ai/DeepSeek-OCR": -55.22852804814579,
+        "deepseek-ai/DeepSeek-OCR-2": 0.2854347495458569,
+        "lightonai/LightOnOCR-2-1B": -1.5624975837379225,
+        "numind/NuExtract3": -24.08896080662953,
+        "rednote-hilab/dots.mocr": 44.38178275153109,
+        "tesseract-5": 14.73316986548707,
+        "zai-org/GLM-OCR": 6.650155801067967
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B",
+        "numind/NuExtract3",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 16,
+        "median_direct_comparisons": 15.0,
+        "min_direct_comparisons": 15,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.8974358974358972,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta": 57.316679880515494,
+      "max_absolute_elo_delta_model": "FireRedTeam/FireRed-OCR",
+      "median_absolute_elo_delta": 13.034198917298454,
+      "name": "mixed-random_1200_seed_43",
+      "percentage_saved": 67.25784447476126,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9780219780219779,
+      "static_budget": 1200,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 44,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 1200,
+      "comparisons_saved": 2465,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1540.0770371859935,
+        "PaddlePaddle/PP-OCRv6_medium": 1364.3902334965335,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1419.0553216231738,
+        "allenai/olmOCR-2-7B-1025-FP8": 1635.9228720998954,
+        "baidu/Qianfan-OCR": 1517.7393003953875,
+        "baidu/Unlimited-OCR": 1461.007776842755,
+        "deepseek-ai/DeepSeek-OCR": 1388.7676529111636,
+        "deepseek-ai/DeepSeek-OCR-2": 1363.5974039981409,
+        "lightonai/LightOnOCR-2-1B": 1705.135646851379,
+        "numind/NuExtract3": 1621.2681692059696,
+        "rednote-hilab/dots.mocr": 1731.689038778754,
+        "tesseract-5": 1049.1914123784838,
+        "zai-org/GLM-OCR": 1702.1581342323707
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1488.4114761427913,
+          1590.7653301092737
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1303.3106287042747,
+          1423.6805971874105
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1364.912071722028,
+          1473.4370582981423
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1578.8812733975985,
+          1695.6837036073482
+        ],
+        "baidu/Qianfan-OCR": [
+          1467.0213936428381,
+          1568.0200335478496
+        ],
+        "baidu/Unlimited-OCR": [
+          1410.068535180301,
+          1513.5552827786407
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1331.674668862896,
+          1438.1041655634394
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1303.7413604777335,
+          1421.7076829987209
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1654.1367053511024,
+          1764.6209629699024
+        ],
+        "numind/NuExtract3": [
+          1569.4477160994538,
+          1677.4546771857981
+        ],
+        "rednote-hilab/dots.mocr": [
+          1677.5328622738377,
+          1796.231750446716
+        ],
+        "tesseract-5": [
+          934.8434079470228,
+          1129.963008382917
+        ],
+        "zai-org/GLM-OCR": [
+          1652.6982107604317,
+          1767.1625793090604
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 28.22228617429755,
+        "PaddlePaddle/PP-OCRv6_medium": 18.03286844724721,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 4.779740962278083,
+        "allenai/olmOCR-2-7B-1025-FP8": -37.83010717334719,
+        "baidu/Qianfan-OCR": -6.266748782765944,
+        "baidu/Unlimited-OCR": -37.035666648395136,
+        "deepseek-ai/DeepSeek-OCR": -20.061592196775564,
+        "deepseek-ai/DeepSeek-OCR-2": 26.73200732154396,
+        "lightonai/LightOnOCR-2-1B": 7.5323891678574455,
+        "numind/NuExtract3": -28.48547222274283,
+        "rednote-hilab/dots.mocr": 31.597738477767052,
+        "tesseract-5": 6.558101252716142,
+        "zai-org/GLM-OCR": 6.224455220319669
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": true,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": true,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": true
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 16,
+        "median_direct_comparisons": 15.0,
+        "min_direct_comparisons": 15,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9743589743589742,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta": 37.83010717334719,
+      "max_absolute_elo_delta_model": "allenai/olmOCR-2-7B-1025-FP8",
+      "median_absolute_elo_delta": 20.061592196775564,
+      "name": "mixed-random_1200_seed_44",
+      "percentage_saved": 67.25784447476126,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9945054945054945,
+      "static_budget": 1200,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": true,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 45,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 1200,
+      "comparisons_saved": 2465,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1548.3979093981743,
+        "PaddlePaddle/PP-OCRv6_medium": 1381.9625337837633,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1427.7316232773803,
+        "allenai/olmOCR-2-7B-1025-FP8": 1690.0293852405443,
+        "baidu/Qianfan-OCR": 1537.4354559583417,
+        "baidu/Unlimited-OCR": 1457.8129162428863,
+        "deepseek-ai/DeepSeek-OCR": 1371.8367744758652,
+        "deepseek-ai/DeepSeek-OCR-2": 1283.5321362017203,
+        "lightonai/LightOnOCR-2-1B": 1700.4411366191428,
+        "numind/NuExtract3": 1593.1453568796262,
+        "rednote-hilab/dots.mocr": 1749.721196183658,
+        "tesseract-5": 1051.6106431247508,
+        "zai-org/GLM-OCR": 1706.342932614146
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1489.4865879567567,
+          1601.2344158729964
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1321.3189838346245,
+          1430.9452825240653
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1374.2315914995168,
+          1484.0732515150687
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1638.1864269235318,
+          1760.5378420766503
+        ],
+        "baidu/Qianfan-OCR": [
+          1482.2598001330014,
+          1590.80176697829
+        ],
+        "baidu/Unlimited-OCR": [
+          1406.4922405858558,
+          1511.4709346654959
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1315.8659481833197,
+          1422.8671792649602
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1210.254823910572,
+          1343.2631290155257
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1650.4276400857102,
+          1762.2977252441447
+        ],
+        "numind/NuExtract3": [
+          1538.4476528042085,
+          1654.9364307698668
+        ],
+        "rednote-hilab/dots.mocr": [
+          1699.1634417846153,
+          1814.7852640293
+        ],
+        "tesseract-5": [
+          950.8618261930715,
+          1126.3453231965984
+        ],
+        "zai-org/GLM-OCR": [
+          1653.0772851725924,
+          1769.4966726297996
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 36.54315838647835,
+        "PaddlePaddle/PP-OCRv6_medium": 35.60516873447705,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 13.456042616484638,
+        "allenai/olmOCR-2-7B-1025-FP8": 16.2764059673018,
+        "baidu/Qianfan-OCR": 13.429406780188174,
+        "baidu/Unlimited-OCR": -40.2305272482638,
+        "deepseek-ai/DeepSeek-OCR": -36.992470632073946,
+        "deepseek-ai/DeepSeek-OCR-2": -53.333260474876624,
+        "lightonai/LightOnOCR-2-1B": 2.83787893562112,
+        "numind/NuExtract3": -56.60828454908619,
+        "rednote-hilab/dots.mocr": 49.629895882671235,
+        "tesseract-5": 8.977331998983118,
+        "zai-org/GLM-OCR": 10.409253602095077
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 16,
+        "median_direct_comparisons": 15.0,
+        "min_direct_comparisons": 15,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9230769230769229,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta": 56.60828454908619,
+      "max_absolute_elo_delta_model": "numind/NuExtract3",
+      "median_absolute_elo_delta": 35.60516873447705,
+      "name": "mixed-random_1200_seed_45",
+      "percentage_saved": 67.25784447476126,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9835164835164836,
+      "static_budget": 1200,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "allocation_seed": 46,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 1200,
+      "comparisons_saved": 2465,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1545.758935357603,
+        "PaddlePaddle/PP-OCRv6_medium": 1360.8703221953983,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1417.5380247578462,
+        "allenai/olmOCR-2-7B-1025-FP8": 1647.8708595287917,
+        "baidu/Qianfan-OCR": 1512.1829443852555,
+        "baidu/Unlimited-OCR": 1513.4081948336227,
+        "deepseek-ai/DeepSeek-OCR": 1389.2344717440421,
+        "deepseek-ai/DeepSeek-OCR-2": 1345.2940881565203,
+        "lightonai/LightOnOCR-2-1B": 1662.2584323422798,
+        "numind/NuExtract3": 1637.5223337086848,
+        "rednote-hilab/dots.mocr": 1686.9492603822323,
+        "tesseract-5": 1075.231849288151,
+        "zai-org/GLM-OCR": 1705.8802833195728
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1489.1163378574377,
+          1601.1962498420417
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1301.0244063635464,
+          1410.5807510065104
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1362.697022835376,
+          1468.4809528198257
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1595.2052892497752,
+          1707.6476603695799
+        ],
+        "baidu/Qianfan-OCR": [
+          1462.0899415922613,
+          1566.9226775945958
+        ],
+        "baidu/Unlimited-OCR": [
+          1464.788501399085,
+          1565.091284798886
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1334.7858387323529,
+          1442.7427103210557
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1278.5340603811019,
+          1401.0533429225782
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1614.4776821782257,
+          1722.0558464549222
+        ],
+        "numind/NuExtract3": [
+          1582.737047005323,
+          1698.1494892586138
+        ],
+        "rednote-hilab/dots.mocr": [
+          1637.4495129659942,
+          1746.8082524984302
+        ],
+        "tesseract-5": [
+          971.6806939370014,
+          1150.9493885266747
+        ],
+        "zai-org/GLM-OCR": [
+          1651.8896526712972,
+          1765.9491401603334
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 33.90418434590697,
+        "PaddlePaddle/PP-OCRv6_medium": 14.512957146112058,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 3.262444096950503,
+        "allenai/olmOCR-2-7B-1025-FP8": -25.882119744450847,
+        "baidu/Qianfan-OCR": -11.823104792897993,
+        "baidu/Unlimited-OCR": 15.364751342472573,
+        "deepseek-ai/DeepSeek-OCR": -19.594773363897048,
+        "deepseek-ai/DeepSeek-OCR-2": 8.428691479923373,
+        "lightonai/LightOnOCR-2-1B": -35.34482534124186,
+        "numind/NuExtract3": -12.231307720027644,
+        "rednote-hilab/dots.mocr": -13.142039918754563,
+        "tesseract-5": 32.59853816238319,
+        "zai-org/GLM-OCR": 9.946604307521739
+      },
+      "final_rank_order": [
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Unlimited-OCR",
+        "baidu/Qianfan-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 16,
+        "median_direct_comparisons": 15.0,
+        "min_direct_comparisons": 15,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.8974358974358972,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta": 35.34482534124186,
+      "max_absolute_elo_delta_model": "lightonai/LightOnOCR-2-1B",
+      "median_absolute_elo_delta": 14.512957146112058,
+      "name": "mixed-random_1200_seed_46",
+      "percentage_saved": 67.25784447476126,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.967032967032967,
+      "static_budget": 1200,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "zai-org/GLM-OCR",
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 3,
+        "unresolved": 9
+      },
+      "allocation_seed": 42,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 2000,
+      "comparisons_saved": 1665,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 3,
+        "unresolved": 9
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1524.4731094141437,
+        "PaddlePaddle/PP-OCRv6_medium": 1353.4103087098065,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1409.3660358316768,
+        "allenai/olmOCR-2-7B-1025-FP8": 1660.5236011229763,
+        "baidu/Qianfan-OCR": 1521.629958929006,
+        "baidu/Unlimited-OCR": 1505.3930928257362,
+        "deepseek-ai/DeepSeek-OCR": 1397.1412651577061,
+        "deepseek-ai/DeepSeek-OCR-2": 1338.6489534186155,
+        "lightonai/LightOnOCR-2-1B": 1691.5456052457262,
+        "numind/NuExtract3": 1644.0893439803604,
+        "rednote-hilab/dots.mocr": 1708.9163260389782,
+        "tesseract-5": 1041.6784062956938,
+        "zai-org/GLM-OCR": 1703.1839930295744
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1484.6431803967298,
+          1566.05053161491
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1305.2714498590876,
+          1397.4896859437192
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1369.5180977374869,
+          1445.5974360312252
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1617.0339979434013,
+          1707.5491049812822
+        ],
+        "baidu/Qianfan-OCR": [
+          1481.8480815582093,
+          1561.1289731181053
+        ],
+        "baidu/Unlimited-OCR": [
+          1465.1360770501678,
+          1549.5479594107903
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1356.048697348841,
+          1437.714996891418
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1290.4970271272873,
+          1382.329184324439
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1652.7807957863388,
+          1736.7759283810406
+        ],
+        "numind/NuExtract3": [
+          1599.1847982011748,
+          1691.8448945663529
+        ],
+        "rednote-hilab/dots.mocr": [
+          1669.055943876028,
+          1752.3012113252753
+        ],
+        "tesseract-5": [
+          952.8531822385969,
+          1105.4219792013923
+        ],
+        "zai-org/GLM-OCR": [
+          1661.4601460744732,
+          1748.9324377705852
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 12.618358402447711,
+        "PaddlePaddle/PP-OCRv6_medium": 7.052943660520214,
+        "PaddlePaddle/PaddleOCR-VL-1.6": -4.90954482921893,
+        "allenai/olmOCR-2-7B-1025-FP8": -13.229378150266257,
+        "baidu/Qianfan-OCR": -2.37609024914741,
+        "baidu/Unlimited-OCR": 7.349649334586047,
+        "deepseek-ai/DeepSeek-OCR": -11.687979950233057,
+        "deepseek-ai/DeepSeek-OCR-2": 1.783556742018618,
+        "lightonai/LightOnOCR-2-1B": -6.057652437795468,
+        "numind/NuExtract3": -5.664297448352045,
+        "rednote-hilab/dots.mocr": 8.825025737991382,
+        "tesseract-5": -0.9549048300739287,
+        "zai-org/GLM-OCR": 7.250314017523351
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 26,
+        "median_direct_comparisons": 26.0,
+        "min_direct_comparisons": 25,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9487179487179485,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta": 13.229378150266257,
+      "max_absolute_elo_delta_model": "allenai/olmOCR-2-7B-1025-FP8",
+      "median_absolute_elo_delta": 7.052943660520214,
+      "name": "mixed-random_2000_seed_42",
+      "percentage_saved": 45.429740791268756,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.989010989010989,
+      "static_budget": 2000,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 3,
+        "unresolved": 9
+      },
+      "allocation_seed": 43,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 2000,
+      "comparisons_saved": 1665,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 3,
+        "unresolved": 9
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1524.9667899861865,
+        "PaddlePaddle/PP-OCRv6_medium": 1356.7313764522748,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1410.8610201716253,
+        "allenai/olmOCR-2-7B-1025-FP8": 1651.435550829535,
+        "baidu/Qianfan-OCR": 1505.847117583739,
+        "baidu/Unlimited-OCR": 1503.9440897789925,
+        "deepseek-ai/DeepSeek-OCR": 1394.9493673281327,
+        "deepseek-ai/DeepSeek-OCR-2": 1337.6340915497055,
+        "lightonai/LightOnOCR-2-1B": 1699.1831145055246,
+        "numind/NuExtract3": 1657.6540603406665,
+        "rednote-hilab/dots.mocr": 1697.725218402506,
+        "tesseract-5": 1048.2455348571812,
+        "zai-org/GLM-OCR": 1710.8226682139307
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1484.58101686882,
+          1568.236251653002
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1312.852809810413,
+          1396.623165112017
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1369.4581422051726,
+          1451.1192412706891
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1609.2111670644863,
+          1693.3406074761172
+        ],
+        "baidu/Qianfan-OCR": [
+          1466.7233762947005,
+          1548.3655087059144
+        ],
+        "baidu/Unlimited-OCR": [
+          1463.9545321410023,
+          1541.7179873756372
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1351.6660846122993,
+          1437.6950839393319
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1291.3080029918697,
+          1386.431868491243
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1659.464101375074,
+          1742.5949902534016
+        ],
+        "numind/NuExtract3": [
+          1615.5659444444086,
+          1702.3240419609579
+        ],
+        "rednote-hilab/dots.mocr": [
+          1654.0679922793377,
+          1743.9714924637265
+        ],
+        "tesseract-5": [
+          968.7186318018415,
+          1105.5573283397157
+        ],
+        "zai-org/GLM-OCR": [
+          1668.320053478764,
+          1757.0266893247438
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 13.112038974490588,
+        "PaddlePaddle/PP-OCRv6_medium": 10.374011402988572,
+        "PaddlePaddle/PaddleOCR-VL-1.6": -3.414560489270343,
+        "allenai/olmOCR-2-7B-1025-FP8": -22.317428443707513,
+        "baidu/Qianfan-OCR": -18.158931594414526,
+        "baidu/Unlimited-OCR": 5.900646287842392,
+        "deepseek-ai/DeepSeek-OCR": -13.87987777980652,
+        "deepseek-ai/DeepSeek-OCR-2": 0.7686948731086432,
+        "lightonai/LightOnOCR-2-1B": 1.5798568220029665,
+        "numind/NuExtract3": 7.900418911954148,
+        "rednote-hilab/dots.mocr": -2.366081898480843,
+        "tesseract-5": 5.612223731413451,
+        "zai-org/GLM-OCR": 14.888989201879667
+      },
+      "final_rank_order": [
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B",
+        "rednote-hilab/dots.mocr",
+        "numind/NuExtract3",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 26,
+        "median_direct_comparisons": 26.0,
+        "min_direct_comparisons": 25,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.8717948717948716,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta": 22.317428443707513,
+      "max_absolute_elo_delta_model": "allenai/olmOCR-2-7B-1025-FP8",
+      "median_absolute_elo_delta": 7.900418911954148,
+      "name": "mixed-random_2000_seed_43",
+      "percentage_saved": 45.429740791268756,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.967032967032967,
+      "static_budget": 2000,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B",
+        "rednote-hilab/dots.mocr"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "allocation_seed": 44,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 2000,
+      "comparisons_saved": 1665,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1520.8638550728301,
+        "PaddlePaddle/PP-OCRv6_medium": 1343.2962443607219,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1414.367979019664,
+        "allenai/olmOCR-2-7B-1025-FP8": 1661.1707832520488,
+        "baidu/Qianfan-OCR": 1538.8514797580187,
+        "baidu/Unlimited-OCR": 1489.0996074523973,
+        "deepseek-ai/DeepSeek-OCR": 1376.5021139574092,
+        "deepseek-ai/DeepSeek-OCR-2": 1351.4810722098198,
+        "lightonai/LightOnOCR-2-1B": 1696.8848585455028,
+        "numind/NuExtract3": 1630.5684174846483,
+        "rednote-hilab/dots.mocr": 1715.0711387453173,
+        "tesseract-5": 1064.9139021340566,
+        "zai-org/GLM-OCR": 1696.9285480075655
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1475.5856503346379,
+          1565.3056364853994
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1295.3241038822075,
+          1384.8050389649948
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1372.6036617366249,
+          1453.6446103366673
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1615.6524125856915,
+          1707.1328941224044
+        ],
+        "baidu/Qianfan-OCR": [
+          1500.0408051498903,
+          1580.0646434908265
+        ],
+        "baidu/Unlimited-OCR": [
+          1448.8323185665822,
+          1526.5774010480927
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1331.7701498944716,
+          1418.2583660486944
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1304.2176337010092,
+          1396.8578657554622
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1656.6464086871865,
+          1741.260631943609
+        ],
+        "numind/NuExtract3": [
+          1589.425416843075,
+          1678.1564867094228
+        ],
+        "rednote-hilab/dots.mocr": [
+          1674.569978268076,
+          1758.4478404657457
+        ],
+        "tesseract-5": [
+          980.5698429017463,
+          1123.3178935676267
+        ],
+        "zai-org/GLM-OCR": [
+          1656.7876426117132,
+          1745.7735529779718
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 9.009104061134167,
+        "PaddlePaddle/PP-OCRv6_medium": -3.061120688564415,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 0.09239835876837788,
+        "allenai/olmOCR-2-7B-1025-FP8": -12.582196021193795,
+        "baidu/Qianfan-OCR": 14.845430579865251,
+        "baidu/Unlimited-OCR": -8.943836038752806,
+        "deepseek-ai/DeepSeek-OCR": -32.32713115053002,
+        "deepseek-ai/DeepSeek-OCR-2": 14.615675533222884,
+        "lightonai/LightOnOCR-2-1B": -0.7183991380188672,
+        "numind/NuExtract3": -19.18522394406409,
+        "rednote-hilab/dots.mocr": 14.979838444330426,
+        "tesseract-5": 22.280591008288866,
+        "zai-org/GLM-OCR": 0.99486899551448
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "baidu/Qianfan-OCR",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 26,
+        "median_direct_comparisons": 26.0,
+        "min_direct_comparisons": 25,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9487179487179485,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta": 32.32713115053002,
+      "max_absolute_elo_delta_model": "deepseek-ai/DeepSeek-OCR",
+      "median_absolute_elo_delta": 12.582196021193795,
+      "name": "mixed-random_2000_seed_44",
+      "percentage_saved": 45.429740791268756,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.989010989010989,
+      "static_budget": 2000,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "allocation_seed": 45,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 2000,
+      "comparisons_saved": 1665,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1512.1977173593375,
+        "PaddlePaddle/PP-OCRv6_medium": 1353.0733820781556,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1424.2063057096652,
+        "allenai/olmOCR-2-7B-1025-FP8": 1677.4324114490018,
+        "baidu/Qianfan-OCR": 1536.9673544915072,
+        "baidu/Unlimited-OCR": 1495.5756835649372,
+        "deepseek-ai/DeepSeek-OCR": 1390.678698123616,
+        "deepseek-ai/DeepSeek-OCR-2": 1320.2351432098117,
+        "lightonai/LightOnOCR-2-1B": 1680.234374186804,
+        "numind/NuExtract3": 1638.962260570605,
+        "rednote-hilab/dots.mocr": 1705.4371282992859,
+        "tesseract-5": 1061.8852527674437,
+        "zai-org/GLM-OCR": 1703.1142881898288
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1469.9085193476883,
+          1554.038025855893
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1308.936053724141,
+          1394.799586840276
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1382.4878790848027,
+          1462.582864513801
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1633.846528469744,
+          1721.8422717792382
+        ],
+        "baidu/Qianfan-OCR": [
+          1497.8701502609244,
+          1578.6012994450916
+        ],
+        "baidu/Unlimited-OCR": [
+          1455.0579527510604,
+          1534.8018274178976
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1345.594886431943,
+          1428.805233695043
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1268.0026305082524,
+          1365.8947082543182
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1642.061796984405,
+          1726.0407199121069
+        ],
+        "numind/NuExtract3": [
+          1597.7171919427267,
+          1683.2997693228428
+        ],
+        "rednote-hilab/dots.mocr": [
+          1662.825228661662,
+          1750.272535647071
+        ],
+        "tesseract-5": [
+          981.7823626848402,
+          1122.3934827105309
+        ],
+        "zai-org/GLM-OCR": [
+          1664.5582731619652,
+          1751.7506175433668
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 0.3429663476415499,
+        "PaddlePaddle/PP-OCRv6_medium": 6.7160170288693735,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 9.930725048769546,
+        "allenai/olmOCR-2-7B-1025-FP8": 3.6794321757593025,
+        "baidu/Qianfan-OCR": 12.961305313353705,
+        "baidu/Unlimited-OCR": -2.4677599262129206,
+        "deepseek-ai/DeepSeek-OCR": -18.150546984323228,
+        "deepseek-ai/DeepSeek-OCR-2": -16.630253466785234,
+        "lightonai/LightOnOCR-2-1B": -17.36888349671767,
+        "numind/NuExtract3": -10.791380858107459,
+        "rednote-hilab/dots.mocr": 5.345827998299001,
+        "tesseract-5": 19.251941641676012,
+        "zai-org/GLM-OCR": 7.1806091777777965
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "baidu/Qianfan-OCR",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": true,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 26,
+        "median_direct_comparisons": 26.0,
+        "min_direct_comparisons": 25,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9743589743589742,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta": 19.251941641676012,
+      "max_absolute_elo_delta_model": "tesseract-5",
+      "median_absolute_elo_delta": 9.930725048769546,
+      "name": "mixed-random_2000_seed_45",
+      "percentage_saved": 45.429740791268756,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9945054945054945,
+      "static_budget": 2000,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 3,
+        "unresolved": 9
+      },
+      "allocation_seed": 46,
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 2000,
+      "comparisons_saved": 1665,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 3,
+        "unresolved": 9
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1533.8119622807478,
+        "PaddlePaddle/PP-OCRv6_medium": 1345.7031598372882,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1409.4419781885404,
+        "allenai/olmOCR-2-7B-1025-FP8": 1650.760752569424,
+        "baidu/Qianfan-OCR": 1514.6923036476044,
+        "baidu/Unlimited-OCR": 1519.4640866019377,
+        "deepseek-ai/DeepSeek-OCR": 1394.5645842349468,
+        "deepseek-ai/DeepSeek-OCR-2": 1354.3306676775535,
+        "lightonai/LightOnOCR-2-1B": 1680.2666749146024,
+        "numind/NuExtract3": 1640.1872347568808,
+        "rednote-hilab/dots.mocr": 1694.7231872871903,
+        "tesseract-5": 1067.7968394963352,
+        "zai-org/GLM-OCR": 1694.256568506948
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1491.9687979530636,
+          1575.5016140373652
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1297.7068794502168,
+          1389.8858322647707
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1370.1402218192918,
+          1446.9416954646042
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1606.6382973762575,
+          1695.078052810251
+        ],
+        "baidu/Qianfan-OCR": [
+          1474.281920126229,
+          1552.7179756261191
+        ],
+        "baidu/Unlimited-OCR": [
+          1484.493481831039,
+          1559.7636218262035
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1349.7613298590338,
+          1436.3483288125153
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1308.4971509808863,
+          1399.9337514013191
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1640.1519037051426,
+          1727.2833418638625
+        ],
+        "numind/NuExtract3": [
+          1596.8696122089577,
+          1685.364577128291
+        ],
+        "rednote-hilab/dots.mocr": [
+          1656.1415438309468,
+          1741.5898336516393
+        ],
+        "tesseract-5": [
+          988.9832247563841,
+          1127.0661717058106
+        ],
+        "zai-org/GLM-OCR": [
+          1653.4441466244011,
+          1739.5497166206278
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 21.957211269051868,
+        "PaddlePaddle/PP-OCRv6_medium": -0.6542052119980326,
+        "PaddlePaddle/PaddleOCR-VL-1.6": -4.833602472355324,
+        "allenai/olmOCR-2-7B-1025-FP8": -22.99222670381846,
+        "baidu/Qianfan-OCR": -9.313745530549113,
+        "baidu/Unlimited-OCR": 21.420643110787523,
+        "deepseek-ai/DeepSeek-OCR": -14.264660872992408,
+        "deepseek-ai/DeepSeek-OCR-2": 17.46527100095659,
+        "lightonai/LightOnOCR-2-1B": -17.336582768919243,
+        "numind/NuExtract3": -9.5664066718316,
+        "rednote-hilab/dots.mocr": -5.368113013796574,
+        "tesseract-5": 25.16352837056752,
+        "zai-org/GLM-OCR": -1.6771105051029735
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Unlimited-OCR",
+        "baidu/Qianfan-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 26,
+        "median_direct_comparisons": 26.0,
+        "min_direct_comparisons": 25,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.8974358974358972,
+      "kind": "mixed-random",
+      "max_absolute_elo_delta": 25.16352837056752,
+      "max_absolute_elo_delta_model": "tesseract-5",
+      "median_absolute_elo_delta": 14.264660872992408,
+      "name": "mixed-random_2000_seed_46",
+      "percentage_saved": 45.429740791268756,
+      "practical_preferences": [],
+      "resolution_summary": "predeclared outcome-independent budget; no adaptive stop",
+      "round_history": [],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9725274725274725,
+      "static_budget": 2000,
+      "stopping_reason": "predeclared_static_budget",
+      "stopping_round": 0,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
     }
   ]
 }

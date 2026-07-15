@@ -134,6 +134,42 @@ def test_size_rule_can_annotate_without_controlling_sampling():
     assert replay._classify(board, comparisons, config, for_sampling=True)[0].status == "unresolved"
 
 
+def test_fixed_pair_balanced_sample_is_exact_balanced_and_seeded():
+    stored = _stored_grid(8)
+
+    first = replay._fixed_pair_balanced_sample(stored, budget=14, seed=42)
+    repeated = replay._fixed_pair_balanced_sample(stored, budget=14, seed=42)
+    other_seed = replay._fixed_pair_balanced_sample(stored, budget=14, seed=43)
+    counts = replay.comparison_pair_counts(first)
+
+    assert len(first) == 14
+    assert sorted(counts.values()) == [4, 5, 5]
+    assert [replay._comparison_key(row) for row in first] == [
+        replay._comparison_key(row) for row in repeated
+    ]
+    assert [replay._comparison_key(row) for row in first] != [
+        replay._comparison_key(row) for row in other_seed
+    ]
+
+
+def test_mixed_sample_preserves_required_warmup_and_rebalances():
+    stored = _stored_grid(8)
+    required = stored[:3]
+
+    selected = replay._fixed_pair_balanced_sample(
+        stored,
+        budget=14,
+        seed=42,
+        required=required,
+    )
+    keys = [replay._comparison_key(row) for row in selected]
+    counts = replay.comparison_pair_counts(selected)
+
+    assert selected[:3] == required
+    assert len(keys) == len(set(keys)) == 14
+    assert max(counts.values()) - min(counts.values()) == 1
+
+
 def test_graph_metrics_report_coverage_and_connectivity():
     complete = replay.graph_metrics(_stored_grid(1), ["a", "b", "c"])
     disconnected = replay.graph_metrics(
