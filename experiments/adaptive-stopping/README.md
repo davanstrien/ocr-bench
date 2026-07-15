@@ -1,7 +1,8 @@
 # Adaptive stopping counterfactual replay
 
-**Recommendation: revise the targeted strategy and keep it experimental.** Do not change the
-balanced default yet, and do not proceed directly to a live trial from this one replay.
+**Recommendation: keep targeted allocation experimental and do not run a live trial yet.** A
+follow-up replay tested stronger per-pair warm-ups, periodic balanced exploration, and separating
+size annotations from sampling. None passed the predeclared fidelity/savings gate.
 
 The opt-in targeted allocator delivers the expected call reduction, but not by stopping early:
 it uses all 10 five-sample rounds while selecting fewer pairs per round. Against the full stored
@@ -10,7 +11,7 @@ board, plain targeted allocation saves **79.7%** of comparisons, while the 3× s
 substantially. The size rule adds only 3.1 percentage points of savings over plain targeted while
 increasing median/max ELO drift.
 
-No production bug was found. This is therefore an experiment/documentation-only change.
+No production bug was found. This remains an experiment/documentation-only change.
 
 ## Scope
 
@@ -168,6 +169,45 @@ from 10 to 5 barely saves another comparison but materially worsens rank correla
 error. A 15-sample minimum or 5× ratio is less aggressive and tracks the full board better, but
 neither restores top-3 ordering or achieves early stopping.
 
+## Follow-up targeted-v2 replay
+
+A second replay tested the proposed next step without changing production code. The gate was
+fixed before running:
+
+- exact full-board top-3 order;
+- Kendall τ ≥ 0.95;
+- maximum absolute ELO delta ≤ 50; and
+- at least 60% of stored outcomes saved.
+
+“Explore every 3” means every third post-warm-up allocation batch is balanced; the other two are
+targeted. “Annotate 3×” computes practical smaller-model annotations on the final board but does
+not let that rule remove pairs from sampling. “Size-stop 3×” does let it control sampling, matching
+the production option.
+
+| Follow-up strategy | Used | Saved | Kendall τ | Spearman ρ | Exact top-3 order | Median abs(ΔELO) | Max abs(ΔELO) | Min pair evidence | Gate |
+|---|---:|---:|---:|---:|---|---:|---:|---:|---|
+| Per-pair warm-up 5 | 1,153 | 73.1% | 0.912 | 0.969 | yes | 74.0 | 157.5 | 5 | **fail** |
+| Per-pair warm-up 10 | 1,561 | 63.6% | 0.934 | 0.982 | yes | 50.0 | 99.1 | 10 | **fail** |
+| Balanced exploration every 3 | 2,023 | 52.9% | 0.956 | 0.991 | no | 31.8 | 98.6 | 17 | **fail** |
+| Warm-up 5 + explore 3 + annotate 3× | 1,946 | 54.7% | 0.934 | 0.987 | no | 29.8 | 88.2 | 15 | **fail** |
+| Warm-up 10 + explore 3 + annotate 3× | 2,313 | 46.1% | 0.956 | 0.991 | yes | 37.1 | 99.6 | 18 | **fail** |
+| Warm-up 5 + explore 3 + size-stop 3× | 1,820 | 57.6% | 0.934 | 0.987 | no | 31.8 | 90.8 | 15 | **fail** |
+
+The candidate suggested after the first replay—warm-up 5 plus every-third-batch exploration—did
+not pass. Periodic balanced batches improved global rank correlation and reduced median ELO drift,
+but consumed enough outcomes to miss the savings gate and still left a large worst-model delta.
+Warm-up floors alone restored the full-board top-3 order, but did not stabilize the rest of the
+board. No follow-up strategy met its stopping criteria before round 10.
+
+Separating annotation from allocation was directionally preferable: with warm-up 5 and exploration,
+annotation-only used 1,946 outcomes and had max drift 88.2, while size-controlled stopping used
+1,820 and had max drift 90.8. The additional 126-outcome saving is not enough evidence to let a
+practical deployment preference influence statistical allocation.
+
+The exact order of the full board's top three is itself weakly identified—their CIs overlap—so it
+should not become a universal product criterion. It remains useful here as a deliberately strict
+counterfactual fidelity check, alongside full-order correlation and ELO drift.
+
 ## Current sentinel-policy robustness check
 
 The primary result must use the requested 4,293-row stored board. However, current production
@@ -181,15 +221,19 @@ conclusion:
 | Targeted | 753 | 79.5% | 0.923 | 0.984 | 3/3, no | 27.0 / 69.0 |
 | Targeted + 3×, min 10 | 624 | 83.0% | 0.897 | 0.973 | 3/3, no | 48.6 / 86.0 |
 
-All three adaptive runs still exhaust the sample batches. See
-[`results-sentinels-excluded.json`](results-sentinels-excluded.json) for full details.
+All three adaptive runs still exhaust the sample batches. The targeted-v2 variants also fail the
+predeclared gate under current sentinel handling. The closest on ELO drift—warm-up 5 plus
+exploration 3, annotation-only—uses 1,684 outcomes (54.1% saved), has median/max absolute ELO
+deltas of 18.1/57.0, and still swaps the statistically unresolved models in ranks 2 and 3.
+See [`results-sentinels-excluded.json`](results-sentinels-excluded.json) for full details.
 
 ## Determinism
 
-Each of the four primary strategies was replayed twice. Selected comparison keys, interim rank
-orders, ELOs, bootstrap CIs, adjacent-pair decisions, final annotations, stop round, and stop
-reason matched exactly. This confirms deterministic execution in the tested environment, helped
-by the fixed bootstrap seed and deterministic equal-ELO tie-break.
+Each of the four primary strategies and the warm-up-5/exploration-3 annotation-only candidate was
+replayed twice. Selected comparison keys, interim rank orders, ELOs, bootstrap CIs, adjacent-pair
+decisions, final annotations, stop round, and stop reason matched exactly. This confirms
+deterministic execution in the tested environment, helped by the fixed bootstrap seed and
+deterministic equal-ELO tie-break.
 
 It does not establish reproducibility across different SciPy/NumPy versions or statistical
 validity under repeated data collection.
@@ -220,19 +264,22 @@ validity under repeated data collection.
 
 ## Recommendation and next experiment
 
-**Revise strategy; keep `targeted` opt-in and `balanced` as the default.** Specifically, evaluate a
-revision that:
+**Keep `targeted` opt-in, retain `balanced` as the default, and do not implement the tested v2
+variants in production.** The follow-up falsified the simple “more warm-up plus periodic balanced
+batches” revision under the predeclared gate.
 
-1. uses a per-pair balanced warm-up floor rather than only the aggregate 273-outcome threshold;
-2. injects periodic balanced/exploration batches so early adjacency does not permanently starve
-   other edges;
-3. monitors rank/top-k stability and ELO drift across rounds, not only overlapping adjacent
-   marginal CIs; and
-4. evaluates page-clustered or policy-aware uncertainty for adaptive runs.
+The next useful direction is a different estimator/design rather than more threshold tuning:
 
-Replay that revision on several existing result boards before one explicitly budgeted live trial.
-The 3× practical rule can remain as an annotation/stopping preference, but this board does not
-support making it a default or treating it as statistical resolution.
+1. compare fixed balanced subsampling at matched budgets (for example 700, 1,200, and 2,000
+   outcomes) against outcome-conditioned targeting;
+2. test a predeclared mixed allocation with random exploration independent of interim winners;
+3. evaluate top-k membership and pairwise decisions separately from exact ordering among
+   statistically unresolved models; and
+4. use page-clustered, policy-aware uncertainty before considering a live adaptive trial.
+
+Keep the 3× rule as a post-hoc deployment annotation only during that work. This board does not
+support letting it influence sampling, making it a default, or treating it as statistical
+resolution.
 
 ## Reproduce
 
@@ -243,7 +290,8 @@ uv sync --dev
 uv run python experiments/adaptive-stopping/replay.py
 ```
 
-The full run takes about five minutes on the machine used for this report. The pinned dataset
+The full primary, sensitivity, and targeted-v2 run takes about eleven minutes on the machine used
+for this report. The pinned dataset
 revision is downloaded read-only. The script contains no judge backend construction and no Hub
 push/upload call.
 

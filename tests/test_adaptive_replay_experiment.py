@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from collections import Counter
 from pathlib import Path
 
 from ocr_bench.elo import ComparisonResult, Leaderboard
@@ -64,6 +65,73 @@ def test_targeted_replay_warms_up_balanced_then_filters_pairs(monkeypatch):
     assert targeted.comparisons[-1].model_a == "b"
     assert targeted.comparisons[-1].model_b == "c"
     assert targeted.stopping_reason == "sample_batches_exhausted"
+
+
+def test_per_pair_warmup_requires_every_pair_to_reach_floor():
+    counts = Counter({("a", "b"): 5, ("a", "c"): 5, ("b", "c"): 4})
+
+    assert replay._warmup_ready(
+        counts,
+        n_pairs=3,
+        total_comparisons=20,
+        min_before_check=20,
+        min_per_pair=None,
+    )
+    assert not replay._warmup_ready(
+        counts,
+        n_pairs=3,
+        total_comparisons=20,
+        min_before_check=20,
+        min_per_pair=5,
+    )
+    counts[("b", "c")] = 5
+    assert replay._warmup_ready(
+        counts,
+        n_pairs=3,
+        total_comparisons=20,
+        min_before_check=20,
+        min_per_pair=5,
+    )
+
+
+def test_periodic_exploration_restores_a_balanced_batch(monkeypatch):
+    stored = _stored_grid(10)
+    monkeypatch.setattr(replay, "compute_elo", lambda *args, **kwargs: _fixed_board())
+
+    result = replay.replay_strategy(
+        stored,
+        ["a", "b", "c"],
+        replay.StrategyConfig(
+            "explore",
+            "targeted",
+            balanced_every_n_post_warmup_batches=3,
+        ),
+        n_bootstrap=1,
+        batch_samples=1,
+    )
+
+    assert len(result.comparisons) == 26
+    assert result.round_history[-1]["allocation_mode"] == "balanced-exploration"
+    assert result.round_history[-1]["batch_comparisons"] == 3
+
+
+def test_size_rule_can_annotate_without_controlling_sampling():
+    small = "zai-org/GLM-OCR"
+    large = "rednote-hilab/dots.mocr"
+    board = Leaderboard(
+        elo={large: 1510.0, small: 1500.0},
+        elo_ci={large: (1450.0, 1570.0), small: (1440.0, 1560.0)},
+    )
+    comparisons = [ComparisonResult(i, large, small, "A") for i in range(10)]
+    config = replay.StrategyConfig(
+        "annotate-only",
+        "targeted",
+        size_tie_ratio=3.0,
+        size_rule_controls_sampling=False,
+    )
+
+    assert replay._classify(board, comparisons, config)[0].status == "prefer-smaller"
+    assert replay._classify(board, comparisons, config, for_sampling=True)[0].status == "unresolved"
 
 
 def test_graph_metrics_report_coverage_and_connectivity():

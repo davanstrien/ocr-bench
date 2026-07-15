@@ -50,6 +50,9 @@ class StrategyConfig:
     kind: StrategyKind
     size_tie_ratio: float | None = None
     size_tie_min_samples: int = 10
+    warmup_min_per_pair: int | None = None
+    balanced_every_n_post_warmup_batches: int | None = None
+    size_rule_controls_sampling: bool = True
 
 
 @dataclass
@@ -79,6 +82,43 @@ SENSITIVITY_CONFIGS = (
     StrategyConfig("targeted_size_5_min_10", "targeted", 5.0, 10),
 )
 
+FOLLOWUP_CONFIGS = (
+    StrategyConfig("targeted_v2_warmup_5", "targeted", warmup_min_per_pair=5),
+    StrategyConfig("targeted_v2_warmup_10", "targeted", warmup_min_per_pair=10),
+    StrategyConfig(
+        "targeted_v2_explore_every_3",
+        "targeted",
+        balanced_every_n_post_warmup_batches=3,
+    ),
+    StrategyConfig(
+        "targeted_v2_warmup_5_explore_3_annotate_3x",
+        "targeted",
+        size_tie_ratio=3.0,
+        size_tie_min_samples=10,
+        warmup_min_per_pair=5,
+        balanced_every_n_post_warmup_batches=3,
+        size_rule_controls_sampling=False,
+    ),
+    StrategyConfig(
+        "targeted_v2_warmup_10_explore_3_annotate_3x",
+        "targeted",
+        size_tie_ratio=3.0,
+        size_tie_min_samples=10,
+        warmup_min_per_pair=10,
+        balanced_every_n_post_warmup_batches=3,
+        size_rule_controls_sampling=False,
+    ),
+    StrategyConfig(
+        "targeted_v2_warmup_5_explore_3_size_stop_3x",
+        "targeted",
+        size_tie_ratio=3.0,
+        size_tie_min_samples=10,
+        warmup_min_per_pair=5,
+        balanced_every_n_post_warmup_batches=3,
+        size_rule_controls_sampling=True,
+    ),
+)
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -104,7 +144,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-sensitivity",
         action="store_true",
-        help="Run only the four primary configurations.",
+        help="Skip the size ratio/min-evidence sensitivity configurations.",
+    )
+    parser.add_argument(
+        "--skip-followup",
+        action="store_true",
+        help="Skip targeted-v2 warm-up and balanced-exploration configurations.",
     )
     parser.add_argument(
         "--exclude-sentinel-comparisons",
@@ -171,12 +216,17 @@ def _classify(
     board: Leaderboard,
     comparisons: Sequence[ComparisonResult],
     config: StrategyConfig,
+    *,
+    for_sampling: bool = False,
 ) -> list[AdjacentPairDecision]:
     """Call the production classifier with the production registry sizes."""
+    size_tie_ratio = config.size_tie_ratio
+    if for_sampling and not config.size_rule_controls_sampling:
+        size_tie_ratio = None
     return classify_adjacent_pairs(
         board,
         comparison_pair_counts(comparisons),
-        size_tie_ratio=config.size_tie_ratio,
+        size_tie_ratio=size_tie_ratio,
         size_tie_min_samples=config.size_tie_min_samples,
         parameter_counts=model_parameter_counts(),
     )
@@ -191,6 +241,22 @@ def _status_counts(decisions: Sequence[AdjacentPairDecision]) -> dict[str, int]:
     }
 
 
+def _warmup_ready(
+    pair_counts: Counter[tuple[str, str]],
+    *,
+    n_pairs: int,
+    total_comparisons: int,
+    min_before_check: int,
+    min_per_pair: int | None,
+) -> bool:
+    """Whether aggregate and optional per-pair balanced warm-up gates are met."""
+    if total_comparisons < min_before_check:
+        return False
+    if min_per_pair is None:
+        return True
+    return len(pair_counts) == n_pairs and min(pair_counts.values(), default=0) >= min_per_pair
+
+
 def replay_strategy(
     stored: Sequence[ComparisonResult],
     model_names: Sequence[str],
@@ -199,11 +265,12 @@ def replay_strategy(
     n_bootstrap: int = 1000,
     batch_samples: int = BATCH_SAMPLES,
 ) -> ReplayResult:
-    """Replay one strategy with the production batching and decision rules.
+    """Replay one strategy with production decisions and configured allocation.
 
-    The first targeted allocation is balanced. As in ``cmd_judge``, decisions
-    are first checked after ``max(3 * n_pairs, 20)`` accumulated outcomes and
-    targeted allocation then follows the currently unresolved adjacent pairs.
+    The current strategy checks after ``max(3 * n_pairs, 20)`` outcomes. Follow-up
+    configurations may additionally require a per-pair warm-up floor, inject a
+    balanced batch after every N post-warm-up batches, or keep the size rule as an
+    annotation without allowing it to remove pairs from sampling.
     """
     if not stored:
         raise ValueError("Cannot replay an empty comparison set")
@@ -233,35 +300,60 @@ def replay_strategy(
     decisions: list[AdjacentPairDecision] = []
     stopping_round = math.ceil(len(sample_order) / batch_samples)
     stopping_reason = "sample_batches_exhausted"
+    post_warmup_batches = 0
 
     for round_number, start in enumerate(range(0, len(sample_order), batch_samples), start=1):
         batch_indices = sample_order[start : start + batch_samples]
+        allocation_pairs = active_pairs
+        if config.kind == "targeted" and active_pairs is None:
+            allocation_mode = "balanced-warmup"
+        elif config.kind == "targeted":
+            post_warmup_batches += 1
+            exploration_every = config.balanced_every_n_post_warmup_batches
+            if exploration_every and post_warmup_batches % exploration_every == 0:
+                allocation_pairs = None
+                allocation_mode = "balanced-exploration"
+            else:
+                allocation_mode = "targeted"
+        else:
+            allocation_mode = "balanced"
+
         batch = [
             comparison
             for sample_idx in batch_indices
             for comparison in grouped.get(sample_idx, [])
-            if active_pairs is None
-            or normalize_model_pair(comparison.model_a, comparison.model_b) in active_pairs
+            if allocation_pairs is None
+            or normalize_model_pair(comparison.model_a, comparison.model_b) in allocation_pairs
         ]
         # Production skips the decision check when build_comparisons returns no rows.
         if not batch:
             continue
         accumulated.extend(batch)
-        if len(accumulated) < min_before_check:
+        pair_counts = comparison_pair_counts(accumulated)
+        if not _warmup_ready(
+            pair_counts,
+            n_pairs=n_pairs,
+            total_comparisons=len(accumulated),
+            min_before_check=min_before_check,
+            min_per_pair=config.warmup_min_per_pair,
+        ):
             round_history.append(
                 {
                     "round": round_number,
                     "sample_indices": batch_indices,
                     "batch_comparisons": len(batch),
                     "cumulative_comparisons": len(accumulated),
+                    "allocation_mode": allocation_mode,
                     "active_pairs": None if active_pairs is None else len(active_pairs),
+                    "observed_pairs": len(pair_counts),
+                    "min_direct_comparisons": min(pair_counts.values(), default=0),
                     "decision": "warm-up",
                 }
             )
             continue
 
         board = compute_elo(accumulated, list(model_names), n_bootstrap=n_bootstrap)
-        decisions = _classify(board, accumulated, config)
+        decisions = _classify(board, accumulated, config, for_sampling=True)
         next_pairs = unresolved_pairs(decisions)
         round_history.append(
             {
@@ -269,6 +361,7 @@ def replay_strategy(
                 "sample_indices": batch_indices,
                 "batch_comparisons": len(batch),
                 "cumulative_comparisons": len(accumulated),
+                "allocation_mode": allocation_mode,
                 "active_pairs": None if active_pairs is None else len(active_pairs),
                 "next_active_pairs": len(next_pairs),
                 "decision": _status_counts(decisions),
@@ -388,27 +481,48 @@ def strategy_metrics(
     }
     absolute_deltas = [abs(delta) for delta in elo_deltas.values()]
     statuses = _status_counts(result.decisions)
+    allocation_statuses = _status_counts(
+        _classify(result.board, result.comparisons, result.config, for_sampling=True)
+    )
     if result.stopping_reason == "adaptive_criteria_met":
         resolution = (
-            f"criteria met: {statuses['resolved']} statistically resolved, "
-            f"{statuses['prefer-smaller']} practical preferences"
+            f"allocation criteria met: {allocation_statuses['resolved']} statistically resolved, "
+            f"{allocation_statuses['prefer-smaller']} sampling preferences"
         )
     elif result.config.kind == "full":
         resolution = "reference only; no adaptive stop"
     else:
-        resolution = f"sample batches exhausted: {statuses['unresolved']} adjacent pairs unresolved"
+        resolution = (
+            "sample batches exhausted: "
+            f"{allocation_statuses['unresolved']} allocation pairs unresolved"
+        )
 
     full_count = len(reference.comparisons)
+    percentage_saved = 100.0 * (full_count - len(result.comparisons)) / full_count
     top3_reference = reference_rank[:3]
     top3_strategy = strategy_rank[:3]
+    top3_order_matches = top3_strategy == top3_reference
+    max_absolute_delta = max(absolute_deltas)
+    followup_gate = {
+        "top3_order_exact": top3_order_matches,
+        "kendall_tau_at_least_0_95": float(kendall) >= 0.95,
+        "max_absolute_elo_delta_at_most_50": max_absolute_delta <= 50.0,
+        "percentage_saved_at_least_60": percentage_saved >= 60.0,
+    }
+    followup_gate["passed"] = all(followup_gate.values())
     return {
         "name": result.config.name,
         "kind": result.config.kind,
         "size_tie_ratio": result.config.size_tie_ratio,
         "size_tie_min_samples": result.config.size_tie_min_samples,
+        "warmup_min_per_pair": result.config.warmup_min_per_pair,
+        "balanced_every_n_post_warmup_batches": (
+            result.config.balanced_every_n_post_warmup_batches
+        ),
+        "size_rule_controls_sampling": result.config.size_rule_controls_sampling,
         "comparisons_consumed": len(result.comparisons),
         "comparisons_saved": full_count - len(result.comparisons),
-        "percentage_saved": 100.0 * (full_count - len(result.comparisons)) / full_count,
+        "percentage_saved": percentage_saved,
         "stopping_round": result.stopping_round,
         "stopping_reason": result.stopping_reason,
         "resolution_summary": resolution,
@@ -418,15 +532,17 @@ def strategy_metrics(
         "top3": top3_strategy,
         "top3_membership_matches": set(top3_strategy) == set(top3_reference),
         "top3_membership_overlap": len(set(top3_strategy) & set(top3_reference)),
-        "top3_order_matches": top3_strategy == top3_reference,
+        "top3_order_matches": top3_order_matches,
         "elo": result.board.elo,
         "elo_ci": result.board.elo_ci,
         "elo_delta_from_full": elo_deltas,
         "median_absolute_elo_delta": statistics.median(absolute_deltas),
-        "max_absolute_elo_delta": max(absolute_deltas),
+        "max_absolute_elo_delta": max_absolute_delta,
         "max_absolute_elo_delta_model": max(elo_deltas, key=lambda model: abs(elo_deltas[model])),
         "decision_statuses": statuses,
+        "allocation_decision_statuses": allocation_statuses,
         "practical_preferences": _preference_rows(result.decisions),
+        "followup_acceptance_gate": followup_gate,
         "graph": graph_metrics(result.comparisons, model_names),
         "deterministic_across_repeats": deterministic,
         "round_history": result.round_history,
@@ -447,13 +563,16 @@ def _write_csvs(output_dir: Path, metrics: Sequence[dict[str, Any]]) -> None:
         "top3_order_matches",
         "median_absolute_elo_delta",
         "max_absolute_elo_delta",
+        "followup_gate_passed",
         "deterministic_across_repeats",
     ]
     with (output_dir / "strategy-summary.csv").open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=summary_fields, lineterminator="\n")
         writer.writeheader()
         for metric in metrics:
-            writer.writerow({field: metric[field] for field in summary_fields})
+            row = {field: metric.get(field) for field in summary_fields}
+            row["followup_gate_passed"] = metric["followup_acceptance_gate"]["passed"]
+            writer.writerow(row)
 
     with (output_dir / "elo-deltas.csv").open("w", newline="") as handle:
         writer = csv.DictWriter(
@@ -483,8 +602,10 @@ def _write_csvs(output_dir: Path, metrics: Sequence[dict[str, Any]]) -> None:
             "sample_indices",
             "batch_comparisons",
             "cumulative_comparisons",
+            "allocation_mode",
             "active_pairs",
             "next_active_pairs",
+            "min_direct_comparisons",
             "resolved",
             "prefer_smaller",
             "unresolved",
@@ -503,8 +624,10 @@ def _write_csvs(output_dir: Path, metrics: Sequence[dict[str, Any]]) -> None:
                         "sample_indices": json.dumps(row["sample_indices"]),
                         "batch_comparisons": row["batch_comparisons"],
                         "cumulative_comparisons": row["cumulative_comparisons"],
+                        "allocation_mode": row.get("allocation_mode"),
                         "active_pairs": row.get("active_pairs"),
                         "next_active_pairs": row.get("next_active_pairs"),
+                        "min_direct_comparisons": row.get("min_direct_comparisons"),
                         "resolved": decision.get("resolved"),
                         "prefer_smaller": decision.get("prefer-smaller"),
                         "unresolved": decision.get("unresolved"),
@@ -528,16 +651,20 @@ def main() -> None:
     configs = list(PRIMARY_CONFIGS)
     if not args.skip_sensitivity:
         configs.extend(SENSITIVITY_CONFIGS)
+    if not args.skip_followup:
+        configs.extend(FOLLOWUP_CONFIGS)
 
     results: dict[str, ReplayResult] = {}
     deterministic: dict[str, bool | None] = {}
-    primary_names = {config.name for config in PRIMARY_CONFIGS}
+    repeat_names = {config.name for config in PRIMARY_CONFIGS} | {
+        "targeted_v2_warmup_5_explore_3_annotate_3x"
+    }
     for config in configs:
         print(f"Replaying {config.name} ...", flush=True)
         first = replay_strategy(stored, model_names, config, n_bootstrap=args.bootstrap)
         results[config.name] = first
         signatures = [_determinism_signature(first)]
-        repeats = args.repeats if config.name in primary_names else 1
+        repeats = args.repeats if config.name in repeat_names else 1
         for _ in range(1, repeats):
             repeated = replay_strategy(
                 stored,
@@ -575,7 +702,14 @@ def main() -> None:
             "min_before_check": max(3 * (len(model_names) * (len(model_names) - 1) // 2), 20),
             "bootstrap_replicates": args.bootstrap,
             "bootstrap_seed": 42,
-            "primary_repeats": args.repeats,
+            "repeats": args.repeats,
+            "repeated_strategy_names": sorted(repeat_names & {config.name for config in configs}),
+            "followup_acceptance_gate": {
+                "top3_order_exact": True,
+                "kendall_tau_minimum": 0.95,
+                "max_absolute_elo_delta_maximum": 50.0,
+                "percentage_saved_minimum": 60.0,
+            },
             "production_helpers": [
                 "compute_elo",
                 "classify_adjacent_pairs",

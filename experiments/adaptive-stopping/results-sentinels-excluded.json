@@ -4,6 +4,12 @@
     "bootstrap_replicates": 1000,
     "bootstrap_seed": 42,
     "comparisons_replayed": 3665,
+    "followup_acceptance_gate": {
+      "kendall_tau_minimum": 0.95,
+      "max_absolute_elo_delta_maximum": 50.0,
+      "percentage_saved_minimum": 60.0,
+      "top3_order_exact": true
+    },
     "historical_sentinel_comparisons": 628,
     "min_before_check": 234,
     "model_count": 13,
@@ -22,7 +28,6 @@
       "tesseract-5",
       "zai-org/GLM-OCR"
     ],
-    "primary_repeats": 1,
     "production_helpers": [
       "compute_elo",
       "classify_adjacent_pairs",
@@ -32,6 +37,14 @@
       "practical_preferences",
       "unresolved_pairs"
     ],
+    "repeated_strategy_names": [
+      "balanced_adaptive",
+      "full_stored_board",
+      "targeted",
+      "targeted_size_3_min_10",
+      "targeted_v2_warmup_5_explore_3_annotate_3x"
+    ],
+    "repeats": 1,
     "sample_count": 50,
     "sentinel_comparisons_excluded": true,
     "source_repo": "davanstrien/ocr-bench-britannica-results",
@@ -40,6 +53,12 @@
   },
   "strategies": [
     {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 4,
+        "unresolved": 8
+      },
+      "balanced_every_n_post_warmup_batches": null,
       "comparisons_consumed": 3665,
       "comparisons_saved": 0,
       "decision_statuses": {
@@ -147,6 +166,13 @@
         "deepseek-ai/DeepSeek-OCR-2",
         "tesseract-5"
       ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": true,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": true
+      },
       "graph": {
         "connected": true,
         "connected_components": [
@@ -183,6 +209,7 @@
       "practical_preferences": [],
       "resolution_summary": "reference only; no adaptive stop",
       "round_history": [],
+      "size_rule_controls_sampling": true,
       "size_tie_min_samples": 10,
       "size_tie_ratio": null,
       "spearman_rho": 1.0,
@@ -195,9 +222,16 @@
       ],
       "top3_membership_matches": true,
       "top3_membership_overlap": 3,
-      "top3_order_matches": true
+      "top3_order_matches": true,
+      "warmup_min_per_pair": null
     },
     {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 4,
+        "unresolved": 8
+      },
+      "balanced_every_n_post_warmup_batches": null,
       "comparisons_consumed": 3665,
       "comparisons_saved": 0,
       "decision_statuses": {
@@ -305,6 +339,13 @@
         "deepseek-ai/DeepSeek-OCR-2",
         "tesseract-5"
       ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": true,
+        "max_absolute_elo_delta_at_most_50": true,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": true
+      },
       "graph": {
         "connected": true,
         "connected_components": [
@@ -339,10 +380,11 @@
       "name": "balanced_adaptive",
       "percentage_saved": 0.0,
       "practical_preferences": [],
-      "resolution_summary": "sample batches exhausted: 8 adjacent pairs unresolved",
+      "resolution_summary": "sample batches exhausted: 8 allocation pairs unresolved",
       "round_history": [
         {
           "active_pairs": null,
+          "allocation_mode": "balanced",
           "batch_comparisons": 267,
           "cumulative_comparisons": 267,
           "decision": {
@@ -377,6 +419,7 @@
         },
         {
           "active_pairs": null,
+          "allocation_mode": "balanced",
           "batch_comparisons": 315,
           "cumulative_comparisons": 582,
           "decision": {
@@ -411,6 +454,7 @@
         },
         {
           "active_pairs": null,
+          "allocation_mode": "balanced",
           "batch_comparisons": 388,
           "cumulative_comparisons": 970,
           "decision": {
@@ -445,6 +489,7 @@
         },
         {
           "active_pairs": null,
+          "allocation_mode": "balanced",
           "batch_comparisons": 390,
           "cumulative_comparisons": 1360,
           "decision": {
@@ -479,6 +524,7 @@
         },
         {
           "active_pairs": null,
+          "allocation_mode": "balanced",
           "batch_comparisons": 390,
           "cumulative_comparisons": 1750,
           "decision": {
@@ -513,6 +559,7 @@
         },
         {
           "active_pairs": null,
+          "allocation_mode": "balanced",
           "batch_comparisons": 389,
           "cumulative_comparisons": 2139,
           "decision": {
@@ -547,6 +594,7 @@
         },
         {
           "active_pairs": null,
+          "allocation_mode": "balanced",
           "batch_comparisons": 390,
           "cumulative_comparisons": 2529,
           "decision": {
@@ -581,6 +629,7 @@
         },
         {
           "active_pairs": null,
+          "allocation_mode": "balanced",
           "batch_comparisons": 390,
           "cumulative_comparisons": 2919,
           "decision": {
@@ -615,6 +664,7 @@
         },
         {
           "active_pairs": null,
+          "allocation_mode": "balanced",
           "batch_comparisons": 357,
           "cumulative_comparisons": 3276,
           "decision": {
@@ -649,6 +699,7 @@
         },
         {
           "active_pairs": null,
+          "allocation_mode": "balanced",
           "batch_comparisons": 389,
           "cumulative_comparisons": 3665,
           "decision": {
@@ -682,6 +733,7 @@
           ]
         }
       ],
+      "size_rule_controls_sampling": true,
       "size_tie_min_samples": 10,
       "size_tie_ratio": null,
       "spearman_rho": 1.0,
@@ -694,9 +746,16 @@
       ],
       "top3_membership_matches": true,
       "top3_membership_overlap": 3,
-      "top3_order_matches": true
+      "top3_order_matches": true,
+      "warmup_min_per_pair": null
     },
     {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "balanced_every_n_post_warmup_batches": null,
       "comparisons_consumed": 753,
       "comparisons_saved": 2912,
       "decision_statuses": {
@@ -804,6 +863,13 @@
         "PaddlePaddle/PP-OCRv6_medium",
         "tesseract-5"
       ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": false
+      },
       "graph": {
         "connected": true,
         "connected_components": [
@@ -838,10 +904,11 @@
       "name": "targeted",
       "percentage_saved": 79.45429740791269,
       "practical_preferences": [],
-      "resolution_summary": "sample batches exhausted: 11 adjacent pairs unresolved",
+      "resolution_summary": "sample batches exhausted: 11 allocation pairs unresolved",
       "round_history": [
         {
           "active_pairs": null,
+          "allocation_mode": "balanced-warmup",
           "batch_comparisons": 267,
           "cumulative_comparisons": 267,
           "decision": {
@@ -876,6 +943,7 @@
         },
         {
           "active_pairs": 12,
+          "allocation_mode": "targeted",
           "batch_comparisons": 52,
           "cumulative_comparisons": 319,
           "decision": {
@@ -910,6 +978,7 @@
         },
         {
           "active_pairs": 11,
+          "allocation_mode": "targeted",
           "batch_comparisons": 54,
           "cumulative_comparisons": 373,
           "decision": {
@@ -944,6 +1013,7 @@
         },
         {
           "active_pairs": 11,
+          "allocation_mode": "targeted",
           "batch_comparisons": 55,
           "cumulative_comparisons": 428,
           "decision": {
@@ -978,6 +1048,7 @@
         },
         {
           "active_pairs": 11,
+          "allocation_mode": "targeted",
           "batch_comparisons": 55,
           "cumulative_comparisons": 483,
           "decision": {
@@ -1012,6 +1083,7 @@
         },
         {
           "active_pairs": 11,
+          "allocation_mode": "targeted",
           "batch_comparisons": 55,
           "cumulative_comparisons": 538,
           "decision": {
@@ -1046,6 +1118,7 @@
         },
         {
           "active_pairs": 11,
+          "allocation_mode": "targeted",
           "batch_comparisons": 55,
           "cumulative_comparisons": 593,
           "decision": {
@@ -1080,6 +1153,7 @@
         },
         {
           "active_pairs": 11,
+          "allocation_mode": "targeted",
           "batch_comparisons": 55,
           "cumulative_comparisons": 648,
           "decision": {
@@ -1114,6 +1188,7 @@
         },
         {
           "active_pairs": 11,
+          "allocation_mode": "targeted",
           "batch_comparisons": 50,
           "cumulative_comparisons": 698,
           "decision": {
@@ -1148,6 +1223,7 @@
         },
         {
           "active_pairs": 11,
+          "allocation_mode": "targeted",
           "batch_comparisons": 55,
           "cumulative_comparisons": 753,
           "decision": {
@@ -1181,6 +1257,7 @@
           ]
         }
       ],
+      "size_rule_controls_sampling": true,
       "size_tie_min_samples": 10,
       "size_tie_ratio": null,
       "spearman_rho": 0.9835164835164836,
@@ -1193,9 +1270,16 @@
       ],
       "top3_membership_matches": true,
       "top3_membership_overlap": 3,
-      "top3_order_matches": false
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
     },
     {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 6,
+        "resolved": 1,
+        "unresolved": 5
+      },
+      "balanced_every_n_post_warmup_batches": null,
       "comparisons_consumed": 624,
       "comparisons_saved": 3041,
       "decision_statuses": {
@@ -1303,6 +1387,13 @@
         "deepseek-ai/DeepSeek-OCR-2",
         "tesseract-5"
       ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": false
+      },
       "graph": {
         "connected": true,
         "connected_components": [
@@ -1374,10 +1465,11 @@
           "smaller_model": "zai-org/GLM-OCR"
         }
       ],
-      "resolution_summary": "sample batches exhausted: 5 adjacent pairs unresolved",
+      "resolution_summary": "sample batches exhausted: 5 allocation pairs unresolved",
       "round_history": [
         {
           "active_pairs": null,
+          "allocation_mode": "balanced-warmup",
           "batch_comparisons": 267,
           "cumulative_comparisons": 267,
           "decision": {
@@ -1412,6 +1504,7 @@
         },
         {
           "active_pairs": 12,
+          "allocation_mode": "targeted",
           "batch_comparisons": 52,
           "cumulative_comparisons": 319,
           "decision": {
@@ -1446,6 +1539,7 @@
         },
         {
           "active_pairs": 11,
+          "allocation_mode": "targeted",
           "batch_comparisons": 54,
           "cumulative_comparisons": 373,
           "decision": {
@@ -1480,6 +1574,7 @@
         },
         {
           "active_pairs": 9,
+          "allocation_mode": "targeted",
           "batch_comparisons": 45,
           "cumulative_comparisons": 418,
           "decision": {
@@ -1514,6 +1609,7 @@
         },
         {
           "active_pairs": 8,
+          "allocation_mode": "targeted",
           "batch_comparisons": 40,
           "cumulative_comparisons": 458,
           "decision": {
@@ -1548,6 +1644,7 @@
         },
         {
           "active_pairs": 8,
+          "allocation_mode": "targeted",
           "batch_comparisons": 40,
           "cumulative_comparisons": 498,
           "decision": {
@@ -1582,6 +1679,7 @@
         },
         {
           "active_pairs": 9,
+          "allocation_mode": "targeted",
           "batch_comparisons": 45,
           "cumulative_comparisons": 543,
           "decision": {
@@ -1616,6 +1714,7 @@
         },
         {
           "active_pairs": 6,
+          "allocation_mode": "targeted",
           "batch_comparisons": 30,
           "cumulative_comparisons": 573,
           "decision": {
@@ -1650,6 +1749,7 @@
         },
         {
           "active_pairs": 6,
+          "allocation_mode": "targeted",
           "batch_comparisons": 26,
           "cumulative_comparisons": 599,
           "decision": {
@@ -1684,6 +1784,7 @@
         },
         {
           "active_pairs": 5,
+          "allocation_mode": "targeted",
           "batch_comparisons": 25,
           "cumulative_comparisons": 624,
           "decision": {
@@ -1717,6 +1818,7 @@
           ]
         }
       ],
+      "size_rule_controls_sampling": true,
       "size_tie_min_samples": 10,
       "size_tie_ratio": 3.0,
       "spearman_rho": 0.9725274725274725,
@@ -1729,7 +1831,3125 @@
       ],
       "top3_membership_matches": true,
       "top3_membership_overlap": 3,
-      "top3_order_matches": false
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 1016,
+      "comparisons_saved": 2649,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1594.1977167245018,
+        "PaddlePaddle/PP-OCRv6_medium": 1343.9363256863503,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1461.9855892384621,
+        "allenai/olmOCR-2-7B-1025-FP8": 1599.7840607374487,
+        "baidu/Qianfan-OCR": 1521.8442923817795,
+        "baidu/Unlimited-OCR": 1502.2638288058974,
+        "deepseek-ai/DeepSeek-OCR": 1421.495700939181,
+        "deepseek-ai/DeepSeek-OCR-2": 1375.5950554145513,
+        "lightonai/LightOnOCR-2-1B": 1660.0179980731882,
+        "numind/NuExtract3": 1573.741049016997,
+        "rednote-hilab/dots.mocr": 1771.482965377228,
+        "tesseract-5": 1014.0364064260923,
+        "zai-org/GLM-OCR": 1659.6190111783221
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1548.0122918324607,
+          1657.8213976451166
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1272.534734219565,
+          1422.2828517541896
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1408.6156899836799,
+          1532.354585548627
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1548.954872012757,
+          1669.2573603652158
+        ],
+        "baidu/Qianfan-OCR": [
+          1472.1911367384866,
+          1585.5581766648052
+        ],
+        "baidu/Unlimited-OCR": [
+          1446.6147984291692,
+          1568.387266502401
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1365.887231962342,
+          1481.125756765516
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1308.6079900774423,
+          1449.596877130258
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1601.0796917899452,
+          1745.7944207667445
+        ],
+        "numind/NuExtract3": [
+          1514.9415770736534,
+          1644.9708996399656
+        ],
+        "rednote-hilab/dots.mocr": [
+          1702.3977665602947,
+          1878.194257286424
+        ],
+        "tesseract-5": [
+          772.1083720578063,
+          1138.0169569592026
+        ],
+        "zai-org/GLM-OCR": [
+          1604.0197325174968,
+          1733.054617156719
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 82.34296571280584,
+        "PaddlePaddle/PP-OCRv6_medium": -2.4210393629359714,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 47.71000857756644,
+        "allenai/olmOCR-2-7B-1025-FP8": -73.96891853579382,
+        "baidu/Qianfan-OCR": -2.161756796373993,
+        "baidu/Unlimited-OCR": 4.220385314747318,
+        "deepseek-ai/DeepSeek-OCR": 12.66645583124182,
+        "deepseek-ai/DeepSeek-OCR-2": 38.72965873795442,
+        "lightonai/LightOnOCR-2-1B": -37.58525961033342,
+        "numind/NuExtract3": -76.01259241171533,
+        "rednote-hilab/dots.mocr": 71.39166507624122,
+        "tesseract-5": -28.596904699675406,
+        "zai-org/GLM-OCR": -36.31466783372889
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "FireRedTeam/FireRed-OCR",
+        "numind/NuExtract3",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": true
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 49,
+        "median_direct_comparisons": 9.0,
+        "min_direct_comparisons": 5,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9230769230769229,
+      "kind": "targeted",
+      "max_absolute_elo_delta": 82.34296571280584,
+      "max_absolute_elo_delta_model": "FireRedTeam/FireRed-OCR",
+      "median_absolute_elo_delta": 37.58525961033342,
+      "name": "targeted_v2_warmup_5",
+      "percentage_saved": 72.27830832196453,
+      "practical_preferences": [],
+      "resolution_summary": "sample batches exhausted: 11 allocation pairs unresolved",
+      "round_history": [
+        {
+          "active_pairs": null,
+          "allocation_mode": "balanced-warmup",
+          "batch_comparisons": 267,
+          "cumulative_comparisons": 267,
+          "decision": "warm-up",
+          "min_direct_comparisons": 2,
+          "observed_pairs": 78,
+          "round": 1,
+          "sample_indices": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        {
+          "active_pairs": null,
+          "allocation_mode": "balanced-warmup",
+          "batch_comparisons": 315,
+          "cumulative_comparisons": 582,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "FireRedTeam/FireRed-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "baidu/Qianfan-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 2,
+          "sample_indices": [
+            5,
+            6,
+            7,
+            8,
+            9
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 54,
+          "cumulative_comparisons": 636,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "FireRedTeam/FireRed-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "baidu/Qianfan-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "numind/NuExtract3",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 3,
+          "sample_indices": [
+            10,
+            11,
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 691,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "FireRedTeam/FireRed-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "numind/NuExtract3",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 4,
+          "sample_indices": [
+            15,
+            16,
+            17,
+            18,
+            19
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 746,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "FireRedTeam/FireRed-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "numind/NuExtract3",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 5,
+          "sample_indices": [
+            20,
+            21,
+            22,
+            23,
+            24
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 801,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "FireRedTeam/FireRed-OCR",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "numind/NuExtract3",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 6,
+          "sample_indices": [
+            25,
+            26,
+            27,
+            28,
+            29
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 856,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "FireRedTeam/FireRed-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "numind/NuExtract3",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 7,
+          "sample_indices": [
+            30,
+            31,
+            32,
+            33,
+            34
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 911,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "FireRedTeam/FireRed-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 8,
+          "sample_indices": [
+            35,
+            36,
+            37,
+            38,
+            39
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 50,
+          "cumulative_comparisons": 961,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "FireRedTeam/FireRed-OCR",
+            "numind/NuExtract3",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 9,
+          "sample_indices": [
+            40,
+            41,
+            42,
+            43,
+            44
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 1016,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "FireRedTeam/FireRed-OCR",
+            "numind/NuExtract3",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 10,
+          "sample_indices": [
+            45,
+            46,
+            47,
+            48,
+            49
+          ]
+        }
+      ],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9780219780219779,
+      "stopping_reason": "sample_batches_exhausted",
+      "stopping_round": 10,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": true,
+      "warmup_min_per_pair": 5
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "balanced_every_n_post_warmup_batches": null,
+      "comparisons_consumed": 1351,
+      "comparisons_saved": 2314,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1584.4540378390668,
+        "PaddlePaddle/PP-OCRv6_medium": 1370.087746133482,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1476.808075615833,
+        "allenai/olmOCR-2-7B-1025-FP8": 1618.3431895840686,
+        "baidu/Qianfan-OCR": 1535.452708568855,
+        "baidu/Unlimited-OCR": 1522.947359963196,
+        "deepseek-ai/DeepSeek-OCR": 1454.4407854931717,
+        "deepseek-ai/DeepSeek-OCR-2": 1426.8932568357582,
+        "lightonai/LightOnOCR-2-1B": 1661.907548415937,
+        "numind/NuExtract3": 1579.3964549847967,
+        "rednote-hilab/dots.mocr": 1665.3182348464015,
+        "tesseract-5": 960.6816984488148,
+        "zai-org/GLM-OCR": 1643.2689032706185
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1541.975049312204,
+          1631.142775041068
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1314.0815158483088,
+          1422.771239653849
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1433.3921057155708,
+          1528.9764672617662
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1573.034774172818,
+          1669.8448562058854
+        ],
+        "baidu/Qianfan-OCR": [
+          1493.4932421468554,
+          1586.3837736779778
+        ],
+        "baidu/Unlimited-OCR": [
+          1476.18691598975,
+          1570.159136712557
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1405.8032438666175,
+          1504.806181540899
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1373.871017369812,
+          1479.5813804195695
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1613.1387930424096,
+          1722.0274752746095
+        ],
+        "numind/NuExtract3": [
+          1533.0995289601428,
+          1632.7697400846548
+        ],
+        "rednote-hilab/dots.mocr": [
+          1614.2344301794028,
+          1727.1556353651142
+        ],
+        "tesseract-5": [
+          708.2146235618151,
+          1068.6003544089108
+        ],
+        "zai-org/GLM-OCR": [
+          1601.5690852762173,
+          1700.1610627970576
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 72.59928682737086,
+        "PaddlePaddle/PP-OCRv6_medium": 23.730381084195642,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 62.53249495493742,
+        "allenai/olmOCR-2-7B-1025-FP8": -55.40978968917398,
+        "baidu/Qianfan-OCR": 11.446659390701598,
+        "baidu/Unlimited-OCR": 24.90391647204592,
+        "deepseek-ai/DeepSeek-OCR": 45.6115403852325,
+        "deepseek-ai/DeepSeek-OCR-2": 90.02786015916126,
+        "lightonai/LightOnOCR-2-1B": -35.69570926758456,
+        "numind/NuExtract3": -70.35718644391568,
+        "rednote-hilab/dots.mocr": -34.77306545458532,
+        "tesseract-5": -81.95161267695289,
+        "zai-org/GLM-OCR": -52.66477574143255
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "FireRedTeam/FireRed-OCR",
+        "numind/NuExtract3",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": true,
+        "top3_order_exact": true
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 49,
+        "median_direct_comparisons": 13.0,
+        "min_direct_comparisons": 10,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9230769230769229,
+      "kind": "targeted",
+      "max_absolute_elo_delta": 90.02786015916126,
+      "max_absolute_elo_delta_model": "deepseek-ai/DeepSeek-OCR-2",
+      "median_absolute_elo_delta": 52.66477574143255,
+      "name": "targeted_v2_warmup_10",
+      "percentage_saved": 63.13778990450205,
+      "practical_preferences": [],
+      "resolution_summary": "sample batches exhausted: 11 allocation pairs unresolved",
+      "round_history": [
+        {
+          "active_pairs": null,
+          "allocation_mode": "balanced-warmup",
+          "batch_comparisons": 267,
+          "cumulative_comparisons": 267,
+          "decision": "warm-up",
+          "min_direct_comparisons": 2,
+          "observed_pairs": 78,
+          "round": 1,
+          "sample_indices": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        {
+          "active_pairs": null,
+          "allocation_mode": "balanced-warmup",
+          "batch_comparisons": 315,
+          "cumulative_comparisons": 582,
+          "decision": "warm-up",
+          "min_direct_comparisons": 5,
+          "observed_pairs": 78,
+          "round": 2,
+          "sample_indices": [
+            5,
+            6,
+            7,
+            8,
+            9
+          ]
+        },
+        {
+          "active_pairs": null,
+          "allocation_mode": "balanced-warmup",
+          "batch_comparisons": 388,
+          "cumulative_comparisons": 970,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "FireRedTeam/FireRed-OCR",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "numind/NuExtract3",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 3,
+          "sample_indices": [
+            10,
+            11,
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 1025,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "FireRedTeam/FireRed-OCR",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "numind/NuExtract3",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 4,
+          "sample_indices": [
+            15,
+            16,
+            17,
+            18,
+            19
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 1080,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "FireRedTeam/FireRed-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "numind/NuExtract3",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 5,
+          "sample_indices": [
+            20,
+            21,
+            22,
+            23,
+            24
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 1135,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "numind/NuExtract3",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 6,
+          "sample_indices": [
+            25,
+            26,
+            27,
+            28,
+            29
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 1190,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "lightonai/LightOnOCR-2-1B",
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "FireRedTeam/FireRed-OCR",
+            "numind/NuExtract3",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 7,
+          "sample_indices": [
+            30,
+            31,
+            32,
+            33,
+            34
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 1245,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "FireRedTeam/FireRed-OCR",
+            "numind/NuExtract3",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 8,
+          "sample_indices": [
+            35,
+            36,
+            37,
+            38,
+            39
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 51,
+          "cumulative_comparisons": 1296,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "FireRedTeam/FireRed-OCR",
+            "numind/NuExtract3",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 9,
+          "sample_indices": [
+            40,
+            41,
+            42,
+            43,
+            44
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 1351,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "FireRedTeam/FireRed-OCR",
+            "numind/NuExtract3",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 10,
+          "sample_indices": [
+            45,
+            46,
+            47,
+            48,
+            49
+          ]
+        }
+      ],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.9780219780219779,
+      "stopping_reason": "sample_batches_exhausted",
+      "stopping_round": 10,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "lightonai/LightOnOCR-2-1B",
+        "zai-org/GLM-OCR"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": true,
+      "warmup_min_per_pair": 10
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "balanced_every_n_post_warmup_batches": 3,
+      "comparisons_consumed": 1756,
+      "comparisons_saved": 1909,
+      "decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1578.7221953695243,
+        "PaddlePaddle/PP-OCRv6_medium": 1344.8714356962412,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1429.0904749243182,
+        "allenai/olmOCR-2-7B-1025-FP8": 1684.4595249185695,
+        "baidu/Qianfan-OCR": 1553.718918951271,
+        "baidu/Unlimited-OCR": 1492.4910380847436,
+        "deepseek-ai/DeepSeek-OCR": 1364.79279459873,
+        "deepseek-ai/DeepSeek-OCR-2": 1255.621293302505,
+        "lightonai/LightOnOCR-2-1B": 1725.5499489717706,
+        "numind/NuExtract3": 1662.1668878387213,
+        "rednote-hilab/dots.mocr": 1720.2453960707978,
+        "tesseract-5": 970.0674285255849,
+        "zai-org/GLM-OCR": 1718.2026627472223
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1533.94473347526,
+          1624.0514932754495
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1294.39283603392,
+          1394.8410542824838
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1386.879750150233,
+          1473.3803090923095
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1639.8084920452216,
+          1733.6149864248125
+        ],
+        "baidu/Qianfan-OCR": [
+          1512.1751570247654,
+          1597.5736276522393
+        ],
+        "baidu/Unlimited-OCR": [
+          1449.3980558762755,
+          1535.512243587908
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1320.6522881529013,
+          1405.756173765873
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1190.5425432908667,
+          1305.4338547938723
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1684.3156726411894,
+          1779.375682668677
+        ],
+        "numind/NuExtract3": [
+          1621.159322965108,
+          1711.232791608624
+        ],
+        "rednote-hilab/dots.mocr": [
+          1678.3331905855202,
+          1775.2680663330157
+        ],
+        "tesseract-5": [
+          842.6855465433207,
+          1051.0483879190583
+        ],
+        "zai-org/GLM-OCR": [
+          1674.1828879108189,
+          1771.3680711869401
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 66.86744435782839,
+        "PaddlePaddle/PP-OCRv6_medium": -1.485929353045094,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 14.814894263422502,
+        "allenai/olmOCR-2-7B-1025-FP8": 10.706545645326969,
+        "baidu/Qianfan-OCR": 29.712869773117518,
+        "baidu/Unlimited-OCR": -5.5524054064064785,
+        "deepseek-ai/DeepSeek-OCR": -44.03645050920909,
+        "deepseek-ai/DeepSeek-OCR-2": -81.24410337409199,
+        "lightonai/LightOnOCR-2-1B": 27.946691288248985,
+        "numind/NuExtract3": 12.413246410008924,
+        "rednote-hilab/dots.mocr": 20.154095769810965,
+        "tesseract-5": -72.56588260018282,
+        "zai-org/GLM-OCR": 22.268983735171332
+      },
+      "final_rank_order": [
+        "lightonai/LightOnOCR-2-1B",
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 49,
+        "median_direct_comparisons": 19.0,
+        "min_direct_comparisons": 17,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9487179487179485,
+      "kind": "targeted",
+      "max_absolute_elo_delta": 81.24410337409199,
+      "max_absolute_elo_delta_model": "deepseek-ai/DeepSeek-OCR-2",
+      "median_absolute_elo_delta": 22.268983735171332,
+      "name": "targeted_v2_explore_every_3",
+      "percentage_saved": 52.08731241473397,
+      "practical_preferences": [],
+      "resolution_summary": "sample batches exhausted: 11 allocation pairs unresolved",
+      "round_history": [
+        {
+          "active_pairs": null,
+          "allocation_mode": "balanced-warmup",
+          "batch_comparisons": 267,
+          "cumulative_comparisons": 267,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 0,
+            "unresolved": 12
+          },
+          "next_active_pairs": 12,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "FireRedTeam/FireRed-OCR",
+            "zai-org/GLM-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "baidu/Qianfan-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "tesseract-5"
+          ],
+          "round": 1,
+          "sample_indices": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        {
+          "active_pairs": 12,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 52,
+          "cumulative_comparisons": 319,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "FireRedTeam/FireRed-OCR",
+            "zai-org/GLM-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "baidu/Qianfan-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "tesseract-5"
+          ],
+          "round": 2,
+          "sample_indices": [
+            5,
+            6,
+            7,
+            8,
+            9
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 54,
+          "cumulative_comparisons": 373,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "FireRedTeam/FireRed-OCR",
+            "zai-org/GLM-OCR",
+            "baidu/Qianfan-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "deepseek-ai/DeepSeek-OCR",
+            "tesseract-5"
+          ],
+          "round": 3,
+          "sample_indices": [
+            10,
+            11,
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "balanced-exploration",
+          "batch_comparisons": 390,
+          "cumulative_comparisons": 763,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "tesseract-5"
+          ],
+          "round": 4,
+          "sample_indices": [
+            15,
+            16,
+            17,
+            18,
+            19
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 818,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "tesseract-5"
+          ],
+          "round": 5,
+          "sample_indices": [
+            20,
+            21,
+            22,
+            23,
+            24
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 54,
+          "cumulative_comparisons": 872,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "tesseract-5"
+          ],
+          "round": 6,
+          "sample_indices": [
+            25,
+            26,
+            27,
+            28,
+            29
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "balanced-exploration",
+          "batch_comparisons": 390,
+          "cumulative_comparisons": 1262,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "zai-org/GLM-OCR",
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "tesseract-5"
+          ],
+          "round": 7,
+          "sample_indices": [
+            30,
+            31,
+            32,
+            33,
+            34
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 1317,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "zai-org/GLM-OCR",
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "tesseract-5"
+          ],
+          "round": 8,
+          "sample_indices": [
+            35,
+            36,
+            37,
+            38,
+            39
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 50,
+          "cumulative_comparisons": 1367,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "zai-org/GLM-OCR",
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "tesseract-5"
+          ],
+          "round": 9,
+          "sample_indices": [
+            40,
+            41,
+            42,
+            43,
+            44
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "balanced-exploration",
+          "batch_comparisons": 389,
+          "cumulative_comparisons": 1756,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "lightonai/LightOnOCR-2-1B",
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "tesseract-5"
+          ],
+          "round": 10,
+          "sample_indices": [
+            45,
+            46,
+            47,
+            48,
+            49
+          ]
+        }
+      ],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": null,
+      "spearman_rho": 0.989010989010989,
+      "stopping_reason": "sample_batches_exhausted",
+      "stopping_round": 10,
+      "top3": [
+        "lightonai/LightOnOCR-2-1B",
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": null
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 2,
+        "unresolved": 10
+      },
+      "balanced_every_n_post_warmup_batches": 3,
+      "comparisons_consumed": 1684,
+      "comparisons_saved": 1981,
+      "decision_statuses": {
+        "prefer-smaller": 5,
+        "resolved": 2,
+        "unresolved": 5
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1528.41957157949,
+        "PaddlePaddle/PP-OCRv6_medium": 1320.1231251382626,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1421.763606007078,
+        "allenai/olmOCR-2-7B-1025-FP8": 1632.9549673936333,
+        "baidu/Qianfan-OCR": 1523.643980465282,
+        "baidu/Unlimited-OCR": 1484.3914961825521,
+        "deepseek-ai/DeepSeek-OCR": 1399.7470360390994,
+        "deepseek-ai/DeepSeek-OCR-2": 1354.946370415816,
+        "lightonai/LightOnOCR-2-1B": 1661.992650991927,
+        "numind/NuExtract3": 1617.4093847305041,
+        "rednote-hilab/dots.mocr": 1757.1171941283797,
+        "tesseract-5": 1087.8128961744028,
+        "zai-org/GLM-OCR": 1709.677720753573
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1482.5652170872186,
+          1571.9234237789242
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1267.7987192827172,
+          1369.398152819473
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1377.7913909245426,
+          1462.6550625412087
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1587.643712160444,
+          1680.20393300897
+        ],
+        "baidu/Qianfan-OCR": [
+          1482.4623193082723,
+          1568.5055369026645
+        ],
+        "baidu/Unlimited-OCR": [
+          1442.3753581734134,
+          1526.6032308658766
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1357.4408833997363,
+          1442.8625231635194
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1306.1912609145675,
+          1400.8511830532318
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1614.7114310385173,
+          1713.9165222974398
+        ],
+        "numind/NuExtract3": [
+          1573.4454186810872,
+          1665.1094207311894
+        ],
+        "rednote-hilab/dots.mocr": [
+          1709.4691298320483,
+          1814.8421704747725
+        ],
+        "tesseract-5": [
+          983.8459938882305,
+          1160.540437337229
+        ],
+        "zai-org/GLM-OCR": [
+          1664.526158086622,
+          1756.9781759997322
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 16.56482056779396,
+        "PaddlePaddle/PP-OCRv6_medium": -26.23423991102368,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 7.488025346182212,
+        "allenai/olmOCR-2-7B-1025-FP8": -40.79801187960925,
+        "baidu/Qianfan-OCR": -0.3620687128714053,
+        "baidu/Unlimited-OCR": -13.651947308597983,
+        "deepseek-ai/DeepSeek-OCR": -9.082209068839802,
+        "deepseek-ai/DeepSeek-OCR-2": 18.08097373921919,
+        "lightonai/LightOnOCR-2-1B": -35.61060669159474,
+        "numind/NuExtract3": -32.344256698208255,
+        "rednote-hilab/dots.mocr": 57.02589382739279,
+        "tesseract-5": 45.17958504863509,
+        "zai-org/GLM-OCR": 13.744041741522096
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 49,
+        "median_direct_comparisons": 18.5,
+        "min_direct_comparisons": 15,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9230769230769229,
+      "kind": "targeted",
+      "max_absolute_elo_delta": 57.02589382739279,
+      "max_absolute_elo_delta_model": "rednote-hilab/dots.mocr",
+      "median_absolute_elo_delta": 18.08097373921919,
+      "name": "targeted_v2_warmup_5_explore_3_annotate_3x",
+      "percentage_saved": 54.05184174624829,
+      "practical_preferences": [
+        {
+          "higher_ranked_model": "deepseek-ai/DeepSeek-OCR-2",
+          "larger_model": "deepseek-ai/DeepSeek-OCR-2",
+          "size_ratio": 98.55072463768116,
+          "smaller_model": "PaddlePaddle/PP-OCRv6_medium"
+        },
+        {
+          "higher_ranked_model": "baidu/Unlimited-OCR",
+          "larger_model": "baidu/Unlimited-OCR",
+          "size_ratio": 3.6666666666666665,
+          "smaller_model": "PaddlePaddle/PaddleOCR-VL-1.6"
+        },
+        {
+          "higher_ranked_model": "PaddlePaddle/PaddleOCR-VL-1.6",
+          "larger_model": "deepseek-ai/DeepSeek-OCR",
+          "size_ratio": 4.444444444444445,
+          "smaller_model": "PaddlePaddle/PaddleOCR-VL-1.6"
+        },
+        {
+          "higher_ranked_model": "lightonai/LightOnOCR-2-1B",
+          "larger_model": "allenai/olmOCR-2-7B-1025-FP8",
+          "size_ratio": 8.3,
+          "smaller_model": "lightonai/LightOnOCR-2-1B"
+        },
+        {
+          "higher_ranked_model": "rednote-hilab/dots.mocr",
+          "larger_model": "rednote-hilab/dots.mocr",
+          "size_ratio": 3.3333333333333335,
+          "smaller_model": "zai-org/GLM-OCR"
+        }
+      ],
+      "resolution_summary": "sample batches exhausted: 10 allocation pairs unresolved",
+      "round_history": [
+        {
+          "active_pairs": null,
+          "allocation_mode": "balanced-warmup",
+          "batch_comparisons": 267,
+          "cumulative_comparisons": 267,
+          "decision": "warm-up",
+          "min_direct_comparisons": 2,
+          "observed_pairs": 78,
+          "round": 1,
+          "sample_indices": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        {
+          "active_pairs": null,
+          "allocation_mode": "balanced-warmup",
+          "batch_comparisons": 315,
+          "cumulative_comparisons": 582,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "FireRedTeam/FireRed-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "baidu/Qianfan-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 2,
+          "sample_indices": [
+            5,
+            6,
+            7,
+            8,
+            9
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 54,
+          "cumulative_comparisons": 636,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "FireRedTeam/FireRed-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "baidu/Qianfan-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "numind/NuExtract3",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 3,
+          "sample_indices": [
+            10,
+            11,
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 691,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "FireRedTeam/FireRed-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "numind/NuExtract3",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 4,
+          "sample_indices": [
+            15,
+            16,
+            17,
+            18,
+            19
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "balanced-exploration",
+          "batch_comparisons": 390,
+          "cumulative_comparisons": 1081,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 5,
+          "sample_indices": [
+            20,
+            21,
+            22,
+            23,
+            24
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 54,
+          "cumulative_comparisons": 1135,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 6,
+          "sample_indices": [
+            25,
+            26,
+            27,
+            28,
+            29
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 1190,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 7,
+          "sample_indices": [
+            30,
+            31,
+            32,
+            33,
+            34
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "balanced-exploration",
+          "batch_comparisons": 390,
+          "cumulative_comparisons": 1580,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "baidu/Qianfan-OCR",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 8,
+          "sample_indices": [
+            35,
+            36,
+            37,
+            38,
+            39
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 50,
+          "cumulative_comparisons": 1630,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "baidu/Qianfan-OCR",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 9,
+          "sample_indices": [
+            40,
+            41,
+            42,
+            43,
+            44
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 54,
+          "cumulative_comparisons": 1684,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 2,
+            "unresolved": 10
+          },
+          "next_active_pairs": 10,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 10,
+          "sample_indices": [
+            45,
+            46,
+            47,
+            48,
+            49
+          ]
+        }
+      ],
+      "size_rule_controls_sampling": false,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": 3.0,
+      "spearman_rho": 0.9835164835164836,
+      "stopping_reason": "sample_batches_exhausted",
+      "stopping_round": 10,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": 5
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 0,
+        "resolved": 1,
+        "unresolved": 11
+      },
+      "balanced_every_n_post_warmup_batches": 3,
+      "comparisons_consumed": 1990,
+      "comparisons_saved": 1675,
+      "decision_statuses": {
+        "prefer-smaller": 6,
+        "resolved": 1,
+        "unresolved": 5
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1533.1159463461559,
+        "PaddlePaddle/PP-OCRv6_medium": 1356.4394547284237,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1456.6544017666968,
+        "allenai/olmOCR-2-7B-1025-FP8": 1625.4395483977885,
+        "baidu/Qianfan-OCR": 1530.3495913306213,
+        "baidu/Unlimited-OCR": 1513.3480345658143,
+        "deepseek-ai/DeepSeek-OCR": 1450.9921993413825,
+        "deepseek-ai/DeepSeek-OCR-2": 1402.5955569920488,
+        "lightonai/LightOnOCR-2-1B": 1675.317060191538,
+        "numind/NuExtract3": 1595.7458734953489,
+        "rednote-hilab/dots.mocr": 1668.452003795861,
+        "tesseract-5": 1046.225989143694,
+        "zai-org/GLM-OCR": 1645.3243399046264
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1494.8413048860393,
+          1572.0690177651336
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1309.8835773489661,
+          1400.316655752454
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1418.3529390528927,
+          1496.8167539216047
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1588.0741786730778,
+          1665.9166700878961
+        ],
+        "baidu/Qianfan-OCR": [
+          1495.2274795617432,
+          1571.7165158544522
+        ],
+        "baidu/Unlimited-OCR": [
+          1477.7749893097453,
+          1549.4542175566492
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1411.5939760602496,
+          1487.1954934765208
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1362.6705142376954,
+          1442.0109692493627
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1631.2202068103788,
+          1720.933994561298
+        ],
+        "numind/NuExtract3": [
+          1556.8076135971587,
+          1637.3856912713704
+        ],
+        "rednote-hilab/dots.mocr": [
+          1626.8756457830232,
+          1713.8049446440773
+        ],
+        "tesseract-5": [
+          942.7053230210765,
+          1121.2198561394557
+        ],
+        "zai-org/GLM-OCR": [
+          1609.1407552926914,
+          1686.8362853113313
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 21.2611953344599,
+        "PaddlePaddle/PP-OCRv6_medium": 10.082089679137425,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 42.37882110580108,
+        "allenai/olmOCR-2-7B-1025-FP8": -48.31343087545406,
+        "baidu/Qianfan-OCR": 6.343542152467762,
+        "baidu/Unlimited-OCR": 15.304591074664131,
+        "deepseek-ai/DeepSeek-OCR": 42.162954233443315,
+        "deepseek-ai/DeepSeek-OCR-2": 65.73016031545194,
+        "lightonai/LightOnOCR-2-1B": -22.286197491983557,
+        "numind/NuExtract3": -54.00776793336354,
+        "rednote-hilab/dots.mocr": -31.639296505125913,
+        "tesseract-5": 3.592678017926346,
+        "zai-org/GLM-OCR": -50.6093391074246
+      },
+      "final_rank_order": [
+        "lightonai/LightOnOCR-2-1B",
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 50,
+        "median_direct_comparisons": 23.0,
+        "min_direct_comparisons": 18,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9230769230769229,
+      "kind": "targeted",
+      "max_absolute_elo_delta": 65.73016031545194,
+      "max_absolute_elo_delta_model": "deepseek-ai/DeepSeek-OCR-2",
+      "median_absolute_elo_delta": 31.639296505125913,
+      "name": "targeted_v2_warmup_10_explore_3_annotate_3x",
+      "percentage_saved": 45.70259208731242,
+      "practical_preferences": [
+        {
+          "higher_ranked_model": "deepseek-ai/DeepSeek-OCR-2",
+          "larger_model": "deepseek-ai/DeepSeek-OCR-2",
+          "size_ratio": 98.55072463768116,
+          "smaller_model": "PaddlePaddle/PP-OCRv6_medium"
+        },
+        {
+          "higher_ranked_model": "baidu/Unlimited-OCR",
+          "larger_model": "baidu/Unlimited-OCR",
+          "size_ratio": 3.6666666666666665,
+          "smaller_model": "PaddlePaddle/PaddleOCR-VL-1.6"
+        },
+        {
+          "higher_ranked_model": "PaddlePaddle/PaddleOCR-VL-1.6",
+          "larger_model": "deepseek-ai/DeepSeek-OCR",
+          "size_ratio": 4.444444444444445,
+          "smaller_model": "PaddlePaddle/PaddleOCR-VL-1.6"
+        },
+        {
+          "higher_ranked_model": "lightonai/LightOnOCR-2-1B",
+          "larger_model": "rednote-hilab/dots.mocr",
+          "size_ratio": 3.0,
+          "smaller_model": "lightonai/LightOnOCR-2-1B"
+        },
+        {
+          "higher_ranked_model": "rednote-hilab/dots.mocr",
+          "larger_model": "rednote-hilab/dots.mocr",
+          "size_ratio": 3.3333333333333335,
+          "smaller_model": "zai-org/GLM-OCR"
+        },
+        {
+          "higher_ranked_model": "zai-org/GLM-OCR",
+          "larger_model": "allenai/olmOCR-2-7B-1025-FP8",
+          "size_ratio": 9.222222222222221,
+          "smaller_model": "zai-org/GLM-OCR"
+        }
+      ],
+      "resolution_summary": "sample batches exhausted: 11 allocation pairs unresolved",
+      "round_history": [
+        {
+          "active_pairs": null,
+          "allocation_mode": "balanced-warmup",
+          "batch_comparisons": 267,
+          "cumulative_comparisons": 267,
+          "decision": "warm-up",
+          "min_direct_comparisons": 2,
+          "observed_pairs": 78,
+          "round": 1,
+          "sample_indices": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        {
+          "active_pairs": null,
+          "allocation_mode": "balanced-warmup",
+          "batch_comparisons": 315,
+          "cumulative_comparisons": 582,
+          "decision": "warm-up",
+          "min_direct_comparisons": 5,
+          "observed_pairs": 78,
+          "round": 2,
+          "sample_indices": [
+            5,
+            6,
+            7,
+            8,
+            9
+          ]
+        },
+        {
+          "active_pairs": null,
+          "allocation_mode": "balanced-warmup",
+          "batch_comparisons": 388,
+          "cumulative_comparisons": 970,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "FireRedTeam/FireRed-OCR",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "numind/NuExtract3",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 3,
+          "sample_indices": [
+            10,
+            11,
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 1025,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "FireRedTeam/FireRed-OCR",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "numind/NuExtract3",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 4,
+          "sample_indices": [
+            15,
+            16,
+            17,
+            18,
+            19
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 1080,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "FireRedTeam/FireRed-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "numind/NuExtract3",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 5,
+          "sample_indices": [
+            20,
+            21,
+            22,
+            23,
+            24
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "balanced-exploration",
+          "batch_comparisons": 389,
+          "cumulative_comparisons": 1469,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "lightonai/LightOnOCR-2-1B",
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "baidu/Qianfan-OCR",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 6,
+          "sample_indices": [
+            25,
+            26,
+            27,
+            28,
+            29
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 1524,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "lightonai/LightOnOCR-2-1B",
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 7,
+          "sample_indices": [
+            30,
+            31,
+            32,
+            33,
+            34
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 55,
+          "cumulative_comparisons": 1579,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "lightonai/LightOnOCR-2-1B",
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "baidu/Qianfan-OCR",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 8,
+          "sample_indices": [
+            35,
+            36,
+            37,
+            38,
+            39
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "balanced-exploration",
+          "batch_comparisons": 357,
+          "cumulative_comparisons": 1936,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "lightonai/LightOnOCR-2-1B",
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "baidu/Qianfan-OCR",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 9,
+          "sample_indices": [
+            40,
+            41,
+            42,
+            43,
+            44
+          ]
+        },
+        {
+          "active_pairs": 11,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 54,
+          "cumulative_comparisons": 1990,
+          "decision": {
+            "prefer-smaller": 0,
+            "resolved": 1,
+            "unresolved": 11
+          },
+          "next_active_pairs": 11,
+          "rank_order": [
+            "lightonai/LightOnOCR-2-1B",
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 10,
+          "sample_indices": [
+            45,
+            46,
+            47,
+            48,
+            49
+          ]
+        }
+      ],
+      "size_rule_controls_sampling": false,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": 3.0,
+      "spearman_rho": 0.9835164835164836,
+      "stopping_reason": "sample_batches_exhausted",
+      "stopping_round": 10,
+      "top3": [
+        "lightonai/LightOnOCR-2-1B",
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": 10
+    },
+    {
+      "allocation_decision_statuses": {
+        "prefer-smaller": 5,
+        "resolved": 2,
+        "unresolved": 5
+      },
+      "balanced_every_n_post_warmup_batches": 3,
+      "comparisons_consumed": 1568,
+      "comparisons_saved": 2097,
+      "decision_statuses": {
+        "prefer-smaller": 5,
+        "resolved": 2,
+        "unresolved": 5
+      },
+      "deterministic_across_repeats": null,
+      "elo": {
+        "FireRedTeam/FireRed-OCR": 1528.3672135547124,
+        "PaddlePaddle/PP-OCRv6_medium": 1318.8846421014914,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 1425.111495714902,
+        "allenai/olmOCR-2-7B-1025-FP8": 1633.044808502267,
+        "baidu/Qianfan-OCR": 1525.067837174809,
+        "baidu/Unlimited-OCR": 1481.989400260938,
+        "deepseek-ai/DeepSeek-OCR": 1400.9864851554164,
+        "deepseek-ai/DeepSeek-OCR-2": 1359.45356432976,
+        "lightonai/LightOnOCR-2-1B": 1655.4354676840687,
+        "numind/NuExtract3": 1617.1646458973364,
+        "rednote-hilab/dots.mocr": 1766.0725472922893,
+        "tesseract-5": 1088.388606809264,
+        "zai-org/GLM-OCR": 1700.0332855227452
+      },
+      "elo_ci": {
+        "FireRedTeam/FireRed-OCR": [
+          1484.0454528025084,
+          1573.1125988782476
+        ],
+        "PaddlePaddle/PP-OCRv6_medium": [
+          1261.2202552408899,
+          1372.4989350481237
+        ],
+        "PaddlePaddle/PaddleOCR-VL-1.6": [
+          1373.3318776687975,
+          1473.75461406909
+        ],
+        "allenai/olmOCR-2-7B-1025-FP8": [
+          1588.216489009013,
+          1683.4046946126866
+        ],
+        "baidu/Qianfan-OCR": [
+          1483.1317495050077,
+          1566.4845816535224
+        ],
+        "baidu/Unlimited-OCR": [
+          1439.3939330940739,
+          1523.901475725061
+        ],
+        "deepseek-ai/DeepSeek-OCR": [
+          1354.5929361718495,
+          1445.0884765324986
+        ],
+        "deepseek-ai/DeepSeek-OCR-2": [
+          1306.2506011106566,
+          1407.5930432753114
+        ],
+        "lightonai/LightOnOCR-2-1B": [
+          1610.00234940123,
+          1709.543914205717
+        ],
+        "numind/NuExtract3": [
+          1574.0732899103,
+          1662.3109869025775
+        ],
+        "rednote-hilab/dots.mocr": [
+          1715.8973109172186,
+          1832.0174827266126
+        ],
+        "tesseract-5": [
+          991.4306218314965,
+          1155.459208818105
+        ],
+        "zai-org/GLM-OCR": [
+          1658.1688789820614,
+          1753.5207488708602
+        ]
+      },
+      "elo_delta_from_full": {
+        "FireRedTeam/FireRed-OCR": 16.512462543016454,
+        "PaddlePaddle/PP-OCRv6_medium": -27.472722947794864,
+        "PaddlePaddle/PaddleOCR-VL-1.6": 10.835915054006364,
+        "allenai/olmOCR-2-7B-1025-FP8": -40.708170770975585,
+        "baidu/Qianfan-OCR": 1.0617879966555392,
+        "baidu/Unlimited-OCR": -16.054043230212073,
+        "deepseek-ai/DeepSeek-OCR": -7.842759952522783,
+        "deepseek-ai/DeepSeek-OCR-2": 22.588167653163055,
+        "lightonai/LightOnOCR-2-1B": -42.16778999945291,
+        "numind/NuExtract3": -32.588995531375986,
+        "rednote-hilab/dots.mocr": 65.98124699130244,
+        "tesseract-5": 45.75529568349634,
+        "zai-org/GLM-OCR": 4.09960651069423
+      },
+      "final_rank_order": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B",
+        "allenai/olmOCR-2-7B-1025-FP8",
+        "numind/NuExtract3",
+        "FireRedTeam/FireRed-OCR",
+        "baidu/Qianfan-OCR",
+        "baidu/Unlimited-OCR",
+        "PaddlePaddle/PaddleOCR-VL-1.6",
+        "deepseek-ai/DeepSeek-OCR",
+        "deepseek-ai/DeepSeek-OCR-2",
+        "PaddlePaddle/PP-OCRv6_medium",
+        "tesseract-5"
+      ],
+      "followup_acceptance_gate": {
+        "kendall_tau_at_least_0_95": false,
+        "max_absolute_elo_delta_at_most_50": false,
+        "passed": false,
+        "percentage_saved_at_least_60": false,
+        "top3_order_exact": false
+      },
+      "graph": {
+        "connected": true,
+        "connected_components": [
+          [
+            "FireRedTeam/FireRed-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "lightonai/LightOnOCR-2-1B",
+            "numind/NuExtract3",
+            "rednote-hilab/dots.mocr",
+            "tesseract-5",
+            "zai-org/GLM-OCR"
+          ]
+        ],
+        "max_direct_comparisons": 49,
+        "median_direct_comparisons": 18.0,
+        "min_direct_comparisons": 15,
+        "observed_pairs": 78,
+        "pair_coverage_pct": 100.0,
+        "possible_pairs": 78
+      },
+      "kendall_tau": 0.9230769230769229,
+      "kind": "targeted",
+      "max_absolute_elo_delta": 65.98124699130244,
+      "max_absolute_elo_delta_model": "rednote-hilab/dots.mocr",
+      "median_absolute_elo_delta": 22.588167653163055,
+      "name": "targeted_v2_warmup_5_explore_3_size_stop_3x",
+      "percentage_saved": 57.21691678035471,
+      "practical_preferences": [
+        {
+          "higher_ranked_model": "deepseek-ai/DeepSeek-OCR-2",
+          "larger_model": "deepseek-ai/DeepSeek-OCR-2",
+          "size_ratio": 98.55072463768116,
+          "smaller_model": "PaddlePaddle/PP-OCRv6_medium"
+        },
+        {
+          "higher_ranked_model": "baidu/Unlimited-OCR",
+          "larger_model": "baidu/Unlimited-OCR",
+          "size_ratio": 3.6666666666666665,
+          "smaller_model": "PaddlePaddle/PaddleOCR-VL-1.6"
+        },
+        {
+          "higher_ranked_model": "PaddlePaddle/PaddleOCR-VL-1.6",
+          "larger_model": "deepseek-ai/DeepSeek-OCR",
+          "size_ratio": 4.444444444444445,
+          "smaller_model": "PaddlePaddle/PaddleOCR-VL-1.6"
+        },
+        {
+          "higher_ranked_model": "lightonai/LightOnOCR-2-1B",
+          "larger_model": "allenai/olmOCR-2-7B-1025-FP8",
+          "size_ratio": 8.3,
+          "smaller_model": "lightonai/LightOnOCR-2-1B"
+        },
+        {
+          "higher_ranked_model": "rednote-hilab/dots.mocr",
+          "larger_model": "rednote-hilab/dots.mocr",
+          "size_ratio": 3.3333333333333335,
+          "smaller_model": "zai-org/GLM-OCR"
+        }
+      ],
+      "resolution_summary": "sample batches exhausted: 5 allocation pairs unresolved",
+      "round_history": [
+        {
+          "active_pairs": null,
+          "allocation_mode": "balanced-warmup",
+          "batch_comparisons": 267,
+          "cumulative_comparisons": 267,
+          "decision": "warm-up",
+          "min_direct_comparisons": 2,
+          "observed_pairs": 78,
+          "round": 1,
+          "sample_indices": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        {
+          "active_pairs": null,
+          "allocation_mode": "balanced-warmup",
+          "batch_comparisons": 315,
+          "cumulative_comparisons": 582,
+          "decision": {
+            "prefer-smaller": 1,
+            "resolved": 1,
+            "unresolved": 10
+          },
+          "next_active_pairs": 10,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "FireRedTeam/FireRed-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "baidu/Qianfan-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 2,
+          "sample_indices": [
+            5,
+            6,
+            7,
+            8,
+            9
+          ]
+        },
+        {
+          "active_pairs": 10,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 49,
+          "cumulative_comparisons": 631,
+          "decision": {
+            "prefer-smaller": 3,
+            "resolved": 1,
+            "unresolved": 8
+          },
+          "next_active_pairs": 8,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "FireRedTeam/FireRed-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "baidu/Qianfan-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "numind/NuExtract3",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 3,
+          "sample_indices": [
+            10,
+            11,
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "active_pairs": 8,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 40,
+          "cumulative_comparisons": 671,
+          "decision": {
+            "prefer-smaller": 3,
+            "resolved": 1,
+            "unresolved": 8
+          },
+          "next_active_pairs": 8,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "FireRedTeam/FireRed-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "zai-org/GLM-OCR",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "baidu/Qianfan-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "numind/NuExtract3",
+            "baidu/Unlimited-OCR",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 4,
+          "sample_indices": [
+            15,
+            16,
+            17,
+            18,
+            19
+          ]
+        },
+        {
+          "active_pairs": 8,
+          "allocation_mode": "balanced-exploration",
+          "batch_comparisons": 390,
+          "cumulative_comparisons": 1061,
+          "decision": {
+            "prefer-smaller": 5,
+            "resolved": 1,
+            "unresolved": 6
+          },
+          "next_active_pairs": 6,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 5,
+          "sample_indices": [
+            20,
+            21,
+            22,
+            23,
+            24
+          ]
+        },
+        {
+          "active_pairs": 6,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 30,
+          "cumulative_comparisons": 1091,
+          "decision": {
+            "prefer-smaller": 5,
+            "resolved": 1,
+            "unresolved": 6
+          },
+          "next_active_pairs": 6,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "deepseek-ai/DeepSeek-OCR",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 6,
+          "sample_indices": [
+            25,
+            26,
+            27,
+            28,
+            29
+          ]
+        },
+        {
+          "active_pairs": 6,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 30,
+          "cumulative_comparisons": 1121,
+          "decision": {
+            "prefer-smaller": 5,
+            "resolved": 1,
+            "unresolved": 6
+          },
+          "next_active_pairs": 6,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 7,
+          "sample_indices": [
+            30,
+            31,
+            32,
+            33,
+            34
+          ]
+        },
+        {
+          "active_pairs": 6,
+          "allocation_mode": "balanced-exploration",
+          "batch_comparisons": 390,
+          "cumulative_comparisons": 1511,
+          "decision": {
+            "prefer-smaller": 5,
+            "resolved": 1,
+            "unresolved": 6
+          },
+          "next_active_pairs": 6,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "baidu/Qianfan-OCR",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 8,
+          "sample_indices": [
+            35,
+            36,
+            37,
+            38,
+            39
+          ]
+        },
+        {
+          "active_pairs": 6,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 28,
+          "cumulative_comparisons": 1539,
+          "decision": {
+            "prefer-smaller": 5,
+            "resolved": 1,
+            "unresolved": 6
+          },
+          "next_active_pairs": 6,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "baidu/Qianfan-OCR",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 9,
+          "sample_indices": [
+            40,
+            41,
+            42,
+            43,
+            44
+          ]
+        },
+        {
+          "active_pairs": 6,
+          "allocation_mode": "targeted",
+          "batch_comparisons": 29,
+          "cumulative_comparisons": 1568,
+          "decision": {
+            "prefer-smaller": 5,
+            "resolved": 2,
+            "unresolved": 5
+          },
+          "next_active_pairs": 5,
+          "rank_order": [
+            "rednote-hilab/dots.mocr",
+            "zai-org/GLM-OCR",
+            "lightonai/LightOnOCR-2-1B",
+            "allenai/olmOCR-2-7B-1025-FP8",
+            "numind/NuExtract3",
+            "FireRedTeam/FireRed-OCR",
+            "baidu/Qianfan-OCR",
+            "baidu/Unlimited-OCR",
+            "PaddlePaddle/PaddleOCR-VL-1.6",
+            "deepseek-ai/DeepSeek-OCR",
+            "deepseek-ai/DeepSeek-OCR-2",
+            "PaddlePaddle/PP-OCRv6_medium",
+            "tesseract-5"
+          ],
+          "round": 10,
+          "sample_indices": [
+            45,
+            46,
+            47,
+            48,
+            49
+          ]
+        }
+      ],
+      "size_rule_controls_sampling": true,
+      "size_tie_min_samples": 10,
+      "size_tie_ratio": 3.0,
+      "spearman_rho": 0.9835164835164836,
+      "stopping_reason": "sample_batches_exhausted",
+      "stopping_round": 10,
+      "top3": [
+        "rednote-hilab/dots.mocr",
+        "zai-org/GLM-OCR",
+        "lightonai/LightOnOCR-2-1B"
+      ],
+      "top3_membership_matches": true,
+      "top3_membership_overlap": 3,
+      "top3_order_matches": false,
+      "warmup_min_per_pair": 5
     }
   ]
 }
