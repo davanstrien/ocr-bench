@@ -44,6 +44,12 @@ _VLLM_OPENAI_ENV = {"PYTHONPATH": "/usr/local/lib/python3.12/dist-packages"}
 
 
 MODEL_REGISTRY: dict[str, ModelConfig] = {
+    "falcon-ocr": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/falcon-ocr.py",
+        model_id="tiiuae/Falcon-OCR",
+        size="0.3B",
+        default_flavor="l4x1",
+    ),
     "glm-ocr": ModelConfig(
         script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/glm-ocr.py",
         model_id="zai-org/GLM-OCR",
@@ -62,6 +68,12 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         model_id="lightonai/LightOnOCR-2-1B",
         size="1B",
         default_flavor="a100-large",
+    ),
+    "ovis-ocr2": ModelConfig(
+        script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/ovis-ocr2.py",
+        model_id="ATH-MaaS/OvisOCR2",
+        size="0.9B",
+        default_flavor="l4x1",
     ),
     "dots-ocr": ModelConfig(
         script="https://huggingface.co/datasets/uv-scripts/ocr/raw/main/dots-ocr.py",
