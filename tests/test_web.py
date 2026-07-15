@@ -92,6 +92,15 @@ class TestLeaderboard:
         resp = client.get("/leaderboard")
         assert "Judge ELO" in resp.text
 
+    def test_parameter_preference_badge_is_visible(self, client):
+        client.app.state.viewer.leaderboard_rows[0]["preferred_over"] = (
+            "lightonai/LightOnOCR-2-1B (4.0x, n=10)"
+        )
+        resp = client.get("/leaderboard")
+        assert resp.status_code == 200
+        assert "★" in resp.text
+        assert "Parameter-efficient practical preference" in resp.text
+
     def test_failed_model_is_visible_but_unranked(self, client):
         client.app.state.viewer.leaderboard_rows.append(
             {

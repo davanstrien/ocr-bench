@@ -48,8 +48,8 @@ class Leaderboard:
 
     @property
     def ranked(self) -> list[tuple[str, float]]:
-        """Models sorted by ELO rating, descending."""
-        return sorted(self.elo.items(), key=lambda x: x[1], reverse=True)
+        """Models sorted by ELO descending, with model name as a stable tie-break."""
+        return sorted(self.elo.items(), key=lambda item: (-item[1], item[0]))
 
     def win_pct(self, model: str) -> float | None:
         """Win percentage for a model, or None if no comparisons."""
@@ -229,6 +229,9 @@ def _bootstrap_ci(
 
 def rankings_resolved(board: Leaderboard) -> bool:
     """Check if all adjacent ranks have non-overlapping 95% CIs.
+
+    Retained as a public statistical-only helper; the CLI uses the richer
+    adaptive classifier when optional practical stopping rules are enabled.
 
     Returns True when the ranking order is statistically resolved — i.e. for
     every pair of adjacent models in the ranking, the higher-ranked model's

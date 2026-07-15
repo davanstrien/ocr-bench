@@ -599,6 +599,7 @@ def build_comparisons(
     max_samples: int | None = None,
     seed: int = 42,
     skip_samples: dict[tuple[str, str], set[int]] | None = None,
+    include_pairs: set[tuple[str, str]] | None = None,
     indices: list[int] | None = None,
     min_chars: int = DEFAULT_MIN_CHARS,
     prompt_template: str = CRITERIA_PROFILES[DEFAULT_CRITERIA],
@@ -621,6 +622,9 @@ def build_comparisons(
             judged on only some samples is still built for the rest, so a
             resumed run tops up partially-judged pairs. If None, nothing is
             skipped.
+        include_pairs: Optional order-independent set of model pairs to build.
+            Used by opt-in targeted adaptive judging after its initial balanced
+            evidence threshold. ``None`` keeps the existing all-pairs behavior.
         indices: Explicit row indices to use. When provided, ``max_samples``
             and ``seed`` are not used for index selection (seed is still used
             for position-bias randomization).
@@ -643,6 +647,13 @@ def build_comparisons(
     col_names = list(ocr_columns.keys())
     model_names = list(ocr_columns.values())
     pairs = list(combinations(range(len(col_names)), 2))
+    if include_pairs is not None:
+        normalized_include = {_normalize_pair(a, b) for a, b in include_pairs}
+        pairs = [
+            (i, j)
+            for i, j in pairs
+            if _normalize_pair(model_names[i], model_names[j]) in normalized_include
+        ]
 
     # Normalize skip map for symmetric (order-independent) pair lookup.
     normalized_skip: dict[tuple[str, str], set[int]] = {}

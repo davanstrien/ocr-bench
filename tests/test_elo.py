@@ -258,6 +258,10 @@ class TestLeaderboard:
         board = Leaderboard(elo={"a": 1400.0, "b": 1600.0, "c": 1500.0})
         assert [m for m, _ in board.ranked] == ["b", "c", "a"]
 
+    def test_equal_elo_uses_stable_model_name_tie_break(self):
+        board = Leaderboard(elo={"z-model": 1500.0, "a-model": 1500.0})
+        assert [model for model, _ in board.ranked] == ["a-model", "z-model"]
+
     def test_elo_ci_default_empty(self):
         board = Leaderboard()
         assert board.elo_ci == {}

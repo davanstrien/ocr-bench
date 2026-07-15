@@ -9,7 +9,15 @@ from dataclasses import dataclass, field
 import structlog
 from datasets import Dataset, load_dataset
 from huggingface_hub import HfApi
+from huggingface_hub.errors import RepositoryNotFoundError
 
+from ocr_bench.adaptive import (
+    AdjacentPairDecision,
+    classify_adjacent_pairs,
+    comparison_pair_counts,
+    model_parameter_counts,
+    practical_preferences,
+)
 from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo
 from ocr_bench.judge import MAX_IMAGE_DIM, MAX_OCR_TEXT_LENGTH
 from ocr_bench.run import MODEL_REGISTRY
@@ -64,58 +72,94 @@ class EvalMetadata:
     # "normalized" (HTML flattened before the cap) or "raw" (capped as-is).
     # Changes verdicts, so it's provenance alongside the caps.
     judge_text_mode: str = "normalized"
+    # Comparison-allocation provenance. ``balanced`` is the historical default;
+    # ``targeted`` tops up only unresolved adjacent pairs after enough balanced evidence.
+    adaptive_strategy: str = "balanced"
+    # Optional practical preference rule for overlapping adjacent CIs. This
+    # affects stopping/annotation only; it never changes ELO or rank.
+    size_tie_ratio: float | None = None
+    size_tie_min_samples: int = 10
 
     def __post_init__(self):
         if not self.timestamp:
             self.timestamp = datetime.datetime.now(datetime.UTC).isoformat()
 
 
+def _config_is_absent(repo_id: str, config_name: str) -> bool:
+    """Return whether a failed optional-config load is a genuine first-run miss.
+
+    A results publish replaces Hub configs. Treating every read error as "no
+    history" can therefore turn a transient/schema failure into destructive
+    overwrite. Only a missing repo or missing config directory is safely empty;
+    if files exist, the original load failure must abort the run.
+    """
+    try:
+        files = HfApi().list_repo_files(repo_id, repo_type="dataset")
+    except RepositoryNotFoundError:
+        return True
+    except Exception as exc:
+        raise OSError(
+            f"Could not verify existing results in {repo_id}; refusing to overwrite "
+            f"history after the '{config_name}' config failed to load: {exc}"
+        ) from exc
+    return not any(path.startswith(f"{config_name}/") for path in files)
+
+
 def load_existing_comparisons(repo_id: str) -> list[ComparisonResult]:
-    """Load existing comparisons from a Hub results repo.
+    """Load existing comparisons without failing open on uncertain read errors.
 
     The stored winner is already unswapped (canonical), so ``swapped=False``.
-    Returns an empty list if the repo or config doesn't exist.
+    Returns an empty list only when the repo/config genuinely has no comparison
+    files. If files exist but loading fails, raises ``OSError`` so a later push
+    cannot replace history with a partial current run.
     """
     try:
         ds = load_dataset(repo_id, name="comparisons", split="train")
-    except Exception as exc:
-        logger.info("no_existing_comparisons", repo=repo_id, reason=str(exc))
-        return []
-
-    results = []
-    for row in ds:
-        results.append(
-            ComparisonResult(
-                sample_idx=row["sample_idx"],
-                model_a=row["model_a"],
-                model_b=row["model_b"],
-                winner=row["winner"],
-                reason=row.get("reason", ""),
-                agreement=row.get("agreement", "1/1"),
-                swapped=False,
-                text_a=row.get("text_a", ""),
-                text_b=row.get("text_b", ""),
-                col_a=row.get("col_a", ""),
-                col_b=row.get("col_b", ""),
-                truncated_a=row.get("truncated_a", False),
-                truncated_b=row.get("truncated_b", False),
+        results = []
+        for row in ds:
+            results.append(
+                ComparisonResult(
+                    sample_idx=row["sample_idx"],
+                    model_a=row["model_a"],
+                    model_b=row["model_b"],
+                    winner=row["winner"],
+                    reason=row.get("reason", ""),
+                    agreement=row.get("agreement", "1/1"),
+                    swapped=False,
+                    text_a=row.get("text_a", ""),
+                    text_b=row.get("text_b", ""),
+                    col_a=row.get("col_a", ""),
+                    col_b=row.get("col_b", ""),
+                    truncated_a=row.get("truncated_a", False),
+                    truncated_b=row.get("truncated_b", False),
+                )
             )
-        )
+    except Exception as exc:
+        if _config_is_absent(repo_id, "comparisons"):
+            logger.info("no_existing_comparisons", repo=repo_id, reason=str(exc))
+            return []
+        raise OSError(
+            f"Existing comparisons in {repo_id} could not be loaded; refusing to "
+            "overwrite Hub history"
+        ) from exc
+
     logger.info("loaded_existing_comparisons", repo=repo_id, n=len(results))
     return results
 
 
 def load_existing_metadata(repo_id: str) -> list[dict]:
-    """Load existing metadata rows from a Hub results repo.
-
-    Returns an empty list if the repo or config doesn't exist.
-    """
+    """Load metadata, returning empty only for a genuinely absent config."""
     try:
         ds = load_dataset(repo_id, name="metadata", split="train")
         return [dict(row) for row in ds]
     except Exception as exc:
-        logger.info("no_existing_metadata", repo=repo_id, reason=str(exc))
-        return []
+        if _config_is_absent(repo_id, "metadata"):
+            logger.info("no_existing_metadata", repo=repo_id, reason=str(exc))
+            return []
+        raise OSError(
+            f"Existing metadata in {repo_id} could not be loaded; refusing to "
+            "overwrite Hub history"
+        ) from exc
 
 
 def _get_model_sizes() -> dict[str, str]:
@@ -127,6 +171,7 @@ def build_leaderboard_rows(
     board: Leaderboard,
     failed_models: list[str] | None = None,
     failed_outputs: dict[str, int] | None = None,
+    parameter_preferences: dict[str, list[AdjacentPairDecision]] | None = None,
 ) -> list[dict]:
     """Convert a Leaderboard into rows suitable for a Hub dataset.
 
@@ -138,6 +183,7 @@ def build_leaderboard_rows(
     sizes = _get_model_sizes()
     failed = set(failed_models or [])
     failure_counts = failed_outputs or {}
+    preferences = parameter_preferences or {}
     rows = []
     for model, elo in board.ranked:
         if model in failed:
@@ -153,6 +199,11 @@ def build_leaderboard_rows(
             "win_pct": round(board.wins[model] / total * 100) if total > 0 else 0,
             "status": "degraded" if failure_counts.get(model, 0) else "ranked",
             "failed_outputs": failure_counts.get(model, 0),
+            "preferred_over": "; ".join(
+                f"{decision.larger_model} ({decision.size_ratio:.1f}x, "
+                f"n={decision.direct_comparisons})"
+                for decision in preferences.get(model, [])
+            ),
         }
         if board.elo_ci and model in board.elo_ci:
             lo, hi = board.elo_ci[model]
@@ -172,6 +223,7 @@ def build_leaderboard_rows(
                 "win_pct": None,
                 "status": "failed",
                 "failed_outputs": failure_counts.get(model, 0),
+                "preferred_over": "",
             }
         )
     return rows
@@ -198,6 +250,9 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
         "max_ocr_text_len": metadata.max_ocr_text_len,
         "judge_image_dim": metadata.judge_image_dim,
         "judge_text_mode": metadata.judge_text_mode,
+        "adaptive_strategy": metadata.adaptive_strategy,
+        "size_tie_ratio": metadata.size_tie_ratio,
+        "size_tie_min_samples": metadata.size_tie_min_samples,
     }
 
 
@@ -254,29 +309,54 @@ def publish_results(
     metadata: EvalMetadata,
     existing_metadata: list[dict] | None = None,
     license_id: str | None = None,
+    preserved_comparisons: list[ComparisonResult] | None = None,
 ) -> None:
     """Push evaluation results to Hub as a dataset with multiple configs.
 
     Configs:
       - (default): Leaderboard table — ``load_dataset("repo")`` returns this.
       - ``leaderboard``: Same table, named config (backward compat for viewer).
-      - ``comparisons``: Full comparison log from the board (caller merges
-        existing + new before ``compute_elo``, so ``board.comparison_log``
-        is already the complete set).
+      - ``comparisons``: Full comparison history. The board log contains the
+        current model grid; ``preserved_comparisons`` may carry rows for models
+        intentionally excluded from this fit so a subset run cannot erase them.
       - ``metadata``: Append-only run log. New row is appended to
         ``existing_metadata``.
     """
-    # Comparisons
-    if board.comparison_log:
-        comp_ds = Dataset.from_list(board.comparison_log)
+    # Comparisons. Canonicalise preserved out-of-grid rows independently so
+    # they remain durable without entering this board's ELO fit or annotations.
+    comparison_rows = list(board.comparison_log)
+    if preserved_comparisons:
+        preserved_models = sorted(
+            {
+                model
+                for result in preserved_comparisons
+                for model in (result.model_a, result.model_b)
+            }
+        )
+        preserved_board = compute_elo(
+            preserved_comparisons, preserved_models, n_bootstrap=0
+        )
+        comparison_rows.extend(preserved_board.comparison_log)
+    if comparison_rows:
+        comp_ds = Dataset.from_list(comparison_rows)
         comp_ds.push_to_hub(repo_id, config_name="comparisons")
-        logger.info("published_comparisons", repo=repo_id, n=len(board.comparison_log))
+        logger.info("published_comparisons", repo=repo_id, n=len(comparison_rows))
 
-    # Leaderboard — dual push: default config + named config
+    # Leaderboard — dual push: default config + named config. Size-aware
+    # preferences are derived from the final board + direct pair counts and
+    # stored as annotations only; they never alter ELO or row order.
+    decisions = classify_adjacent_pairs(
+        board,
+        comparison_pair_counts(board.comparison_log),
+        size_tie_ratio=metadata.size_tie_ratio,
+        size_tie_min_samples=metadata.size_tie_min_samples,
+        parameter_counts=model_parameter_counts(),
+    )
     rows = build_leaderboard_rows(
         board,
         failed_models=metadata.failed_models,
         failed_outputs=metadata.failed_outputs,
+        parameter_preferences=practical_preferences(decisions),
     )
     lb_ds = Dataset.from_list(rows)
     lb_ds.push_to_hub(repo_id)
@@ -400,6 +480,8 @@ def _build_readme(
         status = "failed" if model_name in failed_models else row.get("status", "ranked")
         if model_name in failed_outputs:
             model = f"{model} ⚠"
+        if row.get("preferred_over"):
+            model = f"{model} ★"
         params = row.get("params", "")
 
         if status == "failed":
@@ -430,6 +512,26 @@ def _build_readme(
                 f"| {row['wins']} | {row['losses']} | {row['ties']} "
                 f"| {row['win_pct']}% |"
             )
+
+    preferred_rows = [row for row in rows if row.get("preferred_over")]
+    if preferred_rows:
+        lines += [
+            "",
+            "## ★ Parameter-efficient practical preferences",
+            "",
+            "These adjacent models have overlapping marginal 95% ELO confidence "
+            "intervals, but the starred model has at least the configured parameter "
+            "advantage after the required number of direct comparisons. This is a "
+            "deployment preference — **not** a statistical-equivalence claim, and it "
+            "does not alter ELO scores or ranks.",
+            "",
+            "| Smaller model | Unresolved against |",
+            "|---------------|--------------------|",
+        ]
+        for row in preferred_rows:
+            safe_model = str(row["model"]).replace("|", "\\|")
+            safe_preference = str(row["preferred_over"]).replace("|", "\\|")
+            lines.append(f"| {safe_model} | {safe_preference} |")
 
     if failed_outputs:
         lines += [
@@ -463,6 +565,13 @@ def _build_readme(
         f"- **OCR text cap**: {metadata.max_ocr_text_len} characters per output",
         f"- **Judge image cap**: {metadata.judge_image_dim}px on the longer side",
         f"- **Comparisons**: {comparisons_str}",
+        f"- **Adaptive strategy**: {metadata.adaptive_strategy}",
+        (
+            f"- **Size-aware stopping**: {metadata.size_tie_ratio:g}x parameter ratio, "
+            f"minimum {metadata.size_tie_min_samples} direct comparisons"
+            if metadata.size_tie_ratio is not None
+            else "- **Size-aware stopping**: disabled"
+        ),
         "- **Method**: Bradley-Terry MLE with bootstrap 95% CIs",
         "",
         "## Configs",

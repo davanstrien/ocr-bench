@@ -47,6 +47,9 @@ class TestBuildParser:
         assert args.max_ocr_text_len == 2500
         assert args.judge_image_dim == 1024
         assert args.judge_text_mode == "normalized"
+        assert args.adaptive_strategy == "balanced"
+        assert args.size_tie_ratio is None
+        assert args.size_tie_min_samples == 10
 
     @pytest.mark.parametrize("flag", ["--max-ocr-text-len", "--judge-image-dim"])
     @pytest.mark.parametrize("value", ["0", "-1"])
@@ -116,6 +119,28 @@ class TestBuildParser:
         parser = build_parser()
         args = parser.parse_args(["judge", "user/dataset", "--no-adaptive"])
         assert args.no_adaptive is True
+
+    def test_targeted_adaptive_and_size_rule(self):
+        args = build_parser().parse_args(
+            [
+                "judge",
+                "user/dataset",
+                "--adaptive-strategy",
+                "targeted",
+                "--size-tie-ratio",
+                "3",
+                "--size-tie-min-samples",
+                "5",
+            ]
+        )
+        assert args.adaptive_strategy == "targeted"
+        assert args.size_tie_ratio == 3.0
+        assert args.size_tie_min_samples == 5
+
+    @pytest.mark.parametrize("value", ["1", "0", "-2", "nan", "inf"])
+    def test_size_tie_ratio_must_exceed_one(self, value):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["judge", "user/dataset", "--size-tie-ratio", value])
 
     def test_no_publish_flag(self):
         parser = build_parser()
@@ -694,6 +719,9 @@ class TestBenchParser:
         assert args.criteria_file is None
         assert args.max_samples is None
         assert args.seed == 42
+        assert args.adaptive_strategy == "balanced"
+        assert args.size_tie_ratio is None
+        assert args.size_tie_min_samples == 10
         assert args.no_publish is False
         assert args.port == 7860
         assert args.host == "127.0.0.1"
@@ -791,6 +819,27 @@ class TestCmdBench:
         assert judge_a.models == ["novita:org/m"]  # judge --model, dest=models
         assert judge_a.max_samples == 25
         assert judge_a.seed == 7
+
+    def test_threads_adaptive_options_to_judge(self, monkeypatch):
+        calls = self._patch(monkeypatch)
+        args = build_parser().parse_args(
+            [
+                "bench",
+                "user/imgs",
+                "user/out",
+                "--adaptive-strategy",
+                "targeted",
+                "--size-tie-ratio",
+                "3",
+                "--size-tie-min-samples",
+                "5",
+            ]
+        )
+        cli.cmd_bench(args)
+        judge_a = calls[1][1]
+        assert judge_a.adaptive_strategy == "targeted"
+        assert judge_a.size_tie_ratio == 3.0
+        assert judge_a.size_tie_min_samples == 5
 
     def test_threads_criteria_to_judge(self, monkeypatch):
         """bench --criteria reaches the judge phase's namespace."""

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from ocr_bench.adaptive import AdjacentPairDecision
 from ocr_bench.elo import ComparisonResult, Leaderboard
 from ocr_bench.publish import (
     EvalMetadata,
@@ -84,6 +87,25 @@ class TestBuildLeaderboardRows:
         assert model_a["elo"] == 1550
         assert model_a["failed_outputs"] == 1
 
+    def test_parameter_preference_is_annotation_only(self):
+        board = _make_board()
+        decision = AdjacentPairDecision(
+            higher_model="model-a",
+            lower_model="model-c",
+            status="prefer-smaller",
+            direct_comparisons=10,
+            smaller_model="model-c",
+            larger_model="model-a",
+            size_ratio=4.0,
+        )
+        rows = build_leaderboard_rows(
+            board,
+            parameter_preferences={"model-c": [decision]},
+        )
+        assert [row["model"] for row in rows] == ["model-a", "model-c", "model-b"]
+        model_c = next(row for row in rows if row["model"] == "model-c")
+        assert model_c["preferred_over"] == "model-a (4.0x, n=10)"
+
 
 class TestBuildMetadataRow:
     def test_auto_timestamp(self):
@@ -137,6 +159,37 @@ class TestBuildMetadataRow:
         row = build_metadata_row(meta)
         assert row["max_comparisons"] is None
         assert row["budget_exhausted"] is False
+
+    def test_adaptive_fields_default(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=[],
+            seed=42,
+            max_samples=0,
+            total_comparisons=0,
+            valid_comparisons=0,
+        )
+        row = build_metadata_row(meta)
+        assert row["adaptive_strategy"] == "balanced"
+        assert row["size_tie_ratio"] is None
+        assert row["size_tie_min_samples"] == 10
+
+    def test_adaptive_fields_recorded(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=["j"],
+            seed=42,
+            max_samples=10,
+            total_comparisons=12,
+            valid_comparisons=12,
+            adaptive_strategy="targeted",
+            size_tie_ratio=3,
+            size_tie_min_samples=5,
+        )
+        row = build_metadata_row(meta)
+        assert row["adaptive_strategy"] == "targeted"
+        assert row["size_tie_ratio"] == 3
+        assert row["size_tie_min_samples"] == 5
 
     def test_budget_fields_recorded(self):
         meta = EvalMetadata(
@@ -436,6 +489,42 @@ class TestPublishResults:
 
     @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.Dataset")
+    def test_preserves_out_of_grid_comparisons_without_ranking_them(
+        self, mock_ds_cls, mock_api_cls
+    ):
+        board = _make_board()
+        stale = [
+            ComparisonResult(
+                sample_idx=7,
+                model_a="model-a",
+                model_b="retired-model",
+                winner="B",
+            )
+        ]
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=["j1"],
+            seed=42,
+            max_samples=10,
+            total_comparisons=1,
+            valid_comparisons=1,
+        )
+
+        publish_results(
+            "user/results",
+            board,
+            meta,
+            preserved_comparisons=stale,
+        )
+
+        comparison_rows = mock_ds_cls.from_list.call_args_list[0].args[0]
+        assert len(comparison_rows) == len(board.comparison_log) + 1
+        assert any(row["model_b"] == "retired-model" for row in comparison_rows)
+        leaderboard_rows = mock_ds_cls.from_list.call_args_list[1].args[0]
+        assert all(row["model"] != "retired-model" for row in leaderboard_rows)
+
+    @patch("ocr_bench.publish.HfApi")
+    @patch("ocr_bench.publish.Dataset")
     def test_skips_comparisons_if_empty(self, mock_ds_cls, mock_api_cls):
         mock_ds_cls.from_list.return_value
         board = Leaderboard(
@@ -579,11 +668,25 @@ class TestLoadExistingComparisons:
         assert results[0].truncated_a is True
         assert results[0].truncated_b is False
 
+    @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.load_dataset")
-    def test_returns_empty_on_missing_repo(self, mock_load):
-        mock_load.side_effect = Exception("repo not found")
-        results = load_existing_comparisons("nonexistent/repo")
+    def test_returns_empty_when_comparisons_config_is_absent(self, mock_load, mock_api_cls):
+        mock_load.side_effect = Exception("config not found")
+        mock_api_cls.return_value.list_repo_files.return_value = ["README.md"]
+        results = load_existing_comparisons("user/results")
         assert results == []
+
+    @patch("ocr_bench.publish.HfApi")
+    @patch("ocr_bench.publish.load_dataset")
+    def test_existing_comparison_files_fail_closed_on_load_error(
+        self, mock_load, mock_api_cls
+    ):
+        mock_load.side_effect = Exception("temporary parquet failure")
+        mock_api_cls.return_value.list_repo_files.return_value = [
+            "comparisons/train-00000-of-00001.parquet"
+        ]
+        with pytest.raises(OSError, match="refusing to overwrite Hub history"):
+            load_existing_comparisons("user/results")
 
 
 class TestLoadExistingMetadata:
@@ -599,11 +702,25 @@ class TestLoadExistingMetadata:
         assert len(rows) == 1
         assert rows[0]["source_dataset"] == "repo/data"
 
+    @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.load_dataset")
-    def test_returns_empty_on_missing(self, mock_load):
-        mock_load.side_effect = Exception("not found")
-        rows = load_existing_metadata("nonexistent/repo")
+    def test_returns_empty_when_metadata_config_is_absent(self, mock_load, mock_api_cls):
+        mock_load.side_effect = Exception("config not found")
+        mock_api_cls.return_value.list_repo_files.return_value = ["README.md"]
+        rows = load_existing_metadata("user/results")
         assert rows == []
+
+    @patch("ocr_bench.publish.HfApi")
+    @patch("ocr_bench.publish.load_dataset")
+    def test_existing_metadata_files_fail_closed_on_load_error(
+        self, mock_load, mock_api_cls
+    ):
+        mock_load.side_effect = Exception("temporary parquet failure")
+        mock_api_cls.return_value.list_repo_files.return_value = [
+            "metadata/train-00000-of-00001.parquet"
+        ]
+        with pytest.raises(OSError, match="refusing to overwrite Hub history"):
+            load_existing_metadata("user/results")
 
 
 class TestBuildReadme:
@@ -721,6 +838,43 @@ class TestBuildReadme:
         assert "**Judge text mode**: normalized" in readme
         assert "**OCR text cap**: 2500 characters per output" in readme
         assert "**Judge image cap**: 1024px" in readme
+
+    def test_surfaces_targeted_strategy_and_parameter_preference(self):
+        from ocr_bench.publish import _build_readme
+
+        board = Leaderboard(
+            elo={"tiiuae/Falcon-OCR": 1510.0, "deepseek-ai/DeepSeek-OCR": 1500.0},
+            elo_ci={
+                "tiiuae/Falcon-OCR": (1480.0, 1540.0),
+                "deepseek-ai/DeepSeek-OCR": (1490.0, 1530.0),
+            },
+            wins={"tiiuae/Falcon-OCR": 5, "deepseek-ai/DeepSeek-OCR": 5},
+            losses={"tiiuae/Falcon-OCR": 5, "deepseek-ai/DeepSeek-OCR": 5},
+            ties={"tiiuae/Falcon-OCR": 0, "deepseek-ai/DeepSeek-OCR": 0},
+        )
+        decision = AdjacentPairDecision(
+            higher_model="tiiuae/Falcon-OCR",
+            lower_model="deepseek-ai/DeepSeek-OCR",
+            status="prefer-smaller",
+            direct_comparisons=10,
+            smaller_model="tiiuae/Falcon-OCR",
+            larger_model="deepseek-ai/DeepSeek-OCR",
+            size_ratio=13.3,
+        )
+        rows = build_leaderboard_rows(
+            board,
+            parameter_preferences={"tiiuae/Falcon-OCR": [decision]},
+        )
+        meta = self._make_metadata()
+        meta.adaptive_strategy = "targeted"
+        meta.size_tie_ratio = 3
+        readme = _build_readme("user/results", rows, board, meta)
+        assert "tiiuae/Falcon-OCR ★" in readme
+        assert "## ★ Parameter-efficient practical preferences" in readme
+        assert "deepseek-ai/DeepSeek-OCR (13.3x, n=10)" in readme
+        assert "**Adaptive strategy**: targeted" in readme
+        assert "**Size-aware stopping**: 3x parameter ratio" in readme
+        assert "not** a statistical-equivalence claim" in readme
 
     def _board_two_models(self) -> Leaderboard:
         return Leaderboard(
