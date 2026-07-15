@@ -462,6 +462,55 @@ class TestCheckpointing:
         assert m_checkpoint.call_count == 3  # attempted despite failing
         m_publish.assert_called_once()
 
+    def test_subset_run_preserves_out_of_grid_history_in_checkpoints_and_final_publish(self):
+        ds, ocr = make_ds(n=3, models=("a", "b"))
+        current = ComparisonResult(0, "model-a", "model-b", "A")
+        stale = ComparisonResult(0, "model-a", "retired-model", "B")
+
+        _, m_publish, m_checkpoint = _run_judge(
+            ["--no-adaptive", "--checkpoint-every", "1"],
+            ds,
+            ocr,
+            existing=[current, stale],
+        )
+
+        assert m_checkpoint.call_count == 2
+        for call in m_checkpoint.call_args_list:
+            checkpoint_results = call.args[1]
+            assert stale in checkpoint_results
+            assert "retired-model" in call.args[2]
+        assert m_publish.call_args.kwargs["preserved_comparisons"] == [stale]
+        board = m_publish.call_args.args[1]
+        assert all(
+            row["model_a"] != "retired-model" and row["model_b"] != "retired-model"
+            for row in board.comparison_log
+        )
+
+    def test_failed_model_history_is_preserved_but_excluded_from_fit(self):
+        ds, ocr = make_ds(n=3, models=("a", "b", "c"))
+        ds._columns["col_c"] = ["[OCR ERROR]"] * 3
+        current = ComparisonResult(0, "model-a", "model-b", "A")
+        historical_failed = ComparisonResult(0, "model-a", "model-c", "B")
+
+        _, m_publish, m_checkpoint = _run_judge(
+            ["--no-adaptive", "--checkpoint-every", "1"],
+            ds,
+            ocr,
+            existing=[current, historical_failed],
+        )
+
+        assert all(
+            historical_failed in call.args[1]
+            for call in m_checkpoint.call_args_list
+        )
+        assert m_publish.call_args.kwargs["preserved_comparisons"] == [historical_failed]
+        board = m_publish.call_args.args[1]
+        assert "model-c" not in board.elo
+        assert all(
+            row["model_a"] != "model-c" and row["model_b"] != "model-c"
+            for row in board.comparison_log
+        )
+
     def test_checkpoints_fire_in_adaptive_mode(self):
         # Adaptive checkpoints at batch boundaries: batch of 5 samples x 3 pairs
         # = 15 comparisons; with K=5 each batch crosses the threshold once.

@@ -108,7 +108,12 @@ def classify_adjacent_pairs(
             decisions.append(AdjacentPairDecision(higher_model, lower_model, "resolved", direct))
             continue
 
-        if size_tie_ratio is not None and direct >= size_tie_min_samples:
+        if (
+            higher_ci is not None
+            and lower_ci is not None
+            and size_tie_ratio is not None
+            and direct >= size_tie_min_samples
+        ):
             higher_size = sizes.get(higher_model)
             lower_size = sizes.get(lower_model)
             if higher_size and lower_size and higher_size != lower_size:

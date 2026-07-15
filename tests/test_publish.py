@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from ocr_bench.adaptive import AdjacentPairDecision
 from ocr_bench.elo import ComparisonResult, Leaderboard
 from ocr_bench.publish import (
@@ -487,6 +489,42 @@ class TestPublishResults:
 
     @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.Dataset")
+    def test_preserves_out_of_grid_comparisons_without_ranking_them(
+        self, mock_ds_cls, mock_api_cls
+    ):
+        board = _make_board()
+        stale = [
+            ComparisonResult(
+                sample_idx=7,
+                model_a="model-a",
+                model_b="retired-model",
+                winner="B",
+            )
+        ]
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=["j1"],
+            seed=42,
+            max_samples=10,
+            total_comparisons=1,
+            valid_comparisons=1,
+        )
+
+        publish_results(
+            "user/results",
+            board,
+            meta,
+            preserved_comparisons=stale,
+        )
+
+        comparison_rows = mock_ds_cls.from_list.call_args_list[0].args[0]
+        assert len(comparison_rows) == len(board.comparison_log) + 1
+        assert any(row["model_b"] == "retired-model" for row in comparison_rows)
+        leaderboard_rows = mock_ds_cls.from_list.call_args_list[1].args[0]
+        assert all(row["model"] != "retired-model" for row in leaderboard_rows)
+
+    @patch("ocr_bench.publish.HfApi")
+    @patch("ocr_bench.publish.Dataset")
     def test_skips_comparisons_if_empty(self, mock_ds_cls, mock_api_cls):
         mock_ds_cls.from_list.return_value
         board = Leaderboard(
@@ -630,11 +668,25 @@ class TestLoadExistingComparisons:
         assert results[0].truncated_a is True
         assert results[0].truncated_b is False
 
+    @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.load_dataset")
-    def test_returns_empty_on_missing_repo(self, mock_load):
-        mock_load.side_effect = Exception("repo not found")
-        results = load_existing_comparisons("nonexistent/repo")
+    def test_returns_empty_when_comparisons_config_is_absent(self, mock_load, mock_api_cls):
+        mock_load.side_effect = Exception("config not found")
+        mock_api_cls.return_value.list_repo_files.return_value = ["README.md"]
+        results = load_existing_comparisons("user/results")
         assert results == []
+
+    @patch("ocr_bench.publish.HfApi")
+    @patch("ocr_bench.publish.load_dataset")
+    def test_existing_comparison_files_fail_closed_on_load_error(
+        self, mock_load, mock_api_cls
+    ):
+        mock_load.side_effect = Exception("temporary parquet failure")
+        mock_api_cls.return_value.list_repo_files.return_value = [
+            "comparisons/train-00000-of-00001.parquet"
+        ]
+        with pytest.raises(OSError, match="refusing to overwrite Hub history"):
+            load_existing_comparisons("user/results")
 
 
 class TestLoadExistingMetadata:
@@ -650,11 +702,25 @@ class TestLoadExistingMetadata:
         assert len(rows) == 1
         assert rows[0]["source_dataset"] == "repo/data"
 
+    @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.load_dataset")
-    def test_returns_empty_on_missing(self, mock_load):
-        mock_load.side_effect = Exception("not found")
-        rows = load_existing_metadata("nonexistent/repo")
+    def test_returns_empty_when_metadata_config_is_absent(self, mock_load, mock_api_cls):
+        mock_load.side_effect = Exception("config not found")
+        mock_api_cls.return_value.list_repo_files.return_value = ["README.md"]
+        rows = load_existing_metadata("user/results")
         assert rows == []
+
+    @patch("ocr_bench.publish.HfApi")
+    @patch("ocr_bench.publish.load_dataset")
+    def test_existing_metadata_files_fail_closed_on_load_error(
+        self, mock_load, mock_api_cls
+    ):
+        mock_load.side_effect = Exception("temporary parquet failure")
+        mock_api_cls.return_value.list_repo_files.return_value = [
+            "metadata/train-00000-of-00001.parquet"
+        ]
+        with pytest.raises(OSError, match="refusing to overwrite Hub history"):
+            load_existing_metadata("user/results")
 
 
 class TestBuildReadme:

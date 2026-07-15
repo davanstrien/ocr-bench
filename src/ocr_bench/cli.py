@@ -276,8 +276,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="RATIO",
         help=(
             "Treat an unresolved adjacent pair as a practical smaller-model "
-            "preference when its parameter-count ratio is at least RATIO. This "
-            "can stop targeted sampling but does not alter ELO or claim equivalence."
+            "preference when its parameter-count ratio is at least RATIO. Applies "
+            "to balanced and targeted adaptive stopping; targeted also stops topping "
+            "up that pair. Does not alter ELO or claim equivalence."
         ),
     )
     judge.add_argument(
@@ -466,14 +467,16 @@ def print_leaderboard(
     from ocr_bench.publish import _get_model_sizes
 
     sizes = _get_model_sizes()
-    preferences = practical_preferences(
-        _decisions_for_board(
-            board,
-            None,
-            size_tie_ratio=size_tie_ratio,
-            size_tie_min_samples=size_tie_min_samples,
+    preferences: dict[str, list[AdjacentPairDecision]] = {}
+    if size_tie_ratio is not None:
+        preferences = practical_preferences(
+            _decisions_for_board(
+                board,
+                None,
+                size_tie_ratio=size_tie_ratio,
+                size_tie_min_samples=size_tie_min_samples,
+            )
         )
-    )
     table = Table(title="OCR Model Leaderboard")
     table.add_column("Rank", style="bold")
     table.add_column("Model")
@@ -960,6 +963,10 @@ def cmd_judge(args: argparse.Namespace) -> None:
 
     # --- Incremental: load existing comparisons ---
     existing_results: list[ComparisonResult] = []
+    # Comparisons outside this invocation's rankable model set (subset/retired
+    # configs or currently failed models) are excluded from the current ELO fit
+    # but preserved on Hub. A rerun must never erase judged history.
+    preserved_out_of_grid_results: list[ComparisonResult] = []
     existing_meta_rows: list[dict] = []
     # Maps a normalized (model_a, model_b) pair to the sample indices already
     # judged for it, so build_comparisons skips only those exact (pair, sample)
@@ -981,29 +988,19 @@ def cmd_judge(args: argparse.Namespace) -> None:
         existing_results, discarded_sentinels = _filter_existing_sentinel_comparisons(
             loaded_existing
         )
-        # A currently all-sentinel model is intentionally absent from the ELO
-        # graph. Historical non-sentinel verdicts for that model must not reconnect
-        # it or influence the remaining rankings.
-        failed_set = set(failed_models)
-        before_failed_filter = len(existing_results)
-        existing_results = [
+        # Comparisons outside the rankable current grid cannot enter this ELO
+        # fit, but remain part of the durable Hub history and are re-published
+        # alongside current-grid rows.
+        preserved_out_of_grid_results = [
             result
             for result in existing_results
-            if result.model_a not in failed_set and result.model_b not in failed_set
+            if result.model_a not in current_models or result.model_b not in current_models
         ]
-        discarded_failed_model = before_failed_filter - len(existing_results)
-
-        # Results repos can outlive a model-grid change. Drop comparisons for
-        # configs no longer present; otherwise compute_elo would receive models
-        # outside its current board. A newly added model is handled later by a
-        # balanced warm-up before targeted allocation resumes.
-        before_current_filter = len(existing_results)
         existing_results = [
             result
             for result in existing_results
             if result.model_a in current_models and result.model_b in current_models
         ]
-        discarded_stale_model = before_current_filter - len(existing_results)
 
         # Preserve the append-only metadata history even when integrity filtering
         # removes every old comparison.
@@ -1020,29 +1017,19 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 repo=results_repo,
                 n=discarded_sentinels,
             )
-        if discarded_failed_model:
+        if preserved_out_of_grid_results:
             console.print(
-                f"[bold yellow]Discarded {discarded_failed_model} historical comparison(s) "
-                "involving a currently failed model.[/bold yellow]"
+                f"[yellow]Preserving {len(preserved_out_of_grid_results)} historical "
+                "comparison(s) outside the rankable current model set; "
+                "they are excluded from this ELO fit.[/yellow]"
             )
-            logger.warning(
-                "discarded_failed_model_comparisons",
+            logger.info(
+                "preserving_out_of_grid_comparisons",
                 repo=results_repo,
-                n=discarded_failed_model,
-                models=failed_models,
-            )
-        if discarded_stale_model:
-            console.print(
-                f"[bold yellow]Discarded {discarded_stale_model} historical comparison(s) "
-                "for models outside the current OCR config set.[/bold yellow]"
-            )
-            logger.warning(
-                "discarded_out_of_grid_comparisons",
-                repo=results_repo,
-                n=discarded_stale_model,
+                n=len(preserved_out_of_grid_results),
             )
 
-        if existing_results:
+        if existing_results or preserved_out_of_grid_results:
             # Provenance guard: NEVER mix criteria rubrics on one board. The
             # existing comparisons were judged under the profile recorded in the
             # last metadata row (pre-#44 rows = the default profile, whose prompt
@@ -1098,23 +1085,38 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 )
                 sys.exit(1)
 
-            skip_samples = {}
-            for r in existing_results:
-                skip_samples.setdefault(_normalize_pair(r.model_a, r.model_b), set()).add(
-                    r.sample_idx
+            if existing_results:
+                skip_samples = {}
+                for r in existing_results:
+                    skip_samples.setdefault(
+                        _normalize_pair(r.model_a, r.model_b), set()
+                    ).add(r.sample_idx)
+                console.print(
+                    f"\nIncremental mode: {len(existing_results)} reusable existing "
+                    f"comparisons across {len(skip_samples)} model pairs — skipping "
+                    "already-judged (pair, sample) combinations, topping up the rest."
                 )
-            console.print(
-                f"\nIncremental mode: {len(existing_results)} reusable existing comparisons "
-                f"across {len(skip_samples)} model pairs — skipping already-judged "
-                f"(pair, sample) combinations, topping up the rest."
-            )
-        elif discarded_sentinels or discarded_failed_model or discarded_stale_model:
+            else:
+                console.print(
+                    "\nNo existing comparisons match the current model grid; "
+                    "starting its judge run while preserving out-of-grid history."
+                )
+        elif discarded_sentinels:
             console.print(
                 "\nNo reusable existing comparisons remain after integrity filtering — "
                 "rebuilding from the current OCR outputs."
             )
         else:
             console.print("\nNo existing comparisons found — full judge run.")
+
+    publication_model_names = sorted(
+        current_models
+        | {
+            model
+            for result in preserved_out_of_grid_results
+            for model in (result.model_a, result.model_b)
+        }
+    )
 
     # --- Judge setup (shared by both paths) ---
     model_specs = args.models or [DEFAULT_JUDGE]
@@ -1282,15 +1284,18 @@ def cmd_judge(args: argparse.Namespace) -> None:
             total = len(existing_results) + len(new_results)
             console.print(f"  Batch {batch_num + 1}: {len(batch_results)} new, {total} total")
 
-            # Periodic checkpoint: push the full accumulated comparison set
-            # (append-only, comparisons config only). Fires at batch boundaries,
-            # so checkpoint_every is a lower bound on comparisons between pushes.
+            # Periodic checkpoint: push the full accumulated comparison set,
+            # including out-of-grid history excluded from this ELO fit.
             if (
                 checkpoint_every
                 and results_repo
                 and total_comparisons - last_checkpoint >= checkpoint_every
             ):
-                _checkpoint(results_repo, existing_results + new_results, model_names)
+                _checkpoint(
+                    results_repo,
+                    existing_results + new_results + preserved_out_of_grid_results,
+                    publication_model_names,
+                )
                 last_checkpoint = total_comparisons
 
             if budget_exhausted:
@@ -1438,6 +1443,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     metadata,
                     existing_metadata=existing_meta_rows,
                     license_id=args.license,
+                    preserved_comparisons=preserved_out_of_grid_results,
                 )
                 console.print(f"\nResults published to [bold]{results_repo}[/bold]")
                 _refresh_viewer_space(results_repo)
@@ -1467,7 +1473,11 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 and results_repo
                 and total_comparisons - last_checkpoint >= checkpoint_every
             ):
-                _checkpoint(results_repo, existing_results + new_results, model_names)
+                _checkpoint(
+                    results_repo,
+                    existing_results + new_results + preserved_out_of_grid_results,
+                    publication_model_names,
+                )
                 last_checkpoint = total_comparisons
 
         if budget_exhausted:
@@ -1561,6 +1571,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             metadata,
             existing_metadata=existing_meta_rows,
             license_id=args.license,
+            preserved_comparisons=preserved_out_of_grid_results,
         )
         console.print(f"\nResults published to [bold]{results_repo}[/bold]")
         _refresh_viewer_space(results_repo)

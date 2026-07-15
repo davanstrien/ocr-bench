@@ -230,6 +230,9 @@ def _bootstrap_ci(
 def rankings_resolved(board: Leaderboard) -> bool:
     """Check if all adjacent ranks have non-overlapping 95% CIs.
 
+    Retained as a public statistical-only helper; the CLI uses the richer
+    adaptive classifier when optional practical stopping rules are enabled.
+
     Returns True when the ranking order is statistically resolved — i.e. for
     every pair of adjacent models in the ranking, the higher-ranked model's
     CI lower bound exceeds the lower-ranked model's CI upper bound.

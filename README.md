@@ -77,7 +77,9 @@ ocr-bench judge <output-repo> \
   --size-tie-ratio 3
 ```
 
-`targeted` tops up only adjacent pairs whose confidence intervals remain unresolved. The optional size rule stops trying to order an unresolved pair once it has at least 10 direct comparisons and one model has at least 3× fewer parameters. The leaderboard marks the smaller model as a practical deployment preference; this does **not** alter ELO/rank or claim the models are statistically equivalent. Unknown/custom model sizes simply remain unresolved. Both settings are recorded in results metadata, and the default remains `balanced` for backward compatibility while targeted allocation is validated.
+`targeted` tops up only adjacent pairs whose confidence intervals remain unresolved. The optional size rule applies to **either** adaptive strategy: it can satisfy the whole-run stopping condition in `balanced` mode, while `targeted` also stops topping up that pair. It activates once the pair has at least 10 direct comparisons and one model has at least 3× fewer parameters. The leaderboard marks the smaller model as a practical deployment preference; this does **not** alter ELO/rank or claim the models are statistically equivalent. Unknown/custom model sizes simply remain unresolved. Both settings are recorded in results metadata.
+
+Targeted allocation is experimental and remains opt-in because it conditions later sampling on interim rankings; ordinary bootstrap CIs do not fully account for that optional stopping and may be somewhat optimistic. The default remains `balanced` while targeted allocation is validated.
 
 To avoid wasting judge calls on uninformative pairs, the judge skips comparisons where **both** outputs are shorter than `--min-chars` (default 20 — neither model produced meaningful text), and scores **identical** outputs as an automatic tie without calling the judge. Pass `--min-chars 0` to disable the length filter.
 

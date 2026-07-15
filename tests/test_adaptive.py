@@ -100,6 +100,17 @@ class TestAdjacentPairDecisions:
         )
         assert decisions[0].status == "unresolved"
 
+    def test_missing_ci_cannot_become_a_practical_preference(self):
+        board = _board()
+        del board.elo_ci["large"]
+        decisions = classify_adjacent_pairs(
+            board,
+            {("large", "small"): 10, ("large", "third"): 10},
+            size_tie_ratio=3,
+            parameter_counts={"small": 1_000_000_000, "large": 4_000_000_000},
+        )
+        assert decisions[0].status == "unresolved"
+
     def test_unknown_size_fails_safe_as_unresolved(self):
         decisions = classify_adjacent_pairs(
             _board(),
