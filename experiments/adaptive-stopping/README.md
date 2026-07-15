@@ -1,8 +1,9 @@
 # Adaptive stopping counterfactual replay
 
 **Recommendation: keep targeted allocation experimental and do not run a live trial.** Follow-up
-replays tested stronger adaptive warm-ups/exploration and fixed outcome-independent designs over
-five allocation seeds. No design passed the predeclared fidelity/savings gate robustly.
+replays tested stronger adaptive allocation, fixed outcome-independent designs, and six published
+boards spanning four collections and three Rubenstein judges. There is no collection-robust basis
+for a production change, especially for large model grids.
 
 The opt-in targeted allocator delivers the expected call reduction, but not by stopping early:
 it uses all 10 five-sample rounds while selecting fewer pairs per round. Against the full stored
@@ -242,6 +243,85 @@ but does not make a small board equivalent to the full one. The fixed designs al
 pair-count balance alone is insufficient; preserving a common balanced warm-up made top-3
 membership much more stable than independently sampling each pair.
 
+## Cross-collection, page-clustered replay
+
+The fixed designs were then replayed on six suitable published boards without new judge calls.
+Revisions are pinned in [`multi_board.py`](multi_board.py).
+
+| Board | Collection/role | Outcomes | Models | Samples |
+|---|---|---:|---:|---:|
+| Rubenstein 30B | independent manuscript-card collection | 299 | 4 | 50 |
+| Rubenstein jury | same collection, judge sensitivity | 300 | 4 | 50 |
+| Rubenstein Kimi | same collection, judge sensitivity | 300 | 4 | 50 |
+| UFO 30B | independent collection | 294 | 4 | 49 |
+| BPL | independent, incomplete board | 147 | 4 | 41 |
+| Britannica Qwen35 | same corpus, earlier 6-model/judge sensitivity | 720 | 6 | 50 |
+
+Rubenstein's three judges are not counted as three independent collections. This gives four
+collection groups, but only the original Britannica board has a 14-model graph.
+
+### Uncertainty method
+
+For each board, design, budget fraction (25%, 40%, 60%), and allocation seed (42–46), the replay:
+
+1. resamples complete `sample_idx` page clusters 200 times;
+2. refits the full board inside each page bootstrap;
+3. reruns the fixed allocation inside that same replicate; and
+4. compares the selected board with its paired bootstrap full board.
+
+This is 1,000 design-aware page-bootstrap evaluations per board/design/budget. A full-board pair is
+called robust only when its direction repeats in at least 95% of full-board page bootstraps. The
+cross-board criteria were predeclared as:
+
+- clustered top-3 membership agreement ≥90%;
+- agreement on robust full-board pairs ≥95%; and
+- median clustered Spearman ρ ≥0.90.
+
+Exact ordering among unresolved models and absolute ELO drift are still reported, but are not used
+as pass criteria after the first replay showed that they can be unstable even for the full board.
+
+### Full-board stability ceiling
+
+| Board | Robust pairs | Possible | Full-board top-3 set stability | Full-board top-3 order stability |
+|---|---:|---:|---:|---:|
+| Rubenstein 30B | 4 | 6 | 100.0% | 65.5% |
+| Rubenstein jury | 3 | 6 | 83.0% | 46.5% |
+| Rubenstein Kimi | 5 | 6 | 99.5% | 89.0% |
+| UFO 30B | 5 | 6 | 100.0% | 84.0% |
+| BPL | 4 | 6 | 52.0% | 28.5% |
+| Britannica Qwen35 | 13 | 15 | 100.0% | 65.0% |
+
+BPL and the Rubenstein jury board cannot meet a 90% top-3 stability target reliably even when all
+stored outcomes are used. Their failures below are therefore evidence that the reference board is
+under-resolved, not simply that subsampling is bad.
+
+### Results at a 40% outcome budget
+
+| Board | Pair-balanced | Mixed-random | Clustered top-3 rate (pair/mixed) | Robust-pair agreement (pair/mixed) |
+|---|---|---|---:|---:|
+| Rubenstein 30B | pass | pass | 98.4% / 98.6% | 97.6% / 97.7% |
+| Rubenstein jury | fail | fail | 79.4% / 77.2% | 97.8% / 97.4% |
+| Rubenstein Kimi | pass | pass | 97.6% / 98.0% | 97.5% / 97.4% |
+| UFO 30B | pass | pass | 99.9% / 99.6% | 100.0% / 99.9% |
+| BPL | fail | fail | 65.4% / 62.2% | 86.9% / 85.9% |
+| Britannica Qwen35 | pass | pass | 98.8% / 98.9% | 98.3% / 98.3% |
+
+At 40%, both fixed designs pass on Rubenstein 30B, Rubenstein Kimi, UFO, and the 6-model
+Britannica board; both fail on the intrinsically unstable Rubenstein jury and BPL boards. At 25%,
+results are more collection-dependent. Increasing to 60% still cannot rescue unstable reference
+boards.
+
+There is no consistent winner between pair-balanced and mixed-random allocation on these small
+model grids. Board/judge stability matters more than the choice between the two fixed selectors.
+Small samples also produce heavy ELO tails—Britannica Qwen35 has extreme page-bootstrap ELO
+outliers despite stable rank decisions—so rank/pairwise summaries are safer than treating ELO
+error as approximately Gaussian.
+
+This broadens the evidence, but does not validate large-grid behavior: five of the six additional
+boards have only four models, and the sixth has six. See
+[`multi-board-summary.csv`](multi-board-summary.csv) and
+[`multi-board-results.json`](multi-board-results.json).
+
 ## Current sentinel-policy robustness check
 
 The primary result must use the requested 4,293-row stored board. However, current production
@@ -287,38 +367,45 @@ collection.
 2. **Outcome-conditioned sampling.** Later targeted pairs depend on interim outcomes and ranks.
    Ordinary percentile bootstrap CIs computed after selection do not account for that adaptive,
    optional-stopping process and may be optimistic.
-3. **The bootstrap does not replay the policy.** Production resamples selected comparisons as if
-   the selected set were fixed. It does not re-run allocation inside each bootstrap replicate.
-4. **Comparison-level resampling ignores page clustering.** Many pair outcomes share one page and
-   are correlated. A page/round-clustered bootstrap would better match the sampling unit.
+3. **Production uncertainty does not replay the policy.** Production resamples selected
+   comparisons as if the selected set were fixed. The cross-board experiment reruns fixed
+   allocation inside page bootstraps, but this is not yet a production CI method for targeted
+   optional stopping.
+4. **Production comparison-level resampling ignores page clustering.** Many pair outcomes share
+   one page and are correlated. The cross-board follow-up addresses this experimentally; ordinary
+   published CIs still do not.
 5. **Bradley–Terry fit under sparse, nonuniform allocation.** The graph is connected, so a fit is
    identifiable, but adjacency-driven edge counts can amplify model misspecification and shift the
    global ELO scale relative to a balanced grid.
-6. **One collection and one stored judge run.** Britannica cannot establish general behavior for
-   manuscripts, tables, noisy scans, or other judges.
+6. **Large-grid evidence remains one collection.** The cross-board follow-up adds collections and
+   judges, but its additional grids have only four or six models. It cannot establish sparse
+   allocation behavior for another 10+ model board.
 7. **Unobserved failed judge calls.** Six attempted comparisons have no published valid verdict.
    The replay cannot know how a different allocation would have distributed those failures, so
    savings are relative to 4,293 valid stored outcomes rather than the 4,299 attempted calls.
 8. **Historical sentinel rows.** The primary board predates the current exclusion policy; the
    robustness replay is closer to current input integrity semantics but has only 13 rankable
    models.
+9. **Legacy cross-board schemas.** Several older boards do not store OCR text, so historical
+   sentinel rows cannot be rechecked. Five of the six additional boards have only four models,
+   limiting what they say about sparse large-grid allocation.
+10. **Judge variants are not independent data.** The three Rubenstein boards measure sensitivity
+    to judge choice on the same pages; they do not triple the collection-level evidence.
 
 ## Recommendation and next experiment
 
 **Keep `targeted` opt-in, retain `balanced` as the default, and do not implement the tested v2 or
-fixed designs in production.** Neither threshold tuning nor the tested outcome-independent designs
-passed the predeclared gate robustly.
+fixed designs in production.** The cross-collection replay shows that fixed 40% subsampling can
+preserve robust decisions on already-stable 4–6 model boards, but cannot repair an unstable full
+board and does not test a large independent model grid.
 
-Do not tune further on Britannica alone. The next useful work is methodological validation:
+The evidence is now sufficient to stop retrospective threshold tuning. Before any live adaptive
+trial, obtain at least one additional independent, fully stored board with roughly 10+ models and
+50+ pages, then apply the same page-clustered/design-aware protocol. If that passes across seeds,
+a budget-capped live trial becomes defensible.
 
-1. replay the mixed-random design on several independent published boards;
-2. predeclare a success criterion based on top-k membership and pairwise decisions, separately
-   from exact ordering among statistically unresolved models;
-3. use page-clustered/design-aware uncertainty and report allocation-seed sensitivity; and
-4. consider one live trial only if a design passes across collections and seeds.
-
-Keep the 3× rule as a post-hoc deployment annotation only. This board does not support letting it
-influence sampling, making it a default, or treating it as statistical resolution.
+Keep the 3× rule as a post-hoc deployment annotation only. Current evidence does not support
+letting it influence sampling, making it a default, or treating it as statistical resolution.
 
 ## Reproduce
 
@@ -333,6 +420,12 @@ The full primary, sensitivity, targeted-v2, and fixed-design run takes about ele
 machine used for this report. The pinned dataset
 revision is downloaded read-only. The script contains no judge backend construction and no Hub
 push/upload call.
+
+Cross-collection page-clustered replay:
+
+```bash
+uv run python experiments/adaptive-stopping/multi_board.py
+```
 
 Optional current-sentinel-policy replay:
 
@@ -350,12 +443,14 @@ Generated artifacts:
 - [`elo-deltas.csv`](elo-deltas.csv): per-model ELO and deltas
 - [`round-history.csv`](round-history.csv): batch-by-batch allocation and decisions
 - [`static-design-summary.csv`](static-design-summary.csv): five-seed fixed-design aggregates
+- [`multi-board-summary.csv`](multi-board-summary.csv): cross-board design-aware aggregates
+- [`multi-board-results.json`](multi-board-results.json): pinned board and page-bootstrap details
 - [`results-sentinels-excluded.json`](results-sentinels-excluded.json): robustness replay
 
 Validation commands:
 
 ```bash
 uv run pytest tests/ -q
-uv run ruff check src/ tests/ experiments/adaptive-stopping/replay.py
-uv run ty check src/ experiments/adaptive-stopping/replay.py
+uv run ruff check src/ tests/ experiments/adaptive-stopping/*.py
+uv run ty check src/ experiments/adaptive-stopping/*.py
 ```

@@ -202,15 +202,13 @@ def load_stored_comparisons(
         sentinel_rows += int(has_sentinel)
         if exclude_sentinels and has_sentinel:
             continue
-        winner = row["winner"]
-        if winner not in {"A", "B", "tie"}:
-            raise ValueError(f"Unexpected stored winner: {winner!r}")
+        winner = _canonical_winner(row["winner"])
         results.append(
             ComparisonResult(
                 sample_idx=row["sample_idx"],
                 model_a=row["model_a"],
                 model_b=row["model_b"],
-                winner=cast(Winner, winner),
+                winner=winner,
                 reason=row.get("reason", ""),
                 agreement=row.get("agreement", "1/1"),
                 # Published winners are already canonical/unswapped.
@@ -224,6 +222,17 @@ def load_stored_comparisons(
             )
         )
     return results, source_rows, sentinel_rows
+
+
+def _canonical_winner(value: object) -> Winner:
+    """Normalize current and historical stored winner spellings."""
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized in {"A", "B"}:
+            return cast(Winner, normalized)
+        if normalized.lower() == "tie":
+            return "tie"
+    raise ValueError(f"Unexpected stored winner: {value!r}")
 
 
 def _group_by_sample(

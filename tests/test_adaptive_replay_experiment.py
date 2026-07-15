@@ -17,6 +17,14 @@ assert _SPEC is not None and _SPEC.loader is not None
 replay = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = replay
 _SPEC.loader.exec_module(replay)
+sys.modules["replay"] = replay
+
+_MULTI_PATH = _REPLAY_PATH.with_name("multi_board.py")
+_MULTI_SPEC = importlib.util.spec_from_file_location("adaptive_stopping_multi_board", _MULTI_PATH)
+assert _MULTI_SPEC is not None and _MULTI_SPEC.loader is not None
+multi_board = importlib.util.module_from_spec(_MULTI_SPEC)
+sys.modules[_MULTI_SPEC.name] = multi_board
+_MULTI_SPEC.loader.exec_module(multi_board)
 
 
 def _stored_grid(n_samples: int = 8) -> list[ComparisonResult]:
@@ -36,6 +44,12 @@ def _fixed_board() -> Leaderboard:
             "c": (1380.0, 1520.0),
         },
     )
+
+
+def test_historical_tie_spelling_is_canonicalized():
+    assert replay._canonical_winner("tie") == "tie"
+    assert replay._canonical_winner("TIE") == "tie"
+    assert replay._canonical_winner("A") == "A"
 
 
 def test_targeted_replay_warms_up_balanced_then_filters_pairs(monkeypatch):
@@ -168,6 +182,59 @@ def test_mixed_sample_preserves_required_warmup_and_rebalances():
     assert selected[:3] == required
     assert len(keys) == len(set(keys)) == 14
     assert max(counts.values()) - min(counts.values()) == 1
+
+
+def test_cluster_resample_is_page_level_and_deterministic():
+    stored = _stored_grid(8)
+
+    first = multi_board._cluster_resample(stored, seed=123)
+    repeated = multi_board._cluster_resample(stored, seed=123)
+
+    assert len(first) == len(stored)
+    assert sorted({row.sample_idx for row in first}) == list(range(8))
+    assert Counter(row.sample_idx for row in first) == Counter({i: 3 for i in range(8)})
+    assert first == repeated
+
+
+def test_static_design_selection_does_not_inspect_winners():
+    stored = _stored_grid(8)
+    flipped = [ComparisonResult(row.sample_idx, row.model_a, row.model_b, "B") for row in stored]
+
+    selected = multi_board._select_design(
+        stored,
+        design="mixed-random",
+        budget_fraction=0.60,
+        allocation_seed=42,
+    )
+    selected_flipped = multi_board._select_design(
+        flipped,
+        design="mixed-random",
+        budget_fraction=0.60,
+        allocation_seed=42,
+    )
+
+    assert [replay._comparison_key(row) for row in selected] == [
+        replay._comparison_key(row) for row in selected_flipped
+    ]
+
+
+def test_robust_pairs_require_95_percent_direction_stability():
+    reference = Leaderboard(elo={"a": 1600.0, "b": 1500.0, "c": 1400.0})
+    bootstrap_boards = [
+        Leaderboard(
+            elo={
+                "a": 1600.0,
+                "b": 1500.0 if i < 18 else 1390.0,
+                "c": 1400.0 if i < 18 else 1500.0,
+            }
+        )
+        for i in range(20)
+    ]
+
+    assert multi_board._robust_pairs(reference, bootstrap_boards) == [
+        ("a", "b"),
+        ("a", "c"),
+    ]
 
 
 def test_graph_metrics_report_coverage_and_connectivity():
