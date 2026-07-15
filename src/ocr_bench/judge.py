@@ -8,6 +8,7 @@ import io
 import json
 import logging
 import random
+import re
 from dataclasses import dataclass
 from itertools import combinations
 from typing import Any
@@ -15,6 +16,53 @@ from typing import Any
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+# --- Error sentinels ---
+#
+# OCR scripts write a placeholder string when a page fails (e.g. an image that
+# won't decode, or a model crash mid-batch) rather than aborting the whole job.
+# The job then "completes" with sentinel strings sitting in the output column.
+# These are NOT transcriptions and must never be scored as such — a job that
+# emitted only sentinels is a *failed run*, not a bad model (see issue #46).
+KNOWN_SENTINELS: frozenset[str] = frozenset({"[OCR ERROR]", "[OCR FAILED]"})
+
+# Bounds for the generic bracketed-token match. A genuine error placeholder is a
+# terse token (a few ALL-CAPS words ending in ERROR/FAILED), never a heading or
+# a paragraph — so anything longer or wordier is treated as real text. These
+# bounds keep archival ALL-CAPS headings like "[SECTION FAILED BANKS 1866]" from
+# being mistaken for sentinels.
+_MAX_SENTINEL_LEN = 40
+_MAX_SENTINEL_WORDS = 4
+
+# A bracketed ALL-CAPS token whose FINAL word (before the closing bracket) is
+# ERROR or FAILED, e.g. "[OCR ERROR]", "[SURYA LAYOUT ERROR]", "[GOT-OCR FAILED]".
+# Requiring the keyword to be terminal (not just present) is what excludes
+# archival headings that merely contain the word, e.g. "[SECTION FAILED BANKS
+# 1866]". The whole stripped string must be this single token.
+_SENTINEL_TOKEN_RE = re.compile(r"^\[[A-Z0-9 ._/-]{0,30}(?:ERROR|FAILED)\]$")
+
+
+def is_sentinel(text: str | None) -> bool:
+    """True if ``text`` is an OCR error sentinel rather than a transcription.
+
+    Matches the known literals (case-insensitively) plus any short (≤40 char,
+    ≤4 word) string that strips to a single bracketed ALL-CAPS token ending in
+    ``ERROR``/``FAILED``. Empty or ``None`` values are *not* sentinels (they are
+    handled as missing output on their own).
+    """
+    if not text:
+        return False
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if stripped.upper() in KNOWN_SENTINELS:
+        return True
+    if len(stripped) > _MAX_SENTINEL_LEN:
+        return False
+    if not _SENTINEL_TOKEN_RE.match(stripped):
+        return False
+    return len(stripped[1:-1].split()) <= _MAX_SENTINEL_WORDS
+
 
 # --- Judge prompt profiles ---
 #
@@ -389,6 +437,11 @@ def build_comparisons(
         for i, j in needed_pairs:
             text_a = texts[col_names[i]]
             text_b = texts[col_names[j]]
+            # A sentinel side is a failed output, not a transcription — exclude
+            # the pair so an error string never competes (issue #46). Sentinels
+            # are counted per model separately (integrity.compute_model_stats).
+            if is_sentinel(text_a) or is_sentinel(text_b):
+                continue
             stripped_a, stripped_b = text_a.strip(), text_b.strip()
             # Neither model produced meaningful text — a wasted judge call.
             if len(stripped_a) < min_chars and len(stripped_b) < min_chars:

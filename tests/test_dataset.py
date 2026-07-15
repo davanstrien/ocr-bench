@@ -10,12 +10,16 @@ from datasets import Dataset
 
 from ocr_bench.dataset import (
     DatasetError,
+    LoadedConfig,
     _find_text_column,
+    check_config_alignment,
     discover_configs,
     discover_ocr_columns,
     discover_pr_configs,
+    find_alignment_mismatch,
     load_config_dataset,
     load_flat_dataset,
+    shared_alignment_keys,
 )
 
 # ---------------------------------------------------------------------------
@@ -429,6 +433,205 @@ class TestLoadConfigDataset:
     def test_empty_configs_raises(self):
         with pytest.raises(DatasetError, match="No config names"):
             load_config_dataset("repo/id", [])
+
+
+# ---------------------------------------------------------------------------
+# Cross-config alignment (issue #5)
+# ---------------------------------------------------------------------------
+
+
+def _config_ds(model_id: str, texts: list[str], **passthrough) -> Dataset:
+    data = {
+        "image": [None] * len(texts),
+        "markdown": texts,
+        "inference_info": [json.dumps({"model_id": model_id})] * len(texts),
+    }
+    data.update(passthrough)
+    return Dataset.from_dict(data)
+
+
+class TestFindAlignmentMismatch:
+    def test_no_mismatch(self):
+        a = Dataset.from_dict({"b_number": [1, 2, 3]})
+        b = Dataset.from_dict({"b_number": [1, 2, 3]})
+        assert find_alignment_mismatch(a, b, ["b_number"]) is None
+
+    def test_mid_sequence_swap(self):
+        a = Dataset.from_dict({"b_number": [1, 2, 3]})
+        b = Dataset.from_dict({"b_number": [1, 3, 2]})
+        assert find_alignment_mismatch(a, b, ["b_number"]) == ("b_number", 1)
+
+    def test_length_shortfall_is_mismatch(self):
+        a = Dataset.from_dict({"b_number": [1, 2, 3]})
+        b = Dataset.from_dict({"b_number": [1, 2]})
+        assert find_alignment_mismatch(a, b, ["b_number"]) == ("b_number", 2)
+
+    def test_shared_keys_intersection(self):
+        a = Dataset.from_dict({"b_number": [1], "id": ["x"]})
+        b = Dataset.from_dict({"b_number": [1], "page_index": [0]})
+        assert shared_alignment_keys(a, b) == ["b_number"]
+
+
+class TestCheckConfigAlignment:
+    def _lc(self, name: str, ds: Dataset) -> LoadedConfig:
+        return LoadedConfig(config=name, model_id="m", ds=ds, text_col="markdown")
+
+    def test_single_config_is_na(self):
+        result = check_config_alignment([self._lc("a", _config_ds("m", ["t"], b_number=[1]))])
+        assert result.status == "n/a"
+
+    def test_aligned_is_ok(self):
+        loaded = [
+            self._lc("a", _config_ds("m-a", ["a1", "a2"], b_number=[1, 2])),
+            self._lc("b", _config_ds("m-b", ["b1", "b2"], b_number=[1, 2])),
+        ]
+        result = check_config_alignment(loaded)
+        assert result.status == "ok"
+        assert result.shared_keys == ["b_number"]
+
+    def test_misaligned(self):
+        loaded = [
+            self._lc("a", _config_ds("m-a", ["a1", "a2", "a3"], b_number=[1, 2, 3])),
+            self._lc("b", _config_ds("m-b", ["b1", "b2", "b3"], b_number=[1, 3, 2])),
+        ]
+        result = check_config_alignment(loaded)
+        assert result.status == "misaligned"
+        assert result.config == "b"
+        assert result.reference_config == "a"
+        assert result.index == 1
+        assert result.column == "b_number"
+
+    def test_no_shared_columns_is_unverified(self):
+        loaded = [
+            self._lc("a", _config_ds("m-a", ["a1", "a2"])),
+            self._lc("b", _config_ds("m-b", ["b1", "b2"])),
+        ]
+        assert check_config_alignment(loaded).status == "unverified"
+
+    def test_constant_shared_key_is_unverified(self):
+        # A document-level identifier can match after rows are permuted, so it
+        # cannot prove row-for-row alignment by itself.
+        loaded = [
+            self._lc("a", _config_ds("m-a", ["a1", "a2"], b_number=[7, 7])),
+            self._lc("b", _config_ds("m-b", ["b2", "b1"], b_number=[7, 7])),
+        ]
+        assert check_config_alignment(loaded).status == "unverified"
+
+    def test_null_shared_key_is_unverified(self):
+        loaded = [
+            self._lc("a", _config_ds("m-a", ["a1", "a2"], id=[None, None])),
+            self._lc("b", _config_ds("m-b", ["b2", "b1"], id=[None, None])),
+        ]
+        assert check_config_alignment(loaded).status == "unverified"
+
+    def test_combined_keys_can_identify_rows(self):
+        loaded = [
+            self._lc(
+                "a",
+                _config_ds("m-a", ["a1", "a2"], b_number=[7, 7], page_index=[0, 1]),
+            ),
+            self._lc(
+                "b",
+                _config_ds("m-b", ["b1", "b2"], b_number=[7, 7], page_index=[0, 1]),
+            ),
+        ]
+        assert check_config_alignment(loaded).status == "ok"
+
+    def test_partial_when_some_configs_share_no_keys(self):
+        # One sibling verifies, another shares nothing — the whole set must NOT
+        # read as "ok" off the single passing config (review finding #1).
+        loaded = [
+            self._lc("a", _config_ds("m-a", ["a1", "a2"], b_number=[1, 2])),
+            self._lc("b", _config_ds("m-b", ["b1", "b2"], b_number=[1, 2])),
+            self._lc("c", _config_ds("m-c", ["c1", "c2"])),
+        ]
+        result = check_config_alignment(loaded)
+        assert result.status == "partial"
+        assert result.verified_configs == ["b"]
+        assert result.unverified_configs == ["c"]
+
+    def test_config_status_reports_per_config(self):
+        loaded = [
+            self._lc("a", _config_ds("m-a", ["a1", "a2"], b_number=[1, 2])),
+            self._lc("b", _config_ds("m-b", ["b1", "b2"], b_number=[1, 2])),
+            self._lc("c", _config_ds("m-c", ["c1", "c2"])),
+        ]
+        result = check_config_alignment(loaded)
+        assert result.config_status("a") == "reference"
+        assert result.config_status("b") == "ok"
+        assert result.config_status("c") == "unverified"
+
+
+class TestLoadConfigDatasetAlignment:
+    @patch("ocr_bench.dataset.load_dataset")
+    def test_aligned_configs_merge(self, mock_load):
+        mock_load.side_effect = [
+            _config_ds("m-a", ["a1", "a2"], b_number=[10, 20]),
+            _config_ds("m-b", ["b1", "b2"], b_number=[10, 20]),
+        ]
+        ds, cols = load_config_dataset("repo/id", ["cfg_a", "cfg_b"])
+        assert len(ds) == 2
+        assert cols == {"cfg_a": "m-a", "cfg_b": "m-b"}
+        assert ds[1]["cfg_a"] == "a2"
+        assert ds[1]["cfg_b"] == "b2"
+
+    @patch("ocr_bench.dataset.load_dataset")
+    def test_misaligned_configs_raise(self, mock_load):
+        # Rows 1 and 2 swapped in the second config → row-1 mismatch.
+        mock_load.side_effect = [
+            _config_ds("m-a", ["a1", "a2", "a3"], b_number=[10, 20, 30]),
+            _config_ds("m-b", ["b1", "b2", "b3"], b_number=[10, 30, 20]),
+        ]
+        with pytest.raises(DatasetError, match=r"row 1"):
+            load_config_dataset("repo/id", ["cfg_a", "cfg_b"])
+
+    @patch("ocr_bench.dataset.load_dataset")
+    def test_misaligned_error_names_config(self, mock_load):
+        mock_load.side_effect = [
+            _config_ds("m-a", ["a1", "a2"], b_number=[10, 20]),
+            _config_ds("m-b", ["b1", "b2"], b_number=[10, 99]),
+        ]
+        with pytest.raises(DatasetError, match=r"cfg_b"):
+            load_config_dataset("repo/id", ["cfg_a", "cfg_b"])
+
+    @patch("ocr_bench.dataset.load_dataset")
+    def test_no_shared_columns_warns(self, mock_load):
+        import structlog
+
+        mock_load.side_effect = [
+            _config_ds("m-a", ["a1", "a2"]),
+            _config_ds("m-b", ["b1", "b2"]),
+        ]
+        with structlog.testing.capture_logs() as logs:
+            load_config_dataset("repo/id", ["cfg_a", "cfg_b"])
+        assert any(e.get("event") == "alignment_unverified" for e in logs)
+
+    @patch("ocr_bench.dataset.load_dataset")
+    def test_row_count_mismatch_raises(self, mock_load):
+        # Differing lengths must fail loudly, not silently truncate (review #2).
+        mock_load.side_effect = [
+            _config_ds("m-a", ["a1", "a2", "a3"], b_number=[10, 20, 30]),
+            _config_ds("m-b", ["b1", "b2"], b_number=[10, 20]),
+        ]
+        with pytest.raises(DatasetError, match=r"[Rr]ow-count mismatch"):
+            load_config_dataset("repo/id", ["cfg_a", "cfg_b"])
+
+    @patch("ocr_bench.dataset.load_dataset")
+    def test_partial_alignment_warns_not_raises(self, mock_load):
+        import structlog
+
+        # cfg_b shares b_number (verified); cfg_c shares nothing (unverified).
+        mock_load.side_effect = [
+            _config_ds("m-a", ["a1", "a2"], b_number=[10, 20]),
+            _config_ds("m-b", ["b1", "b2"], b_number=[10, 20]),
+            _config_ds("m-c", ["c1", "c2"]),
+        ]
+        with structlog.testing.capture_logs() as logs:
+            _, cols = load_config_dataset("repo/id", ["cfg_a", "cfg_b", "cfg_c"])
+        assert len(cols) == 3  # merge still proceeds
+        warns = [e for e in logs if e.get("event") == "alignment_unverified"]
+        assert warns and warns[0]["status"] == "partial"
+        assert warns[0]["unverified_configs"] == ["cfg_c"]
 
 
 # ---------------------------------------------------------------------------

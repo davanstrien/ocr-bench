@@ -13,6 +13,7 @@ from ocr_bench.judge import (
     build_messages,
     build_prompt,
     image_to_base64,
+    is_sentinel,
     parse_judge_output,
     prompt_hash,
     validate_prompt_template,
@@ -279,6 +280,63 @@ class TestParseJudgeOutput:
         assert isinstance(result["reason"], str)
 
 
+class TestIsSentinel:
+    def test_known_literals(self):
+        assert is_sentinel("[OCR ERROR]")
+        assert is_sentinel("[OCR FAILED]")
+
+    def test_known_literals_case_insensitive(self):
+        assert is_sentinel("[ocr error]")
+        assert is_sentinel("[Ocr Failed]")
+
+    def test_surrounding_whitespace(self):
+        assert is_sentinel("  [OCR ERROR]\n")
+
+    def test_census_variants_match(self):
+        # Per-script sentinel formats seen in the uv-scripts census.
+        for variant in (
+            "[OCR ERROR]",
+            "[OCR FAILED]",
+            "[SURYA LAYOUT ERROR]",
+            "[LIFT LOAD ERROR]",
+            "[GOT-OCR FAILED]",
+            "[DOTS.OCR ERROR]",
+        ):
+            assert is_sentinel(variant), variant
+
+    def test_normal_text_is_not_sentinel(self):
+        assert not is_sentinel("The quick brown fox")
+        assert not is_sentinel("Page 3 of the manuscript")
+
+    def test_empty_and_none_are_not_sentinels(self):
+        # Empty/None are "missing" but handled separately from sentinels.
+        assert not is_sentinel("")
+        assert not is_sentinel("   ")
+        assert not is_sentinel(None)
+
+    def test_lowercase_prose_mentioning_error_is_not_sentinel(self):
+        assert not is_sentinel("an error occurred while reading the page")
+        assert not is_sentinel("[the scan failed to load, see appendix]")
+
+    def test_archival_heading_with_nonfinal_keyword_is_not_sentinel(self):
+        # ALL-CAPS bracketed archival headings that merely CONTAIN ERROR/FAILED
+        # (not as the final word) must not be flagged (review finding #3).
+        assert not is_sentinel("[SECTION FAILED BANKS 1866]")
+        assert not is_sentinel("[ERROR REPORT OF THE YEAR 1877]")
+
+    def test_wordy_or_long_bracket_ending_in_keyword_is_not_sentinel(self):
+        # Ends in ERROR but is a >4-word heading — not a terse sentinel.
+        assert not is_sentinel("[NOTE ON THE FATAL ERROR]")  # 5 words
+        # A long transcription that merely opens with a bracket.
+        long_text = "[NOTICE] " + "the page reads " * 20
+        assert len(long_text) > 40
+        assert not is_sentinel(long_text)
+
+    def test_bracket_token_must_be_whole_string(self):
+        # A sentinel embedded in real text is not a whole-column failure.
+        assert not is_sentinel("Title page\n[OCR ERROR]\nmore text")
+
+
 class TestComparison:
     def test_text_fields_default_empty(self):
         comp = Comparison(
@@ -361,6 +419,35 @@ class TestBuildComparisons:
         ]
         comps = build_comparisons(ds, {"ocr_a": "A", "ocr_b": "B"})
         assert len(comps) == 0
+
+    def test_skips_sentinel_side_like_empty(self):
+        """A sentinel output is treated as missing — the pair is excluded even
+        though the other side is a long, valid transcription."""
+        ds = [
+            {
+                "image": Image.new("RGB", (100, 100)),
+                "ocr_a": "[OCR ERROR]",
+                "ocr_b": "a proper full transcription of the whole page here",
+            },
+        ]
+        comps = build_comparisons(ds, {"ocr_a": "A", "ocr_b": "B"})
+        assert len(comps) == 0
+
+    def test_sentinel_excludes_only_affected_pairs(self):
+        """With 3 models where one is a sentinel, only the pair between the two
+        valid models survives (texts are long enough to clear min_chars)."""
+        ds = [
+            {
+                "image": Image.new("RGB", (60, 60)),
+                "col_a": "[SURYA LAYOUT ERROR]",
+                "col_b": "a full transcription from model b here",
+                "col_c": "a different transcription from model c",
+            },
+        ]
+        ocr_columns = {"col_a": "A", "col_b": "B", "col_c": "C"}
+        comps = build_comparisons(ds, ocr_columns)
+        pair_set = {(c.model_a, c.model_b) for c in comps}
+        assert pair_set == {("B", "C")}
 
     def test_max_samples(self):
         ds = [

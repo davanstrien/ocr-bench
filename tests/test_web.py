@@ -92,6 +92,25 @@ class TestLeaderboard:
         resp = client.get("/leaderboard")
         assert "Judge ELO" in resp.text
 
+    def test_failed_model_is_visible_but_unranked(self, client):
+        client.app.state.viewer.leaderboard_rows.append(
+            {
+                "model": "BrokenOCR",
+                "elo": None,
+                "wins": 0,
+                "losses": 0,
+                "ties": 0,
+                "win_pct": None,
+                "status": "failed",
+                "failed_outputs": 10,
+            }
+        )
+        resp = client.get("/leaderboard")
+        assert resp.status_code == 200
+        assert "BrokenOCR" in resp.text
+        assert "FAILED" in resp.text
+        assert "None" not in resp.text
+
 
 class TestComparisonsPage:
     def test_renders_page(self, client):

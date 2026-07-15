@@ -26,13 +26,21 @@ from ocr_bench.dataset import (
     load_flat_dataset,
 )
 from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo, rankings_resolved
+from ocr_bench.integrity import (
+    SENTINEL_FLAG_RATE,
+    audit_repo,
+    compute_model_stats,
+    failed_output_counts,
+)
 from ocr_bench.judge import (
     CRITERIA_PROFILES,
     DEFAULT_CRITERIA,
     DEFAULT_MIN_CHARS,
+    MAX_OCR_TEXT_LENGTH,
     Comparison,
     _normalize_pair,
     build_comparisons,
+    is_sentinel,
     prompt_hash,
     sample_indices,
     validate_prompt_template,
@@ -284,11 +292,32 @@ def build_parser() -> argparse.ArgumentParser:
     bench.add_argument("--port", type=int, default=7860, help="Viewer port (default: 7860)")
     bench.add_argument("--host", default="127.0.0.1", help="Viewer host (default: 127.0.0.1)")
 
+    # --- audit subcommand ---
+    audit = sub.add_parser(
+        "audit",
+        help="Read-only pre-judge health check on an OCR output repo",
+    )
+    audit.add_argument("dataset", help="HF dataset repo id with OCR outputs")
+    audit.add_argument("--split", default="train", help="Dataset split (default: train)")
+    audit.add_argument(
+        "--max-ocr-text-len",
+        type=int,
+        default=MAX_OCR_TEXT_LENGTH,
+        help=(
+            "Text length above which the judge truncates an output "
+            f"(default: {MAX_OCR_TEXT_LENGTH}); reported as truncation exposure"
+        ),
+    )
+
     return parser
 
 
-def print_leaderboard(board: Leaderboard) -> None:
-    """Print leaderboard as a Rich table."""
+def print_leaderboard(
+    board: Leaderboard,
+    failed_models: list[str] | None = None,
+    failed_outputs: dict[str, int] | None = None,
+) -> None:
+    """Print leaderboard as a Rich table, leaving failed runs unranked."""
     from ocr_bench.publish import _get_model_sizes
 
     sizes = _get_model_sizes()
@@ -306,7 +335,12 @@ def print_leaderboard(board: Leaderboard) -> None:
     table.add_column("Ties", justify="right")
     table.add_column("Win%", justify="right")
 
-    for rank, (model, elo) in enumerate(board.ranked, 1):
+    failed = set(failed_models or [])
+    rank = 0
+    for model, elo in board.ranked:
+        if model in failed:
+            continue
+        rank += 1
         pct = board.win_pct(model)
         pct_str = f"{pct:.0f}%" if pct is not None else "-"
         if has_ci and model in board.elo_ci:
@@ -314,15 +348,28 @@ def print_leaderboard(board: Leaderboard) -> None:
             elo_str = f"{round(elo)} ({round(lo)}\u2013{round(hi)})"
         else:
             elo_str = str(round(elo))
+        model_label = f"{model} ⚠" if (failed_outputs or {}).get(model) else model
         table.add_row(
             str(rank),
-            model,
+            model_label,
             sizes.get(model, ""),
             elo_str,
             str(board.wins[model]),
             str(board.losses[model]),
             str(board.ties[model]),
             pct_str,
+        )
+
+    for model in sorted(failed):
+        table.add_row(
+            "-",
+            f"{model} [bold red]FAILED[/bold red]",
+            sizes.get(model, ""),
+            "-",
+            "-",
+            "-",
+            "-",
+            "-",
         )
 
     console.print(table)
@@ -404,6 +451,21 @@ def _resolve_results_repo(dataset: str, save_results: str | None, no_publish: bo
     if save_results:
         return save_results
     return f"{dataset}-results"
+
+
+def _filter_existing_sentinel_comparisons(
+    results: list[ComparisonResult],
+) -> tuple[list[ComparisonResult], int]:
+    """Remove historical comparisons where an error sentinel competed as OCR.
+
+    Results repos created before issue #46 was fixed can contain verdicts for
+    strings such as ``[OCR ERROR]``. Reusing those rows would preserve the
+    poisoned ELO and add their pair/sample keys to the resume skip map, so the
+    corrected comparison builder would never get a chance to reconsider them.
+    Filter them before either operation and report how many were discarded.
+    """
+    kept = [r for r in results if not (is_sentinel(r.text_a) or is_sentinel(r.text_b))]
+    return kept, len(results) - len(kept)
 
 
 def _refresh_viewer_space(results_repo: str) -> None:
@@ -653,6 +715,33 @@ def cmd_judge(args: argparse.Namespace) -> None:
     for col, model in ocr_columns.items():
         console.print(f"  {col} → {model}")
 
+    # --- Input integrity: sentinel outputs (issue #46) ---
+    # Error sentinels (e.g. "[OCR ERROR]") are excluded from judging by
+    # build_comparisons; here we count them per model for the metadata + card
+    # and warn loudly when a model's run largely failed on this corpus.
+    model_stats = compute_model_stats(ds, ocr_columns, max_ocr_text_len=MAX_OCR_TEXT_LENGTH)
+    failed_outputs = failed_output_counts(model_stats)
+    # A fully sentinel-backed run has no comparable OCR output at all. Keep it
+    # visible as FAILED, but never assign it an arbitrary disconnected ELO/rank.
+    # Partial failures remain rankable on their successful outputs with a
+    # degraded warning, while the audit still blocks rates over its threshold.
+    failed_models = sorted(
+        stat.model
+        for stat in model_stats
+        if stat.n_rows > 0 and stat.n_sentinel == stat.n_rows
+    )
+    for stat in model_stats:
+        if stat.sentinel_rate > SENTINEL_FLAG_RATE:
+            if stat.model in failed_models:
+                consequence = "this run is marked FAILED and receives no leaderboard rank"
+            else:
+                consequence = "its rank uses successful outputs only and is marked degraded"
+            console.print(
+                f"[yellow]⚠ {stat.model}: {stat.n_sentinel}/{stat.n_rows} outputs are "
+                f"error sentinels ({stat.sentinel_rate:.0%}) — excluded from judging; "
+                f"{consequence}.[/yellow]"
+            )
+
     # --- Incremental: load existing comparisons ---
     existing_results: list[ComparisonResult] = []
     existing_meta_rows: list[dict] = []
@@ -672,9 +761,50 @@ def cmd_judge(args: argparse.Namespace) -> None:
         # adaptive runs, where a checkpoint can persist a pair at (say) 3/50
         # samples — a pair-level skip would freeze it there forever.
         # --full-rejudge forces a clean re-run (ignores all existing).
-        existing_results = load_existing_comparisons(results_repo)
+        loaded_existing = load_existing_comparisons(results_repo)
+        existing_results, discarded_sentinels = _filter_existing_sentinel_comparisons(
+            loaded_existing
+        )
+        # A currently all-sentinel model is intentionally absent from the ELO
+        # graph. Historical non-sentinel verdicts for that model must not reconnect
+        # it or influence the remaining rankings.
+        failed_set = set(failed_models)
+        before_failed_filter = len(existing_results)
+        existing_results = [
+            result
+            for result in existing_results
+            if result.model_a not in failed_set and result.model_b not in failed_set
+        ]
+        discarded_failed_model = before_failed_filter - len(existing_results)
+
+        # Preserve the append-only metadata history even when integrity filtering
+        # removes every old comparison.
+        existing_meta_rows = load_existing_metadata(results_repo)
+
+        if discarded_sentinels:
+            console.print(
+                f"\n[bold yellow]Discarded {discarded_sentinels} existing comparison(s) "
+                "containing OCR error sentinels.[/bold yellow] They will not affect "
+                "ELO or the resume skip map."
+            )
+            logger.warning(
+                "discarded_existing_sentinel_comparisons",
+                repo=results_repo,
+                n=discarded_sentinels,
+            )
+        if discarded_failed_model:
+            console.print(
+                f"[bold yellow]Discarded {discarded_failed_model} historical comparison(s) "
+                "involving a currently failed model.[/bold yellow]"
+            )
+            logger.warning(
+                "discarded_failed_model_comparisons",
+                repo=results_repo,
+                n=discarded_failed_model,
+                models=failed_models,
+            )
+
         if existing_results:
-            existing_meta_rows = load_existing_metadata(results_repo)
             # Provenance guard: NEVER mix criteria rubrics on one board. The
             # existing comparisons were judged under the profile recorded in the
             # last metadata row (pre-#44 rows = the default profile, whose prompt
@@ -714,14 +844,19 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     r.sample_idx
                 )
             console.print(
-                f"\nIncremental mode: {len(existing_results)} existing comparisons "
+                f"\nIncremental mode: {len(existing_results)} reusable existing comparisons "
                 f"across {len(skip_samples)} model pairs — skipping already-judged "
                 f"(pair, sample) combinations, topping up the rest."
+            )
+        elif discarded_sentinels or discarded_failed_model:
+            console.print(
+                "\nNo reusable existing comparisons remain after integrity filtering — "
+                "rebuilding from the current OCR outputs."
             )
         else:
             console.print("\nNo existing comparisons found — full judge run.")
 
-    model_names = list(set(ocr_columns.values()))
+    model_names = list(set(ocr_columns.values()) - set(failed_models))
 
     # --- Judge setup (shared by both paths) ---
     model_specs = args.models or [DEFAULT_JUDGE]
@@ -917,7 +1052,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             console.print("[green]All pairs already judged — refitting leaderboard.[/green]")
             board = compute_elo(existing_results, model_names)
             console.print()
-            print_leaderboard(board)
+            print_leaderboard(board, failed_models, failed_outputs)
             if results_repo:
                 metadata = EvalMetadata(
                     source_dataset=args.dataset,
@@ -929,6 +1064,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     max_comparisons=max_comparisons,
                     budget_exhausted=budget_exhausted,
                     from_prs=from_prs,
+                    failed_outputs=failed_outputs,
+                    failed_models=failed_models,
                     criteria=criteria,
                     prompt_hash=criteria_prompt_hash,
                 )
@@ -1003,7 +1140,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
     all_results = existing_results + new_results
     board = compute_elo(all_results, model_names)
     console.print()
-    print_leaderboard(board)
+    print_leaderboard(board, failed_models, failed_outputs)
 
     # A budget-capped run may stop before the ranking is statistically settled —
     # surface which adjacent pairs are still unresolved so the operator knows
@@ -1034,6 +1171,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
             budget_exhausted=budget_exhausted,
             auto_tied=n_auto_total,
             from_prs=from_prs,
+            failed_outputs=failed_outputs,
+            failed_models=failed_models,
             criteria=criteria,
             prompt_hash=criteria_prompt_hash,
         )
@@ -1329,6 +1468,103 @@ def cmd_bench(args: argparse.Namespace) -> None:
     cmd_view(parser.parse_args(view_argv))
 
 
+# Audit exit codes, so CI can tell a bad *repo* from a broken *run*.
+_AUDIT_EXIT_INTEGRITY = 1  # audit ran and found blocking problems
+_AUDIT_EXIT_OPERATIONAL = 2  # audit could not complete (network/Hub/load)
+
+
+def _pct(rate: float) -> str:
+    """Format a rate as a percentage, colouring anything non-zero for attention."""
+    if rate <= 0:
+        return "0%"
+    colour = "red" if rate > SENTINEL_FLAG_RATE else "yellow"
+    return f"[{colour}]{rate:.0%}[/{colour}]"
+
+
+def _align_cell(status: str) -> str:
+    """Colour a per-config alignment status for the audit table."""
+    colours = {"misaligned": "red", "unverified": "yellow", "ok": "green"}
+    colour = colours.get(status)
+    return f"[{colour}]{status}[/{colour}]" if colour else status
+
+
+def cmd_audit(args: argparse.Namespace) -> None:
+    """Read-only pre-judge health check.
+
+    Exit codes: 0 = clean, 1 = the repo would poison a judge run (integrity
+    failure), 2 = the audit could not complete (network / Hub / dataset load).
+    """
+    try:
+        report = audit_repo(
+            args.dataset,
+            split=args.split,
+            max_ocr_text_len=args.max_ocr_text_len,
+        )
+    except (DatasetError, OSError, OpenAIError, ValueError) as exc:
+        # Couldn't even run the check (repo missing, no OCR columns, network /
+        # Hub outage). Distinct from an integrity failure so automation can tell
+        # "broken run" from "bad data".
+        console.print(f"[red]Audit could not complete:[/red] {exc}")
+        sys.exit(_AUDIT_EXIT_OPERATIONAL)
+
+    if not report.configs:
+        console.print("[red]No OCR configs/columns found to audit.[/red]")
+        sys.exit(_AUDIT_EXIT_OPERATIONAL)
+
+    align = report.alignment
+    table = Table(title=f"OCR input audit — {args.dataset}", show_lines=False)
+    table.add_column("Config", style="cyan")
+    table.add_column("Model")
+    table.add_column("Rows", justify="right")
+    table.add_column("Empty", justify="right")
+    table.add_column("<20ch", justify="right")
+    table.add_column("Sentinel", justify="right")
+    table.add_column("Median len", justify="right")
+    table.add_column("Max len", justify="right")
+    table.add_column(f">{args.max_ocr_text_len}", justify="right")
+    table.add_column("Align")
+
+    for cfg in report.configs:
+        s = cfg.stats
+        table.add_row(
+            s.name,
+            s.model,
+            str(s.n_rows),
+            _pct(s.empty_rate),
+            _pct(s.short_rate),
+            _pct(s.sentinel_rate),
+            f"{s.median_len:.0f}",
+            str(s.max_len),
+            _pct(s.over_max_rate),
+            _align_cell(align.config_status(s.name)),
+        )
+
+    console.print(table)
+
+    # Overall alignment line
+    if align.status == "misaligned":
+        console.print(f"[red]Alignment: {align.describe()}[/red]")
+    elif align.status in ("unverified", "partial"):
+        console.print(f"[yellow]Alignment: {align.describe()}[/yellow]")
+    else:
+        console.print(f"Alignment: {align.describe()}")
+
+    # Verdict + exit code (usable in automation)
+    if report.has_problems:
+        problems: list[str] = []
+        if align.status == "misaligned":
+            problems.append("row misalignment")
+        if report.row_count_mismatch:
+            counts = ", ".join(f"{c.stats.name}={c.stats.n_rows}" for c in report.configs)
+            problems.append(f"row-count mismatch ({counts})")
+        if report.flagged_models:
+            flagged = ", ".join(report.flagged_models)
+            problems.append(f">{SENTINEL_FLAG_RATE:.0%} sentinels: {flagged}")
+        console.print(f"\n[red]FAIL[/red] — {'; '.join(problems)}")
+        sys.exit(_AUDIT_EXIT_INTEGRITY)
+    console.print("\n[green]OK[/green] — no blocking issues found")
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -1348,6 +1584,8 @@ def main() -> None:
             cmd_publish(args)
         elif args.command == "bench":
             cmd_bench(args)
+        elif args.command == "audit":
+            cmd_audit(args)
     except DatasetError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(1)
