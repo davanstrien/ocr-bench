@@ -2,18 +2,32 @@
 
 import json
 
+import pytest
 from PIL import Image
 
 from ocr_bench.judge import (
+    CRITERIA_PROFILES,
+    DEFAULT_CRITERIA,
     PAIRWISE_PROMPT,
     Comparison,
     build_comparisons,
     build_messages,
     build_prompt,
     image_to_base64,
+    is_sentinel,
     normalize_for_judge,
     parse_judge_output,
+    prompt_hash,
+    validate_prompt_template,
 )
+
+# sha256(prompt template)[:12] — pins the exact bytes of each criteria profile.
+# If a prompt is edited, the matching test fails loudly; a new value is
+# intentional churn, not an accident. The DEFAULT hash must never change (it is
+# byte-identical to the pre-#44 hardcoded prompt); update the table-fidelity one
+# deliberately when its prompt changes.
+DEFAULT_PROMPT_HASH = "8d86832723b5"
+TABLE_FIDELITY_PROMPT_HASH = "fe138e71ecc3"
 
 
 class TestImageToBase64:
@@ -204,6 +218,112 @@ class TestNormalizeForJudge:
         assert isinstance(result, str)
 
 
+class TestCriteriaProfiles:
+    def test_default_profile_present(self):
+        assert DEFAULT_CRITERIA == "default"
+        assert "default" in CRITERIA_PROFILES
+
+    def test_default_profile_byte_equal(self):
+        """The default profile must be the original prompt, byte-for-byte."""
+        assert prompt_hash(CRITERIA_PROFILES["default"]) == DEFAULT_PROMPT_HASH
+
+    def test_table_fidelity_profile_present(self):
+        assert "table-fidelity" in CRITERIA_PROFILES
+
+    def test_table_fidelity_byte_equal(self):
+        """Pin the table-fidelity prompt bytes; edits must update this hash."""
+        assert prompt_hash(CRITERIA_PROFILES["table-fidelity"]) == TABLE_FIDELITY_PROMPT_HASH
+
+    def test_table_fidelity_criteria_ordering(self):
+        """Table fidelity is criterion 3 (below completeness, above accuracy);
+        accuracy and reading order shift to 4 and 5. Position now matches the
+        intended severity, so no override language is needed."""
+        tf = CRITERIA_PROFILES["table-fidelity"]
+        for label in (
+            "1. Faithfulness",
+            "2. Completeness",
+            "3. Table fidelity",
+            "4. Accuracy",
+            "5. Reading order",
+        ):
+            assert label in tf
+        # Ordering holds positionally, and the old severity-override phrasing is gone.
+        assert tf.index("2. Completeness") < tf.index("3. Table fidelity")
+        assert tf.index("3. Table fidelity") < tf.index("4. Accuracy")
+        assert "rank it just below completeness" not in tf
+
+    def test_table_fidelity_criterion_content(self):
+        tf = CRITERIA_PROFILES["table-fidelity"]
+        assert "row and column" in tf
+        assert "significant error" in tf
+        # Markup style stays neutral — the relationships are judged, not syntax.
+        assert "plain-text table" in tf
+        assert "<|ref|>" in tf  # bbox-tag-ignore note retained
+        # The default's structure-neutralising criterion 5 is gone.
+        assert "5. Formatting" not in tf
+
+    def test_table_fidelity_tie_line_covers_non_table_pages(self):
+        """The tie line must not require table structure on pages without tables;
+        it gates on tables only 'where tables are present'."""
+        tf = CRITERIA_PROFILES["table-fidelity"]
+        assert "where tables are present" in tf
+
+    def test_profiles_have_distinct_prompts(self):
+        assert CRITERIA_PROFILES["default"] != CRITERIA_PROFILES["table-fidelity"]
+
+    def test_all_profiles_have_placeholders(self):
+        for tmpl in CRITERIA_PROFILES.values():
+            assert "{ocr_text_a}" in tmpl
+            assert "{ocr_text_b}" in tmpl
+
+
+class TestPromptHash:
+    def test_is_12_hex_chars(self):
+        h = prompt_hash("anything")
+        assert len(h) == 12
+        assert all(c in "0123456789abcdef" for c in h)
+
+    def test_deterministic(self):
+        assert prompt_hash("same") == prompt_hash("same")
+
+    def test_differs_between_profiles(self):
+        assert prompt_hash(CRITERIA_PROFILES["default"]) != prompt_hash(
+            CRITERIA_PROFILES["table-fidelity"]
+        )
+
+
+class TestValidatePromptTemplate:
+    def test_valid_template_passes(self):
+        validate_prompt_template("Judge A: {ocr_text_a} vs B: {ocr_text_b}")  # no raise
+
+    def test_builtin_profiles_pass(self):
+        for tmpl in CRITERIA_PROFILES.values():
+            validate_prompt_template(tmpl)  # includes escaped {{ }} JSON example
+
+    def test_escaped_braces_allowed(self):
+        validate_prompt_template('{ocr_text_a} {ocr_text_b} reply {{"winner": "A"}}')
+
+    def test_missing_ocr_text_a(self):
+        with pytest.raises(ValueError, match=r"\{ocr_text_a\}"):
+            validate_prompt_template("only b: {ocr_text_b}")
+
+    def test_missing_ocr_text_b(self):
+        with pytest.raises(ValueError, match=r"\{ocr_text_b\}"):
+            validate_prompt_template("only a: {ocr_text_a}")
+
+    def test_missing_both(self):
+        with pytest.raises(ValueError, match="missing required placeholder"):
+            validate_prompt_template("no placeholders here")
+
+    def test_unknown_format_field(self):
+        with pytest.raises(ValueError, match="not a valid format string"):
+            validate_prompt_template("{ocr_text_a} {ocr_text_b} {surprise}")
+
+    def test_stray_unescaped_brace(self):
+        with pytest.raises(ValueError, match="escape any literal brace"):
+            validate_prompt_template("{ocr_text_a} {ocr_text_b} and a lone {")
+
+
 class TestBuildPrompt:
     def test_not_swapped(self):
         prompt, swapped, trunc_a, trunc_b = build_prompt("text A", "text B", swapped=False)
@@ -313,6 +433,31 @@ class TestBuildPrompt:
         assert not trunc_norm  # flattened content fits under 60
         assert trunc_raw  # raw markup blows the cap
 
+    def test_defaults_to_default_profile(self):
+        """With no template arg, build_prompt uses the default criteria."""
+        prompt, _, _, _ = build_prompt("a", "b", swapped=False)
+        assert "5. Formatting" in prompt
+        assert "5. Table fidelity" not in prompt
+
+    def test_threads_explicit_template(self):
+        prompt, _, _, _ = build_prompt(
+            "a", "b", swapped=False, prompt_template=CRITERIA_PROFILES["table-fidelity"]
+        )
+        assert "3. Table fidelity" in prompt
+        assert "a" in prompt
+        assert "b" in prompt
+
+    def test_custom_template_gets_truncation_disclosure(self):
+        prompt, _, truncated_a, _ = build_prompt(
+            "x" * 100,
+            "b",
+            swapped=False,
+            prompt_template="Custom rubric\nA={ocr_text_a}\nB={ocr_text_b}",
+            max_len=20,
+        )
+        assert truncated_a
+        assert "Evaluator note: Output A above was truncated" in prompt
+
 
 class TestBuildMessages:
     def test_message_structure(self):
@@ -388,6 +533,63 @@ class TestParseJudgeOutput:
         assert isinstance(result["reason"], str)
 
 
+class TestIsSentinel:
+    def test_known_literals(self):
+        assert is_sentinel("[OCR ERROR]")
+        assert is_sentinel("[OCR FAILED]")
+
+    def test_known_literals_case_insensitive(self):
+        assert is_sentinel("[ocr error]")
+        assert is_sentinel("[Ocr Failed]")
+
+    def test_surrounding_whitespace(self):
+        assert is_sentinel("  [OCR ERROR]\n")
+
+    def test_census_variants_match(self):
+        # Per-script sentinel formats seen in the uv-scripts census.
+        for variant in (
+            "[OCR ERROR]",
+            "[OCR FAILED]",
+            "[SURYA LAYOUT ERROR]",
+            "[LIFT LOAD ERROR]",
+            "[GOT-OCR FAILED]",
+            "[DOTS.OCR ERROR]",
+        ):
+            assert is_sentinel(variant), variant
+
+    def test_normal_text_is_not_sentinel(self):
+        assert not is_sentinel("The quick brown fox")
+        assert not is_sentinel("Page 3 of the manuscript")
+
+    def test_empty_and_none_are_not_sentinels(self):
+        # Empty/None are "missing" but handled separately from sentinels.
+        assert not is_sentinel("")
+        assert not is_sentinel("   ")
+        assert not is_sentinel(None)
+
+    def test_lowercase_prose_mentioning_error_is_not_sentinel(self):
+        assert not is_sentinel("an error occurred while reading the page")
+        assert not is_sentinel("[the scan failed to load, see appendix]")
+
+    def test_archival_heading_with_nonfinal_keyword_is_not_sentinel(self):
+        # ALL-CAPS bracketed archival headings that merely CONTAIN ERROR/FAILED
+        # (not as the final word) must not be flagged (review finding #3).
+        assert not is_sentinel("[SECTION FAILED BANKS 1866]")
+        assert not is_sentinel("[ERROR REPORT OF THE YEAR 1877]")
+
+    def test_wordy_or_long_bracket_ending_in_keyword_is_not_sentinel(self):
+        # Ends in ERROR but is a >4-word heading — not a terse sentinel.
+        assert not is_sentinel("[NOTE ON THE FATAL ERROR]")  # 5 words
+        # A long transcription that merely opens with a bracket.
+        long_text = "[NOTICE] " + "the page reads " * 20
+        assert len(long_text) > 40
+        assert not is_sentinel(long_text)
+
+    def test_bracket_token_must_be_whole_string(self):
+        # A sentinel embedded in real text is not a whole-column failure.
+        assert not is_sentinel("Title page\n[OCR ERROR]\nmore text")
+
+
 class TestComparison:
     def test_text_fields_default_empty(self):
         comp = Comparison(
@@ -439,6 +641,27 @@ class TestBuildComparisons:
         assert comp.text_a == "text from model A"
         assert comp.text_b == "text from model B"
 
+    def test_defaults_to_default_criteria(self):
+        ds = self._make_dataset()
+        ocr_columns = {"ocr_model_a": "ModelA", "ocr_model_b": "ModelB"}
+        # min_chars=0 isolates this from the blank-pair filter (toy text is short)
+        comps = build_comparisons(ds, ocr_columns, min_chars=0)
+        prompt_text = comps[0].messages[0]["content"][1]["text"]
+        assert "5. Formatting" in prompt_text
+        assert "5. Table fidelity" not in prompt_text
+
+    def test_threads_prompt_template_into_messages(self):
+        """The selected criteria profile reaches each comparison's judge prompt."""
+        ds = self._make_dataset()
+        ocr_columns = {"ocr_model_a": "ModelA", "ocr_model_b": "ModelB"}
+        # min_chars=0 isolates this from the blank-pair filter (toy text is short)
+        comps = build_comparisons(
+            ds, ocr_columns, prompt_template=CRITERIA_PROFILES["table-fidelity"], min_chars=0
+        )
+        prompt_text = comps[0].messages[0]["content"][1]["text"]
+        assert "3. Table fidelity" in prompt_text
+        assert "5. Formatting" not in prompt_text
+
     def test_skips_empty_text(self):
         ds = [
             {
@@ -449,6 +672,35 @@ class TestBuildComparisons:
         ]
         comps = build_comparisons(ds, {"ocr_a": "A", "ocr_b": "B"})
         assert len(comps) == 0
+
+    def test_skips_sentinel_side_like_empty(self):
+        """A sentinel output is treated as missing — the pair is excluded even
+        though the other side is a long, valid transcription."""
+        ds = [
+            {
+                "image": Image.new("RGB", (100, 100)),
+                "ocr_a": "[OCR ERROR]",
+                "ocr_b": "a proper full transcription of the whole page here",
+            },
+        ]
+        comps = build_comparisons(ds, {"ocr_a": "A", "ocr_b": "B"})
+        assert len(comps) == 0
+
+    def test_sentinel_excludes_only_affected_pairs(self):
+        """With 3 models where one is a sentinel, only the pair between the two
+        valid models survives (texts are long enough to clear min_chars)."""
+        ds = [
+            {
+                "image": Image.new("RGB", (60, 60)),
+                "col_a": "[SURYA LAYOUT ERROR]",
+                "col_b": "a full transcription from model b here",
+                "col_c": "a different transcription from model c",
+            },
+        ]
+        ocr_columns = {"col_a": "A", "col_b": "B", "col_c": "C"}
+        comps = build_comparisons(ds, ocr_columns)
+        pair_set = {(c.model_a, c.model_b) for c in comps}
+        assert pair_set == {("B", "C")}
 
     def test_max_samples(self):
         ds = [

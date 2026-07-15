@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
@@ -25,14 +26,25 @@ from ocr_bench.dataset import (
     load_flat_dataset,
 )
 from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo, rankings_resolved
+from ocr_bench.integrity import (
+    SENTINEL_FLAG_RATE,
+    audit_repo,
+    compute_model_stats,
+    failed_output_counts,
+)
 from ocr_bench.judge import (
+    CRITERIA_PROFILES,
+    DEFAULT_CRITERIA,
     DEFAULT_MIN_CHARS,
     MAX_IMAGE_DIM,
     MAX_OCR_TEXT_LENGTH,
     Comparison,
     _normalize_pair,
     build_comparisons,
+    is_sentinel,
+    prompt_hash,
     sample_indices,
+    validate_prompt_template,
 )
 from ocr_bench.publish import (
     EvalMetadata,
@@ -95,6 +107,33 @@ def build_parser() -> argparse.ArgumentParser:
         dest="models",
         help=f"Judge model spec (repeatable for jury). Default: {DEFAULT_JUDGE}",
     )
+    # --criteria and --criteria-file are mutually exclusive, enforced in
+    # _resolve_criteria (NOT an argparse mutually-exclusive group: on Python
+    # 3.13.0 such a group with a defaulted choices arg in a subparser fails to
+    # detect the conflict — a real regression, fixed in 3.13.1). --criteria's
+    # default is the None sentinel so "explicitly passed" is distinguishable
+    # from "unset"; it resolves to DEFAULT_CRITERIA in _resolve_criteria.
+    judge.add_argument(
+        "--criteria",
+        choices=sorted(CRITERIA_PROFILES),
+        default=None,
+        help=(
+            "Judge criteria profile (default: default). 'table-fidelity' adds an "
+            "explicit row/column cell-preservation criterion for table-dense corpora. "
+            "Mutually exclusive with --criteria-file."
+        ),
+    )
+    judge.add_argument(
+        "--criteria-file",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Path to a custom judge prompt template (mutually exclusive with "
+            "--criteria). Must contain the {ocr_text_a} and {ocr_text_b} "
+            "placeholders and no other format fields — see the 'default' profile "
+            "for the expected shape. Recorded in metadata as custom:<filename>."
+        ),
+    )
 
     # Eval
     judge.add_argument("--max-samples", type=int, default=None, help="Max samples to evaluate")
@@ -140,7 +179,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     judge.add_argument(
         "--max-ocr-text-len",
-        type=int,
+        type=_positive_int,
         default=MAX_OCR_TEXT_LENGTH,
         help=(
             "Per-output character cap (applied after HTML normalization) for "
@@ -150,7 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     judge.add_argument(
         "--judge-image-dim",
-        type=int,
+        type=_positive_int,
         default=MAX_IMAGE_DIM,
         help=(
             "Longer-side pixel cap for the judge image "
@@ -259,6 +298,23 @@ def build_parser() -> argparse.ArgumentParser:
         dest="judge_models",
         help=f"Judge model spec (repeatable for a jury). Default: {DEFAULT_JUDGE}",
     )
+    # Mutual exclusion enforced in _resolve_criteria (see the judge parser note).
+    bench.add_argument(
+        "--criteria",
+        choices=sorted(CRITERIA_PROFILES),
+        default=None,
+        help=(
+            "Judge criteria profile (default: default). 'table-fidelity' adds an "
+            "explicit row/column cell-preservation criterion for table-dense corpora. "
+            "Mutually exclusive with --criteria-file."
+        ),
+    )
+    bench.add_argument(
+        "--criteria-file",
+        default=None,
+        metavar="PATH",
+        help="Path to a custom judge prompt template (mutually exclusive with --criteria).",
+    )
     bench.add_argument(
         "--max-samples", type=int, default=None, help="Per-model sample limit (also caps judging)"
     )
@@ -275,11 +331,32 @@ def build_parser() -> argparse.ArgumentParser:
     bench.add_argument("--port", type=int, default=7860, help="Viewer port (default: 7860)")
     bench.add_argument("--host", default="127.0.0.1", help="Viewer host (default: 127.0.0.1)")
 
+    # --- audit subcommand ---
+    audit = sub.add_parser(
+        "audit",
+        help="Read-only pre-judge health check on an OCR output repo",
+    )
+    audit.add_argument("dataset", help="HF dataset repo id with OCR outputs")
+    audit.add_argument("--split", default="train", help="Dataset split (default: train)")
+    audit.add_argument(
+        "--max-ocr-text-len",
+        type=_positive_int,
+        default=MAX_OCR_TEXT_LENGTH,
+        help=(
+            "Text length above which the judge truncates an output "
+            f"(default: {MAX_OCR_TEXT_LENGTH}); reported as truncation exposure"
+        ),
+    )
+
     return parser
 
 
-def print_leaderboard(board: Leaderboard) -> None:
-    """Print leaderboard as a Rich table."""
+def print_leaderboard(
+    board: Leaderboard,
+    failed_models: list[str] | None = None,
+    failed_outputs: dict[str, int] | None = None,
+) -> None:
+    """Print leaderboard as a Rich table, leaving failed runs unranked."""
     from ocr_bench.publish import _get_model_sizes
 
     sizes = _get_model_sizes()
@@ -297,7 +374,12 @@ def print_leaderboard(board: Leaderboard) -> None:
     table.add_column("Ties", justify="right")
     table.add_column("Win%", justify="right")
 
-    for rank, (model, elo) in enumerate(board.ranked, 1):
+    failed = set(failed_models or [])
+    rank = 0
+    for model, elo in board.ranked:
+        if model in failed:
+            continue
+        rank += 1
         pct = board.win_pct(model)
         pct_str = f"{pct:.0f}%" if pct is not None else "-"
         if has_ci and model in board.elo_ci:
@@ -305,15 +387,28 @@ def print_leaderboard(board: Leaderboard) -> None:
             elo_str = f"{round(elo)} ({round(lo)}\u2013{round(hi)})"
         else:
             elo_str = str(round(elo))
+        model_label = f"{model} ⚠" if (failed_outputs or {}).get(model) else model
         table.add_row(
             str(rank),
-            model,
+            model_label,
             sizes.get(model, ""),
             elo_str,
             str(board.wins[model]),
             str(board.losses[model]),
             str(board.ties[model]),
             pct_str,
+        )
+
+    for model in sorted(failed):
+        table.add_row(
+            "-",
+            f"{model} [bold red]FAILED[/bold red]",
+            sizes.get(model, ""),
+            "-",
+            "-",
+            "-",
+            "-",
+            "-",
         )
 
     console.print(table)
@@ -397,6 +492,21 @@ def _resolve_results_repo(dataset: str, save_results: str | None, no_publish: bo
     if save_results:
         return save_results
     return f"{dataset}-results"
+
+
+def _filter_existing_sentinel_comparisons(
+    results: list[ComparisonResult],
+) -> tuple[list[ComparisonResult], int]:
+    """Remove historical comparisons where an error sentinel competed as OCR.
+
+    Results repos created before issue #46 was fixed can contain verdicts for
+    strings such as ``[OCR ERROR]``. Reusing those rows would preserve the
+    poisoned ELO and add their pair/sample keys to the resume skip map, so the
+    corrected comparison builder would never get a chance to reconsider them.
+    Filter them before either operation and report how many were discarded.
+    """
+    kept = [r for r in results if not (is_sentinel(r.text_a) or is_sentinel(r.text_b))]
+    return kept, len(results) - len(kept)
 
 
 def _refresh_viewer_space(results_repo: str) -> None:
@@ -493,6 +603,72 @@ def _unresolved_adjacent_pairs(board: Leaderboard) -> list[str]:
     return pairs
 
 
+def _resolve_criteria(args: argparse.Namespace) -> tuple[str, str, str]:
+    """Resolve (criteria_name, prompt_template, prompt_hash) from the CLI args.
+
+    Enforces that ``--criteria`` and ``--criteria-file`` are mutually exclusive
+    (``--criteria`` defaults to ``None``, so an explicit value is distinguishable
+    from unset — this exclusivity is enforced here rather than via an argparse
+    group, which is unreliable on Python 3.13.0). ``--criteria-file`` loads and
+    validates a custom prompt template, named ``custom:<filename>``; its hash is
+    computed exactly as for a built-in profile, so provenance and the mixing
+    guard treat custom and built-in rubrics identically. Otherwise the named
+    built-in profile (or the default when unset) is used. Raises ``DatasetError``
+    on a conflict, or an unreadable/invalid custom file (clean CLI error).
+    """
+    criteria = getattr(args, "criteria", None)
+    criteria_file = getattr(args, "criteria_file", None)
+    if criteria_file and criteria is not None:
+        raise DatasetError(
+            "--criteria and --criteria-file are mutually exclusive; pass only one"
+        )
+    if criteria_file:
+        try:
+            template = Path(criteria_file).read_text(encoding="utf-8")
+        except OSError as exc:
+            raise DatasetError(f"could not read --criteria-file '{criteria_file}': {exc}") from exc
+        try:
+            validate_prompt_template(template)
+        except ValueError as exc:
+            raise DatasetError(f"invalid --criteria-file '{criteria_file}': {exc}") from exc
+        return f"custom:{Path(criteria_file).name}", template, prompt_hash(template)
+    name = criteria or DEFAULT_CRITERIA
+    template = CRITERIA_PROFILES[name]
+    return name, template, prompt_hash(template)
+
+
+def _existing_criteria_provenance(meta_rows: list[dict]) -> tuple[str, str]:
+    """The (criteria profile, prompt hash) the existing comparisons were judged under.
+
+    Reads the LAST metadata row. Pre-#44 rows lack these columns (or carry None
+    after schema alignment); treat them as the ``default`` profile — historically
+    accurate, since the default profile's prompt is byte-identical to the
+    pre-#44 hardcoded prompt. Used to block mixing criteria rubrics on one board.
+    """
+    default_hash = prompt_hash(CRITERIA_PROFILES[DEFAULT_CRITERIA])
+    if not meta_rows:
+        return DEFAULT_CRITERIA, default_hash
+    last = meta_rows[-1]
+    return (last.get("criteria") or DEFAULT_CRITERIA, last.get("prompt_hash") or default_hash)
+
+
+def _existing_preprocessing_provenance(meta_rows: list[dict]) -> tuple[str, int, int]:
+    """Return text mode, text cap, and image cap used by existing comparisons.
+
+    Results written before #45 used raw text with the original fixed caps. Treat
+    missing metadata as that legacy configuration so the new normalized default
+    cannot silently mix old raw verdicts with newly normalized ones.
+    """
+    if not meta_rows:
+        return "raw", MAX_OCR_TEXT_LENGTH, MAX_IMAGE_DIM
+    last = meta_rows[-1]
+    return (
+        last.get("judge_text_mode") or "raw",
+        int(last.get("max_ocr_text_len") or MAX_OCR_TEXT_LENGTH),
+        int(last.get("judge_image_dim") or MAX_IMAGE_DIM),
+    )
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Orchestrate: load → compare → judge → elo → print → publish."""
     # --- Resolve flags ---
@@ -510,6 +686,11 @@ def cmd_judge(args: argparse.Namespace) -> None:
             "the #45 format bias. 'normalized' is the default for exactly this "
             "reason; use raw only to judge markup quality or audit the transformation."
         )
+
+    # Judge criteria profile: the prompt template every comparison is built with,
+    # plus a stable hash of it recorded in the results metadata for provenance.
+    # A built-in profile (--criteria) or a validated custom file (--criteria-file).
+    criteria, prompt_template, criteria_prompt_hash = _resolve_criteria(args)
 
     # Resolve checkpoint cadence (args.checkpoint_every: None = unspecified).
     #
@@ -601,6 +782,33 @@ def cmd_judge(args: argparse.Namespace) -> None:
     for col, model in ocr_columns.items():
         console.print(f"  {col} → {model}")
 
+    # --- Input integrity: sentinel outputs (issue #46) ---
+    # Error sentinels (e.g. "[OCR ERROR]") are excluded from judging by
+    # build_comparisons; here we count them per model for the metadata + card
+    # and warn loudly when a model's run largely failed on this corpus.
+    model_stats = compute_model_stats(ds, ocr_columns, max_ocr_text_len=MAX_OCR_TEXT_LENGTH)
+    failed_outputs = failed_output_counts(model_stats)
+    # A fully sentinel-backed run has no comparable OCR output at all. Keep it
+    # visible as FAILED, but never assign it an arbitrary disconnected ELO/rank.
+    # Partial failures remain rankable on their successful outputs with a
+    # degraded warning, while the audit still blocks rates over its threshold.
+    failed_models = sorted(
+        stat.model
+        for stat in model_stats
+        if stat.n_rows > 0 and stat.n_sentinel == stat.n_rows
+    )
+    for stat in model_stats:
+        if stat.sentinel_rate > SENTINEL_FLAG_RATE:
+            if stat.model in failed_models:
+                consequence = "this run is marked FAILED and receives no leaderboard rank"
+            else:
+                consequence = "its rank uses successful outputs only and is marked degraded"
+            console.print(
+                f"[yellow]⚠ {stat.model}: {stat.n_sentinel}/{stat.n_rows} outputs are "
+                f"error sentinels ({stat.sentinel_rate:.0%}) — excluded from judging; "
+                f"{consequence}.[/yellow]"
+            )
+
     # --- Incremental: load existing comparisons ---
     existing_results: list[ComparisonResult] = []
     existing_meta_rows: list[dict] = []
@@ -620,23 +828,124 @@ def cmd_judge(args: argparse.Namespace) -> None:
         # adaptive runs, where a checkpoint can persist a pair at (say) 3/50
         # samples — a pair-level skip would freeze it there forever.
         # --full-rejudge forces a clean re-run (ignores all existing).
-        existing_results = load_existing_comparisons(results_repo)
+        loaded_existing = load_existing_comparisons(results_repo)
+        existing_results, discarded_sentinels = _filter_existing_sentinel_comparisons(
+            loaded_existing
+        )
+        # A currently all-sentinel model is intentionally absent from the ELO
+        # graph. Historical non-sentinel verdicts for that model must not reconnect
+        # it or influence the remaining rankings.
+        failed_set = set(failed_models)
+        before_failed_filter = len(existing_results)
+        existing_results = [
+            result
+            for result in existing_results
+            if result.model_a not in failed_set and result.model_b not in failed_set
+        ]
+        discarded_failed_model = before_failed_filter - len(existing_results)
+
+        # Preserve the append-only metadata history even when integrity filtering
+        # removes every old comparison.
+        existing_meta_rows = load_existing_metadata(results_repo)
+
+        if discarded_sentinels:
+            console.print(
+                f"\n[bold yellow]Discarded {discarded_sentinels} existing comparison(s) "
+                "containing OCR error sentinels.[/bold yellow] They will not affect "
+                "ELO or the resume skip map."
+            )
+            logger.warning(
+                "discarded_existing_sentinel_comparisons",
+                repo=results_repo,
+                n=discarded_sentinels,
+            )
+        if discarded_failed_model:
+            console.print(
+                f"[bold yellow]Discarded {discarded_failed_model} historical comparison(s) "
+                "involving a currently failed model.[/bold yellow]"
+            )
+            logger.warning(
+                "discarded_failed_model_comparisons",
+                repo=results_repo,
+                n=discarded_failed_model,
+                models=failed_models,
+            )
+
         if existing_results:
+            # Provenance guard: NEVER mix criteria rubrics on one board. The
+            # existing comparisons were judged under the profile recorded in the
+            # last metadata row (pre-#44 rows = the default profile, whose prompt
+            # is byte-identical to the old hardcoded one). Judging the rest — or
+            # even just refitting — under a different --criteria would merge
+            # incompatible verdicts into one ELO board AND republish the metadata
+            # mislabeled with the current run's criteria. Refuse and exit; the
+            # only safe way to change rubric is --full-rejudge (discards existing).
+            # Compare on the prompt HASH (the true rubric identity): this catches
+            # a built-in prompt edited across code versions, matches the same
+            # custom file re-run, and blocks two different custom files even if
+            # they share a basename.
+            prev_criteria, prev_hash = _existing_criteria_provenance(existing_meta_rows)
+            if prev_hash != criteria_prompt_hash:
+                if prev_criteria.startswith("custom:"):
+                    match_hint = (
+                        f"re-supply the same custom prompt file (recorded as "
+                        f"'{prev_criteria}', prompt {prev_hash})"
+                    )
+                else:
+                    match_hint = f"re-run with [bold]--criteria {prev_criteria}[/bold]"
+                console.print(
+                    f"[red]Error:[/red] criteria mismatch — [bold]{results_repo}[/bold] "
+                    f"was judged under criteria '[bold]{prev_criteria}[/bold]' "
+                    f"(prompt {prev_hash}), but this run requested "
+                    f"'[bold]{criteria}[/bold]' (prompt {criteria_prompt_hash}). "
+                    f"Mixing rubrics on one leaderboard would produce meaningless "
+                    f"rankings and mislabeled metadata.\n"
+                    f"To match the existing results, {match_hint}; or use "
+                    f"[bold]--full-rejudge[/bold] to discard them and re-judge "
+                    f"everything under '{criteria}'."
+                )
+                sys.exit(1)
+
+            previous_preprocessing = _existing_preprocessing_provenance(existing_meta_rows)
+            requested_preprocessing = (
+                args.judge_text_mode,
+                args.max_ocr_text_len,
+                args.judge_image_dim,
+            )
+            if previous_preprocessing != requested_preprocessing:
+                prev_mode, prev_text_cap, prev_image_cap = previous_preprocessing
+                console.print(
+                    f"[red]Error:[/red] judge preprocessing mismatch — "
+                    f"[bold]{results_repo}[/bold] was judged with "
+                    f"text_mode={prev_mode}, max_ocr_text_len={prev_text_cap}, "
+                    f"judge_image_dim={prev_image_cap}, but this run requested "
+                    f"text_mode={args.judge_text_mode}, "
+                    f"max_ocr_text_len={args.max_ocr_text_len}, "
+                    f"judge_image_dim={args.judge_image_dim}. Mixing these verdicts "
+                    "would make the leaderboard incomparable. Re-run with matching "
+                    "settings, or use [bold]--full-rejudge[/bold]."
+                )
+                sys.exit(1)
+
             skip_samples = {}
             for r in existing_results:
                 skip_samples.setdefault(_normalize_pair(r.model_a, r.model_b), set()).add(
                     r.sample_idx
                 )
             console.print(
-                f"\nIncremental mode: {len(existing_results)} existing comparisons "
+                f"\nIncremental mode: {len(existing_results)} reusable existing comparisons "
                 f"across {len(skip_samples)} model pairs — skipping already-judged "
                 f"(pair, sample) combinations, topping up the rest."
             )
-            existing_meta_rows = load_existing_metadata(results_repo)
+        elif discarded_sentinels or discarded_failed_model:
+            console.print(
+                "\nNo reusable existing comparisons remain after integrity filtering — "
+                "rebuilding from the current OCR outputs."
+            )
         else:
             console.print("\nNo existing comparisons found — full judge run.")
 
-    model_names = list(set(ocr_columns.values()))
+    model_names = list(set(ocr_columns.values()) - set(failed_models))
 
     # --- Judge setup (shared by both paths) ---
     model_specs = args.models or [DEFAULT_JUDGE]
@@ -645,6 +954,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
         for spec in model_specs
     ]
     is_jury = len(judges) > 1
+
+    console.print(f"Judge criteria: [bold]{criteria}[/bold] (prompt {criteria_prompt_hash})")
+    logger.info("judge_criteria", criteria=criteria, prompt_hash=criteria_prompt_hash)
 
     def _judge_batch(batch_comps: list[Comparison]) -> list[ComparisonResult]:
         """Run judge(s) on a batch, returning ComparisonResults.
@@ -707,6 +1019,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 indices=batch_indices,
                 seed=args.seed,
                 min_chars=args.min_chars,
+                prompt_template=prompt_template,
                 max_ocr_text_len=args.max_ocr_text_len,
                 judge_image_dim=args.judge_image_dim,
                 normalize=normalize,
@@ -800,6 +1113,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             seed=args.seed,
             skip_samples=skip_samples,
             min_chars=args.min_chars,
+            prompt_template=prompt_template,
             max_ocr_text_len=args.max_ocr_text_len,
             judge_image_dim=args.judge_image_dim,
             normalize=normalize,
@@ -833,7 +1147,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             console.print("[green]All pairs already judged — refitting leaderboard.[/green]")
             board = compute_elo(existing_results, model_names)
             console.print()
-            print_leaderboard(board)
+            print_leaderboard(board, failed_models, failed_outputs)
             if results_repo:
                 metadata = EvalMetadata(
                     source_dataset=args.dataset,
@@ -845,6 +1159,10 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     max_comparisons=max_comparisons,
                     budget_exhausted=budget_exhausted,
                     from_prs=from_prs,
+                    failed_outputs=failed_outputs,
+                    failed_models=failed_models,
+                    criteria=criteria,
+                    prompt_hash=criteria_prompt_hash,
                     max_ocr_text_len=args.max_ocr_text_len,
                     judge_image_dim=args.judge_image_dim,
                     judge_text_mode=args.judge_text_mode,
@@ -920,7 +1238,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
     all_results = existing_results + new_results
     board = compute_elo(all_results, model_names)
     console.print()
-    print_leaderboard(board)
+    print_leaderboard(board, failed_models, failed_outputs)
 
     # A budget-capped run may stop before the ranking is statistically settled —
     # surface which adjacent pairs are still unresolved so the operator knows
@@ -951,6 +1269,10 @@ def cmd_judge(args: argparse.Namespace) -> None:
             budget_exhausted=budget_exhausted,
             auto_tied=n_auto_total,
             from_prs=from_prs,
+            failed_outputs=failed_outputs,
+            failed_models=failed_models,
+            criteria=criteria,
+            prompt_hash=criteria_prompt_hash,
             max_ocr_text_len=args.max_ocr_text_len,
             judge_image_dim=args.judge_image_dim,
             judge_text_mode=args.judge_text_mode,
@@ -1179,6 +1501,11 @@ def cmd_bench(args: argparse.Namespace) -> None:
     """
     parser = build_parser()
 
+    # Validate the criteria selection BEFORE launching OCR jobs: a bad
+    # --criteria-file or a --criteria/--criteria-file conflict should fail fast,
+    # not after a full (paid) run. Raises DatasetError, caught by main().
+    _resolve_criteria(args)
+
     # --- Phase 1: run OCR models (waits for jobs to finish by default) ---
     from ocr_bench.run import failed_jobs
 
@@ -1216,6 +1543,12 @@ def cmd_bench(args: argparse.Namespace) -> None:
     ]
     for model in args.judge_models or []:
         judge_argv += ["--model", model]
+    # Forward whichever criteria flag was set (at most one — already validated
+    # above). Neither → the judge phase uses its own default.
+    if args.criteria_file:
+        judge_argv += ["--criteria-file", args.criteria_file]
+    elif args.criteria is not None:
+        judge_argv += ["--criteria", args.criteria]
     if args.max_samples is not None:
         judge_argv += ["--max-samples", str(args.max_samples)]
     if args.no_publish:
@@ -1237,6 +1570,103 @@ def cmd_bench(args: argparse.Namespace) -> None:
     cmd_view(parser.parse_args(view_argv))
 
 
+# Audit exit codes, so CI can tell a bad *repo* from a broken *run*.
+_AUDIT_EXIT_INTEGRITY = 1  # audit ran and found blocking problems
+_AUDIT_EXIT_OPERATIONAL = 2  # audit could not complete (network/Hub/load)
+
+
+def _pct(rate: float) -> str:
+    """Format a rate as a percentage, colouring anything non-zero for attention."""
+    if rate <= 0:
+        return "0%"
+    colour = "red" if rate > SENTINEL_FLAG_RATE else "yellow"
+    return f"[{colour}]{rate:.0%}[/{colour}]"
+
+
+def _align_cell(status: str) -> str:
+    """Colour a per-config alignment status for the audit table."""
+    colours = {"misaligned": "red", "unverified": "yellow", "ok": "green"}
+    colour = colours.get(status)
+    return f"[{colour}]{status}[/{colour}]" if colour else status
+
+
+def cmd_audit(args: argparse.Namespace) -> None:
+    """Read-only pre-judge health check.
+
+    Exit codes: 0 = clean, 1 = the repo would poison a judge run (integrity
+    failure), 2 = the audit could not complete (network / Hub / dataset load).
+    """
+    try:
+        report = audit_repo(
+            args.dataset,
+            split=args.split,
+            max_ocr_text_len=args.max_ocr_text_len,
+        )
+    except (DatasetError, OSError, OpenAIError, ValueError) as exc:
+        # Couldn't even run the check (repo missing, no OCR columns, network /
+        # Hub outage). Distinct from an integrity failure so automation can tell
+        # "broken run" from "bad data".
+        console.print(f"[red]Audit could not complete:[/red] {exc}")
+        sys.exit(_AUDIT_EXIT_OPERATIONAL)
+
+    if not report.configs:
+        console.print("[red]No OCR configs/columns found to audit.[/red]")
+        sys.exit(_AUDIT_EXIT_OPERATIONAL)
+
+    align = report.alignment
+    table = Table(title=f"OCR input audit — {args.dataset}", show_lines=False)
+    table.add_column("Config", style="cyan")
+    table.add_column("Model")
+    table.add_column("Rows", justify="right")
+    table.add_column("Empty", justify="right")
+    table.add_column("<20ch", justify="right")
+    table.add_column("Sentinel", justify="right")
+    table.add_column("Median len", justify="right")
+    table.add_column("Max len", justify="right")
+    table.add_column(f">{args.max_ocr_text_len}", justify="right")
+    table.add_column("Align")
+
+    for cfg in report.configs:
+        s = cfg.stats
+        table.add_row(
+            s.name,
+            s.model,
+            str(s.n_rows),
+            _pct(s.empty_rate),
+            _pct(s.short_rate),
+            _pct(s.sentinel_rate),
+            f"{s.median_len:.0f}",
+            str(s.max_len),
+            _pct(s.over_max_rate),
+            _align_cell(align.config_status(s.name)),
+        )
+
+    console.print(table)
+
+    # Overall alignment line
+    if align.status == "misaligned":
+        console.print(f"[red]Alignment: {align.describe()}[/red]")
+    elif align.status in ("unverified", "partial"):
+        console.print(f"[yellow]Alignment: {align.describe()}[/yellow]")
+    else:
+        console.print(f"Alignment: {align.describe()}")
+
+    # Verdict + exit code (usable in automation)
+    if report.has_problems:
+        problems: list[str] = []
+        if align.status == "misaligned":
+            problems.append("row misalignment")
+        if report.row_count_mismatch:
+            counts = ", ".join(f"{c.stats.name}={c.stats.n_rows}" for c in report.configs)
+            problems.append(f"row-count mismatch ({counts})")
+        if report.flagged_models:
+            flagged = ", ".join(report.flagged_models)
+            problems.append(f">{SENTINEL_FLAG_RATE:.0%} sentinels: {flagged}")
+        console.print(f"\n[red]FAIL[/red] — {'; '.join(problems)}")
+        sys.exit(_AUDIT_EXIT_INTEGRITY)
+    console.print("\n[green]OK[/green] — no blocking issues found")
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -1256,6 +1686,8 @@ def main() -> None:
             cmd_publish(args)
         elif args.command == "bench":
             cmd_bench(args)
+        elif args.command == "audit":
+            cmd_audit(args)
     except DatasetError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(1)

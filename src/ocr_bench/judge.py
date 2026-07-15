@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import logging
@@ -17,9 +18,70 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-# --- Judge prompt ---
+# --- Error sentinels ---
+#
+# OCR scripts write a placeholder string when a page fails (e.g. an image that
+# won't decode, or a model crash mid-batch) rather than aborting the whole job.
+# The job then "completes" with sentinel strings sitting in the output column.
+# These are NOT transcriptions and must never be scored as such — a job that
+# emitted only sentinels is a *failed run*, not a bad model (see issue #46).
+KNOWN_SENTINELS: frozenset[str] = frozenset({"[OCR ERROR]", "[OCR FAILED]"})
 
-PAIRWISE_PROMPT = """\
+# Bounds for the generic bracketed-token match. A genuine error placeholder is a
+# terse token (a few ALL-CAPS words ending in ERROR/FAILED), never a heading or
+# a paragraph — so anything longer or wordier is treated as real text. These
+# bounds keep archival ALL-CAPS headings like "[SECTION FAILED BANKS 1866]" from
+# being mistaken for sentinels.
+_MAX_SENTINEL_LEN = 40
+_MAX_SENTINEL_WORDS = 4
+
+# A bracketed ALL-CAPS token whose FINAL word (before the closing bracket) is
+# ERROR or FAILED, e.g. "[OCR ERROR]", "[SURYA LAYOUT ERROR]", "[GOT-OCR FAILED]".
+# Requiring the keyword to be terminal (not just present) is what excludes
+# archival headings that merely contain the word, e.g. "[SECTION FAILED BANKS
+# 1866]". The whole stripped string must be this single token.
+_SENTINEL_TOKEN_RE = re.compile(r"^\[[A-Z0-9 ._/-]{0,30}(?:ERROR|FAILED)\]$")
+
+
+def is_sentinel(text: str | None) -> bool:
+    """True if ``text`` is an OCR error sentinel rather than a transcription.
+
+    Matches the known literals (case-insensitively) plus any short (≤40 char,
+    ≤4 word) string that strips to a single bracketed ALL-CAPS token ending in
+    ``ERROR``/``FAILED``. Empty or ``None`` values are *not* sentinels (they are
+    handled as missing output on their own).
+    """
+    if not text:
+        return False
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if stripped.upper() in KNOWN_SENTINELS:
+        return True
+    if len(stripped) > _MAX_SENTINEL_LEN:
+        return False
+    if not _SENTINEL_TOKEN_RE.match(stripped):
+        return False
+    return len(stripped[1:-1].split()) <= _MAX_SENTINEL_WORDS
+
+
+# --- Judge prompt profiles ---
+#
+# Named criteria profiles select the pairwise judge prompt. "default" is tuned
+# for prose corpora — it deliberately neutralises structure so cosmetic markup
+# can't win. "table-fidelity" keeps criteria 1-4 identical but swaps criterion 5
+# for an explicit table criterion, because on table-dense corpora the main
+# quality signal is whether a pipeline preserves row/column cell association
+# rather than flattening it. Add a profile by adding a key here; the CLI exposes
+# them via ``--criteria`` and records the chosen profile + a prompt hash in the
+# results metadata so two boards judged under different prompts are
+# distinguishable. See GitHub issue #44.
+
+# The profile chosen when ``--criteria`` is not given (and the default template
+# for direct callers of ``build_prompt`` / ``build_comparisons``).
+DEFAULT_CRITERIA = "default"
+
+_DEFAULT_PROMPT = """\
 You are an expert OCR quality evaluator. You are given a document image and \
 TWO OCR outputs (A and B) extracted from that same image.
 
@@ -63,6 +125,102 @@ Output B:
 Respond with JSON only (no markdown fences, no extra text):
 {{"winner": "A", "reason": "brief explanation"}}
 Use "A", "B", or "tie" for the winner field."""
+
+_TABLE_FIDELITY_PROMPT = """\
+You are an expert OCR quality evaluator. You are given a document image and \
+TWO OCR outputs (A and B) extracted from that same image.
+
+Compare them and decide which extraction is better overall.
+
+Evaluation criteria (in priority order):
+
+1. Faithfulness: The output must ONLY contain text actually visible in the document. \
+Hallucinating text that is not in the image (garbled strings, repeated tokens, \
+nonsensical output) is the most serious error. Added commentary or notes \
+(e.g. "it appears the text says...") is also an error, but less severe than \
+hallucination. If a page is blank or has minimal text, saying so is acceptable — \
+fabricating content is always worse.
+
+2. Completeness: ALL visible text must be captured — headers, footers, marginalia, \
+stamps, handwritten notes. Missing any section of text is a significant penalty.
+
+3. Table fidelity: When the document contains tabular data, the extraction must \
+preserve the table's row and column structure — each value must stay associated \
+with its correct row and column headers. A flattened table that runs cells \
+together so it is no longer clear which value belongs to which row or column is a \
+significant error. Markup style is neutral: a well-aligned plain-text table \
+(using spacing or simple separators) that preserves the cell relationships is just \
+as good as a markdown or HTML table — judge the preserved row/column relationships, \
+not the syntax used to express them.
+
+4. Accuracy: Correct characters, no garbled or fabricated words.
+
+5. Reading order: Text flows naturally as a human would read the document.
+
+Ignore bounding box tags like <|ref|> <|det|> if present. For non-tabular text, \
+do not penalise or reward markdown formatting markers (#, **, *, etc.) — plain \
+text and markdown-formatted text that contain the same words are equivalent.
+
+If both outputs capture the same text — including, where tables are present, the \
+same table structure — with similar accuracy, respond with "tie". Only pick a \
+winner when there is a clear quality difference.
+
+Output A:
+---
+{ocr_text_a}
+---
+
+Output B:
+---
+{ocr_text_b}
+---
+
+Respond with JSON only (no markdown fences, no extra text):
+{{"winner": "A", "reason": "brief explanation"}}
+Use "A", "B", or "tie" for the winner field."""
+
+CRITERIA_PROFILES: dict[str, str] = {
+    "default": _DEFAULT_PROMPT,
+    "table-fidelity": _TABLE_FIDELITY_PROMPT,
+}
+# Backward-compatible name for callers that imported the original single prompt.
+PAIRWISE_PROMPT = CRITERIA_PROFILES[DEFAULT_CRITERIA]
+
+
+def prompt_hash(prompt_template: str) -> str:
+    """Stable 12-hex-char sha256 fingerprint of a judge prompt template.
+
+    Hashes the template (with its ``{ocr_text_a}`` placeholders intact), not a
+    formatted instance, so every run using the same profile yields the same
+    hash. Recorded in the results metadata for provenance.
+    """
+    return hashlib.sha256(prompt_template.encode()).hexdigest()[:12]
+
+
+def validate_prompt_template(template: str) -> None:
+    """Raise ``ValueError`` if a prompt template won't work with ``build_prompt``.
+
+    A valid template must contain both ``{ocr_text_a}`` and ``{ocr_text_b}`` and
+    no other format fields — any unknown ``{field}`` or a stray unescaped brace
+    would crash ``str.format`` at judge time. This mirrors how ``build_prompt``
+    formats the template, so a template that passes here is safe to judge with.
+    Used to vet user-supplied ``--criteria-file`` templates before a run starts.
+    """
+    try:
+        template.format(ocr_text_a="A", ocr_text_b="B")
+    except (KeyError, IndexError, ValueError) as exc:
+        raise ValueError(
+            f"template is not a valid format string ({exc!s}). Only "
+            "{ocr_text_a} and {ocr_text_b} may appear as placeholders; escape "
+            "any literal brace as {{ or }}"
+        ) from exc
+    missing = [f for f in ("{ocr_text_a}", "{ocr_text_b}") if f not in template]
+    if missing:
+        raise ValueError(
+            f"template is missing required placeholder(s): {', '.join(missing)} "
+            "(see the default profile for the expected shape)"
+        )
+
 
 JUDGE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -354,24 +512,16 @@ def build_prompt(
     text_a: str,
     text_b: str,
     swapped: bool,
+    prompt_template: str = CRITERIA_PROFILES[DEFAULT_CRITERIA],
     max_len: int = MAX_OCR_TEXT_LENGTH,
     normalize: bool = True,
 ) -> tuple[str, bool, bool, bool]:
-    """Build the pairwise comparison prompt, applying position-bias swap.
+    """Build the selected criteria prompt, normalization, cap, and position swap.
 
-    When ``normalize`` is True (default), each text is normalized (HTML
-    flattened to bare content) before the length cap so the budget is spent on
-    content, not markup — keeping the cap format-neutral. When False, text goes
-    to the cap as-is (raw mode). When a text is still over ``max_len`` it is
-    truncated and a harness-voice evaluator note is appended AFTER that output's
-    block (outside the fenced text, before the JSON instruction) so the judge
-    doesn't read the cut as model incompleteness or the note as model-added
-    commentary.
-
-    Returns (prompt_text, swapped, truncated_a, truncated_b). The returned flags
-    refer to the original A/B (``text_a``/``text_b``) ordering, independent of
-    the display swap; the note references the judge-visible (post-swap) A/B
-    positions.
+    ``prompt_template`` supplies the judge rubric. When ``normalize`` is true,
+    HTML is flattened before the character cap so markup verbosity cannot consume
+    the content budget. Truncation is disclosed in harness voice outside the OCR
+    output text. Returned truncation flags always refer to the original A/B order.
     """
     norm_a = normalize_for_judge(text_a) if normalize else text_a
     norm_b = normalize_for_judge(text_b) if normalize else text_b
@@ -381,7 +531,7 @@ def build_prompt(
     disp_a_truncated, disp_b_truncated = (trunc_b, trunc_a) if swapped else (trunc_a, trunc_b)
     if swapped:
         a, b = b, a
-    prompt = PAIRWISE_PROMPT.format(ocr_text_a=a, ocr_text_b=b)
+    prompt = prompt_template.format(ocr_text_a=a, ocr_text_b=b)
 
     notes = []
     if disp_a_truncated:
@@ -390,9 +540,14 @@ def build_prompt(
         notes.append(_truncation_note("B"))
     if notes:
         note_block = "\n".join(notes) + "\n\n"
-        prompt = prompt.replace(
-            _JSON_INSTRUCTION_ANCHOR, note_block + _JSON_INSTRUCTION_ANCHOR, 1
-        )
+        if _JSON_INSTRUCTION_ANCHOR in prompt:
+            prompt = prompt.replace(
+                _JSON_INSTRUCTION_ANCHOR, note_block + _JSON_INSTRUCTION_ANCHOR, 1
+            )
+        else:
+            # Custom criteria templates need not use the built-in JSON wording;
+            # appending still keeps the harness note outside both OCR values.
+            prompt = f"{prompt.rstrip()}\n\n{note_block.rstrip()}"
 
     return prompt, swapped, trunc_a, trunc_b
 
@@ -446,6 +601,7 @@ def build_comparisons(
     skip_samples: dict[tuple[str, str], set[int]] | None = None,
     indices: list[int] | None = None,
     min_chars: int = DEFAULT_MIN_CHARS,
+    prompt_template: str = CRITERIA_PROFILES[DEFAULT_CRITERIA],
     max_ocr_text_len: int = MAX_OCR_TEXT_LENGTH,
     judge_image_dim: int = MAX_IMAGE_DIM,
     normalize: bool = True,
@@ -471,6 +627,8 @@ def build_comparisons(
         min_chars: Skip a pair when BOTH outputs are shorter than this (after
             stripping) — neither model produced meaningful text. Set to 0 to
             disable the filter.
+        prompt_template: Criteria profile template (see ``CRITERIA_PROFILES``)
+            used to build each comparison prompt.
         max_ocr_text_len: Per-output character cap applied after HTML
             normalization when building each prompt.
         judge_image_dim: Longer-side pixel cap for the judge image.
@@ -532,6 +690,11 @@ def build_comparisons(
         for i, j in needed_pairs:
             text_a = texts[col_names[i]]
             text_b = texts[col_names[j]]
+            # A sentinel side is a failed output, not a transcription — exclude
+            # the pair so an error string never competes (issue #46). Sentinels
+            # are counted per model separately (integrity.compute_model_stats).
+            if is_sentinel(text_a) or is_sentinel(text_b):
+                continue
             stripped_a, stripped_b = text_a.strip(), text_b.strip()
             # Neither model produced meaningful text — a wasted judge call.
             if len(stripped_a) < min_chars and len(stripped_b) < min_chars:
@@ -574,7 +737,12 @@ def build_comparisons(
 
             swapped = rng.random() < 0.5
             prompt, swapped, trunc_a, trunc_b = build_prompt(
-                text_a, text_b, swapped, max_len=max_ocr_text_len, normalize=normalize
+                text_a,
+                text_b,
+                swapped,
+                prompt_template=prompt_template,
+                max_len=max_ocr_text_len,
+                normalize=normalize,
             )
             messages = build_messages(image_b64, prompt)
 

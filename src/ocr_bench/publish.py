@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import structlog
 from datasets import Dataset, load_dataset
@@ -48,6 +48,16 @@ class EvalMetadata:
     max_comparisons: int | None = None
     budget_exhausted: bool = False
     from_prs: bool = False
+    # model → count of error-sentinel outputs excluded from judging (issue #46).
+    failed_outputs: dict[str, int] = field(default_factory=dict)
+    # All-sentinel models. They remain visible in the published data but must
+    # not receive an ordinary ELO or leaderboard rank.
+    failed_models: list[str] = field(default_factory=list)
+    # Judge prompt provenance: which criteria profile (--criteria) was used and a
+    # stable hash of the exact prompt template. Two boards judged under different
+    # prompts share a judge model but differ here, so they stay distinguishable.
+    criteria: str = "default"
+    prompt_hash: str = ""
     timestamp: str = ""
     max_ocr_text_len: int = MAX_OCR_TEXT_LENGTH
     judge_image_dim: int = MAX_IMAGE_DIM
@@ -113,11 +123,25 @@ def _get_model_sizes() -> dict[str, str]:
     return {cfg.model_id: cfg.size for cfg in MODEL_REGISTRY.values()}
 
 
-def build_leaderboard_rows(board: Leaderboard) -> list[dict]:
-    """Convert a Leaderboard into rows suitable for a Hub dataset."""
+def build_leaderboard_rows(
+    board: Leaderboard,
+    failed_models: list[str] | None = None,
+    failed_outputs: dict[str, int] | None = None,
+) -> list[dict]:
+    """Convert a Leaderboard into rows suitable for a Hub dataset.
+
+    All-sentinel models are appended as explicit ``status="failed"`` rows
+    without an ELO or rankable score. Models with a
+    smaller non-zero failure count remain rankable but carry ``degraded`` status
+    so every consumer, including the web viewer, can surface the caveat.
+    """
     sizes = _get_model_sizes()
+    failed = set(failed_models or [])
+    failure_counts = failed_outputs or {}
     rows = []
     for model, elo in board.ranked:
+        if model in failed:
+            continue
         total = board.wins[model] + board.losses[model] + board.ties[model]
         row = {
             "model": model,
@@ -127,12 +151,29 @@ def build_leaderboard_rows(board: Leaderboard) -> list[dict]:
             "losses": board.losses[model],
             "ties": board.ties[model],
             "win_pct": round(board.wins[model] / total * 100) if total > 0 else 0,
+            "status": "degraded" if failure_counts.get(model, 0) else "ranked",
+            "failed_outputs": failure_counts.get(model, 0),
         }
         if board.elo_ci and model in board.elo_ci:
             lo, hi = board.elo_ci[model]
             row["elo_low"] = round(lo)
             row["elo_high"] = round(hi)
         rows.append(row)
+
+    for model in sorted(failed):
+        rows.append(
+            {
+                "model": model,
+                "elo": None,
+                "params": sizes.get(model, ""),
+                "wins": board.wins.get(model, 0),
+                "losses": board.losses.get(model, 0),
+                "ties": board.ties.get(model, 0),
+                "win_pct": None,
+                "status": "failed",
+                "failed_outputs": failure_counts.get(model, 0),
+            }
+        )
     return rows
 
 
@@ -149,6 +190,10 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
         "max_comparisons": metadata.max_comparisons,
         "budget_exhausted": metadata.budget_exhausted,
         "from_prs": metadata.from_prs,
+        "failed_outputs": json.dumps(metadata.failed_outputs),
+        "failed_models": json.dumps(metadata.failed_models),
+        "criteria": metadata.criteria,
+        "prompt_hash": metadata.prompt_hash,
         "timestamp": metadata.timestamp,
         "max_ocr_text_len": metadata.max_ocr_text_len,
         "judge_image_dim": metadata.judge_image_dim,
@@ -228,15 +273,19 @@ def publish_results(
         logger.info("published_comparisons", repo=repo_id, n=len(board.comparison_log))
 
     # Leaderboard — dual push: default config + named config
-    rows = build_leaderboard_rows(board)
+    rows = build_leaderboard_rows(
+        board,
+        failed_models=metadata.failed_models,
+        failed_outputs=metadata.failed_outputs,
+    )
     lb_ds = Dataset.from_list(rows)
     lb_ds.push_to_hub(repo_id)
     lb_ds.push_to_hub(repo_id, config_name="leaderboard")
     logger.info("published_leaderboard", repo=repo_id, n=len(rows))
 
     # Metadata — append-only. Align all rows to the union of keys so a newer
-    # row's columns (auto_tied, budget fields) aren't dropped when an older row
-    # written before those fields existed comes first.
+    # row's columns (auto_tied, budget fields, failed_outputs) aren't dropped
+    # when an older row written before those fields existed comes first.
     meta_row = build_metadata_row(metadata)
     all_meta = _align_metadata_rows((existing_metadata or []) + [meta_row])
     Dataset.from_list(all_meta).push_to_hub(repo_id, config_name="metadata")
@@ -279,6 +328,20 @@ def _build_readme(
         comparisons_str = f"{n_judged} judged + {n_auto} auto-tied ({n_comparisons} total)"
     else:
         comparisons_str = str(n_comparisons)
+
+    # Models that emitted error sentinels instead of transcriptions. These
+    # outputs were excluded from judging, so a high count means the run failed
+    # on this corpus — the card must not let it read as "ranked low" (issue #46).
+    failed = metadata.failed_outputs
+    if isinstance(failed, str):
+        failed = json.loads(failed) if failed else {}
+    failed_outputs: dict[str, int] = {
+        model: count for model, count in (failed or {}).items() if count
+    }
+    failed_model_values = metadata.failed_models
+    if isinstance(failed_model_values, str):
+        failed_model_values = json.loads(failed_model_values) if failed_model_values else []
+    failed_models = set(failed_model_values or [])
 
     # The card license describes the published results DATA (which embeds
     # OCR text derived from the source dataset), not this tool — so there is
@@ -329,15 +392,35 @@ def _build_readme(
         lines.append("| Rank | Model | Params | ELO | Wins | Losses | Ties | Win% |")
         lines.append("|------|-------|--------|-----|------|--------|------|------|")
 
-    for rank, row in enumerate(rows, 1):
+    rank = 0
+    for row in rows:
         # Escape pipes so arbitrary model names can't break the table
-        model = str(row["model"]).replace("|", "\\|")
-        elo = row["elo"]
+        model_name = row["model"]
+        model = str(model_name).replace("|", "\\|")
+        status = "failed" if model_name in failed_models else row.get("status", "ranked")
+        if model_name in failed_outputs:
+            model = f"{model} ⚠"
         params = row.get("params", "")
-        if has_ci and "elo_low" in row:
+
+        if status == "failed":
+            if has_ci:
+                lines.append(f"| — | {model} | {params} | **FAILED** | — | — | — | — | — |")
+            else:
+                lines.append(f"| — | {model} | {params} | **FAILED** | — | — | — | — |")
+            continue
+
+        rank += 1
+        elo = row["elo"]
+        if has_ci and row.get("elo_low") is not None:
             ci = f"{row['elo_low']}\u2013{row['elo_high']}"
             lines.append(
                 f"| {rank} | {model} | {params} | {elo} | {ci} "
+                f"| {row['wins']} | {row['losses']} | {row['ties']} "
+                f"| {row['win_pct']}% |"
+            )
+        elif has_ci:
+            lines.append(
+                f"| {rank} | {model} | {params} | {elo} | — "
                 f"| {row['wins']} | {row['losses']} | {row['ties']} "
                 f"| {row['win_pct']}% |"
             )
@@ -348,6 +431,25 @@ def _build_readme(
                 f"| {row['win_pct']}% |"
             )
 
+    if failed_outputs:
+        lines += [
+            "",
+            "## ⚠ Failed outputs",
+            "",
+            "The models below emitted error sentinels (e.g. `[OCR ERROR]`, "
+            "`[OCR FAILED]`) instead of transcriptions on some pages — usually a "
+            "crashed or misconfigured run, **not** poor OCR quality. Those outputs "
+            "were **excluded from judging**, so a high count means the model did "
+            "not produce comparable output on this corpus. Do not read a flagged "
+            "model's rank as a quality signal.",
+            "",
+            "| Model | Excluded outputs |",
+            "|-------|------------------|",
+        ]
+        for model, count in sorted(failed_outputs.items(), key=lambda kv: -kv[1]):
+            safe_model = str(model).replace("|", "\\|")
+            lines.append(f"| {safe_model} | {count} |")
+
     lines += [
         "",
         "## Details",
@@ -355,6 +457,11 @@ def _build_readme(
         f"- **Source dataset**: [`{metadata.source_dataset}`]"
         f"(https://huggingface.co/datasets/{metadata.source_dataset})",
         f"- **Judge**: {judge_str}",
+        f"- **Judge criteria**: {metadata.criteria}",
+        f"- **Judge prompt hash**: `{metadata.prompt_hash or 'unrecorded'}`",
+        f"- **Judge text mode**: {metadata.judge_text_mode}",
+        f"- **OCR text cap**: {metadata.max_ocr_text_len} characters per output",
+        f"- **Judge image cap**: {metadata.judge_image_dim}px on the longer side",
         f"- **Comparisons**: {comparisons_str}",
         "- **Method**: Bradley-Terry MLE with bootstrap 95% CIs",
         "",

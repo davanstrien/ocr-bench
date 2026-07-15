@@ -6,14 +6,14 @@ Rankings change by document type — the best model for manuscript cards is diff
 
 Inspired by [Datalab's Benchmarks + Evals](https://www.datalab.to/blog/datalab-benchmarks-evals) — pairwise VLM-as-judge with Bradley-Terry scoring per document class — but as an open-source, Hub-native tool anyone can run on their own collections.
 
-**Pipeline**: `run` (launch OCR models via HF Jobs) → `judge` (pairwise VLM comparison → Bradley-Terry ELO) → `view` (leaderboard + human validation). Everything lives on the Hugging Face Hub — no local GPU needed.
+**Pipeline**: `run` (launch OCR models via HF Jobs) → `audit` (optional read-only pre-judge health check) → `judge` (pairwise VLM comparison → Bradley-Terry ELO) → `view` (leaderboard + human validation). Everything lives on the Hugging Face Hub — no local GPU needed.
 
 ## Architecture
 
 | Module | What it does |
 |--------|-------------|
 | `elo.py` | Bradley-Terry MLE via scipy, bootstrap 95% CIs, ELO scale |
-| `judge.py` | VLM-as-judge prompt, Comparison dataclass, structured output schema |
+| `judge.py` | Criteria-profile/custom judge prompts, HTML normalization, truncation disclosure, Comparison dataclass, structured output schema |
 | `dataset.py` | Flat, config-per-model, PR-based dataset loading, OCR column discovery |
 | `backends.py` | API backends: InferenceProvider + OpenAI-compatible, concurrent calls |
 | `publish.py` | Publish comparisons + leaderboard to Hub; incremental load from existing results |
@@ -21,7 +21,8 @@ Inspired by [Datalab's Benchmarks + Evals](https://www.datalab.to/blog/datalab-b
 | `validate.py` | Human A/B validation data layer, agreement stats, human ELO |
 | `viewer.py` | Data loading for results viewer (pure functions) |
 | `web.py` | FastAPI + HTMX unified viewer (browse + validate in one app) |
-| `cli.py` | CLI: `judge` (incremental + `--full-rejudge`), `run`, `view` |
+| `integrity.py` | Input-integrity checks shared by judge guards + `audit`: sentinel/empty/length stats, per-model failure counts, audit report |
+| `cli.py` | CLI: `judge` (incremental + `--full-rejudge`), `run`, `view`, `audit` |
 
 ## Tooling
 
@@ -45,17 +46,20 @@ Branch protection is on — all changes go through PRs with CI checks.
 - **Arrow-level merges**: dataset loading uses Arrow column ops to avoid per-row image decode
 - **Don't merge PRs**: load OCR outputs via `revision=` to avoid README merge conflicts on Hub datasets
 - **Default judge**: Qwen3.5-35B-A3B via HF Inference Providers (zero parse failures, fastest, only needs HF token)
+- **Judge provenance is immutable within a results repo**: criteria/prompt hash, normalized-vs-raw text mode, text cap, and image cap are recorded; changing any requires `--full-rejudge`.
+- **Normalize before truncating**: default judge text mode flattens known HTML while preserving table-cell boundaries and GLAM transcription tokens, then applies the character cap. Raw mode is opt-in.
 
 ## Known limitations
 
-- **Row alignment across configs is positional only** — `load_config_dataset()` merges by index. Safe if all model runs use the same `--seed`/`--max-samples` and source dataset doesn't change. Future: add content hash column.
+- **Row alignment across configs is verified when possible, else positional** — `load_config_dataset()` merges by index but first asserts row-for-row equality on shared passthrough keys (`b_number`, `page_index`, `source_row`, `id`) whose combined values are non-missing and unique per row; a mismatch raises `DatasetError`. Missing or non-identifying keys fall back to positional alignment with a warning (`ocr-bench audit` reports this as `unverified`).
+- **Error sentinels are excluded, not judged** — `judge.is_sentinel` recognises `[OCR ERROR]`/`[OCR FAILED]` and bracketed ALL-CAPS `ERROR`/`FAILED` variants; a sentinel side is treated as missing output (like empty), counted per model into `failed_outputs`, and warned on at >10%. Partially affected runs are marked degraded; all-sentinel runs are published as `FAILED` without an ELO/rank in the card and viewer.
 - **Blank page filtering** not yet implemented — wastes judge calls when neither model produced meaningful text.
 
 ## Roadmap
 
 - Blog post: "There Is No Best OCR Model"
-- Judge prompt presets for GLAM document types
-- Custom prompt and ignore list support
+- Additional judge prompt presets for GLAM document types
+- Ignore list support
 - Judge comparison across different judge models
 - `--focus-pairs`: prioritize overlapping-CI pairs in validation UI
 - CER/WER metrics alongside VLM judge
