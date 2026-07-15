@@ -263,8 +263,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def print_leaderboard(board: Leaderboard) -> None:
-    """Print leaderboard as a Rich table."""
+def print_leaderboard(
+    board: Leaderboard,
+    failed_models: list[str] | None = None,
+    failed_outputs: dict[str, int] | None = None,
+) -> None:
+    """Print leaderboard as a Rich table, leaving failed runs unranked."""
     from ocr_bench.publish import _get_model_sizes
 
     sizes = _get_model_sizes()
@@ -282,7 +286,12 @@ def print_leaderboard(board: Leaderboard) -> None:
     table.add_column("Ties", justify="right")
     table.add_column("Win%", justify="right")
 
-    for rank, (model, elo) in enumerate(board.ranked, 1):
+    failed = set(failed_models or [])
+    rank = 0
+    for model, elo in board.ranked:
+        if model in failed:
+            continue
+        rank += 1
         pct = board.win_pct(model)
         pct_str = f"{pct:.0f}%" if pct is not None else "-"
         if has_ci and model in board.elo_ci:
@@ -290,15 +299,28 @@ def print_leaderboard(board: Leaderboard) -> None:
             elo_str = f"{round(elo)} ({round(lo)}\u2013{round(hi)})"
         else:
             elo_str = str(round(elo))
+        model_label = f"{model} ⚠" if (failed_outputs or {}).get(model) else model
         table.add_row(
             str(rank),
-            model,
+            model_label,
             sizes.get(model, ""),
             elo_str,
             str(board.wins[model]),
             str(board.losses[model]),
             str(board.ties[model]),
             pct_str,
+        )
+
+    for model in sorted(failed):
+        table.add_row(
+            "-",
+            f"{model} [bold red]FAILED[/bold red]",
+            sizes.get(model, ""),
+            "-",
+            "-",
+            "-",
+            "-",
+            "-",
         )
 
     console.print(table)
@@ -596,12 +618,25 @@ def cmd_judge(args: argparse.Namespace) -> None:
     # and warn loudly when a model's run largely failed on this corpus.
     model_stats = compute_model_stats(ds, ocr_columns, max_ocr_text_len=MAX_OCR_TEXT_LENGTH)
     failed_outputs = failed_output_counts(model_stats)
+    # A fully sentinel-backed run has no comparable OCR output at all. Keep it
+    # visible as FAILED, but never assign it an arbitrary disconnected ELO/rank.
+    # Partial failures remain rankable on their successful outputs with a
+    # degraded warning, while the audit still blocks rates over its threshold.
+    failed_models = sorted(
+        stat.model
+        for stat in model_stats
+        if stat.n_rows > 0 and stat.n_sentinel == stat.n_rows
+    )
     for stat in model_stats:
         if stat.sentinel_rate > SENTINEL_FLAG_RATE:
+            if stat.model in failed_models:
+                consequence = "this run is marked FAILED and receives no leaderboard rank"
+            else:
+                consequence = "its rank uses successful outputs only and is marked degraded"
             console.print(
                 f"[yellow]⚠ {stat.model}: {stat.n_sentinel}/{stat.n_rows} outputs are "
                 f"error sentinels ({stat.sentinel_rate:.0%}) — excluded from judging; "
-                f"a high rate means this run failed, not that the model is weak.[/yellow]"
+                f"{consequence}.[/yellow]"
             )
 
     # --- Incremental: load existing comparisons ---
@@ -627,6 +662,18 @@ def cmd_judge(args: argparse.Namespace) -> None:
         existing_results, discarded_sentinels = _filter_existing_sentinel_comparisons(
             loaded_existing
         )
+        # A currently all-sentinel model is intentionally absent from the ELO
+        # graph. Historical non-sentinel verdicts for that model must not reconnect
+        # it or influence the remaining rankings.
+        failed_set = set(failed_models)
+        before_failed_filter = len(existing_results)
+        existing_results = [
+            result
+            for result in existing_results
+            if result.model_a not in failed_set and result.model_b not in failed_set
+        ]
+        discarded_failed_model = before_failed_filter - len(existing_results)
+
         # Preserve the append-only metadata history even when integrity filtering
         # removes every old comparison.
         existing_meta_rows = load_existing_metadata(results_repo)
@@ -642,6 +689,17 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 repo=results_repo,
                 n=discarded_sentinels,
             )
+        if discarded_failed_model:
+            console.print(
+                f"[bold yellow]Discarded {discarded_failed_model} historical comparison(s) "
+                "involving a currently failed model.[/bold yellow]"
+            )
+            logger.warning(
+                "discarded_failed_model_comparisons",
+                repo=results_repo,
+                n=discarded_failed_model,
+                models=failed_models,
+            )
 
         if existing_results:
             skip_samples = {}
@@ -654,7 +712,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 f"across {len(skip_samples)} model pairs — skipping already-judged "
                 f"(pair, sample) combinations, topping up the rest."
             )
-        elif discarded_sentinels:
+        elif discarded_sentinels or discarded_failed_model:
             console.print(
                 "\nNo reusable existing comparisons remain after integrity filtering — "
                 "rebuilding from the current OCR outputs."
@@ -662,7 +720,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
         else:
             console.print("\nNo existing comparisons found — full judge run.")
 
-    model_names = list(set(ocr_columns.values()))
+    model_names = list(set(ocr_columns.values()) - set(failed_models))
 
     # --- Judge setup (shared by both paths) ---
     model_specs = args.models or [DEFAULT_JUDGE]
@@ -853,7 +911,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             console.print("[green]All pairs already judged — refitting leaderboard.[/green]")
             board = compute_elo(existing_results, model_names)
             console.print()
-            print_leaderboard(board)
+            print_leaderboard(board, failed_models, failed_outputs)
             if results_repo:
                 metadata = EvalMetadata(
                     source_dataset=args.dataset,
@@ -866,6 +924,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     budget_exhausted=budget_exhausted,
                     from_prs=from_prs,
                     failed_outputs=failed_outputs,
+                    failed_models=failed_models,
                 )
                 publish_results(
                     results_repo,
@@ -938,7 +997,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
     all_results = existing_results + new_results
     board = compute_elo(all_results, model_names)
     console.print()
-    print_leaderboard(board)
+    print_leaderboard(board, failed_models, failed_outputs)
 
     # A budget-capped run may stop before the ranking is statistically settled —
     # surface which adjacent pairs are still unresolved so the operator knows
@@ -970,6 +1029,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             auto_tied=n_auto_total,
             from_prs=from_prs,
             failed_outputs=failed_outputs,
+            failed_models=failed_models,
         )
         publish_results(
             results_repo,

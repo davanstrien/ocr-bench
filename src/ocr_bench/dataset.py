@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -43,10 +44,10 @@ class AlignmentResult:
       - ``misaligned``: a shared column disagrees — ``config``/``column``/
         ``index`` locate the first mismatch against ``reference_config``.
       - ``partial``: some configs were verified against the reference but others
-        shared no passthrough column, so their alignment is unchecked. The
+        shared no identifying passthrough keys, so their alignment is unchecked. The
         unchecked configs are listed in ``unverified_configs``. A single passing
         config must NOT let the whole set read as verified.
-      - ``unverified``: no config shared a passthrough column with the
+      - ``unverified``: no config shared identifying passthrough keys with the
         reference, so alignment is positional-only and could not be checked.
       - ``n/a``: fewer than two configs (nothing to compare).
     """
@@ -79,7 +80,7 @@ class AlignmentResult:
         if self.status == "partial":
             return (
                 f"PARTIAL — verified {', '.join(self.verified_configs)} on "
-                f"{', '.join(self.shared_keys)}; unverified (no shared keys): "
+                f"{', '.join(self.shared_keys)}; unverified (no identifying keys): "
                 f"{', '.join(self.unverified_configs)}"
             )
         if self.status == "misaligned":
@@ -88,13 +89,20 @@ class AlignmentResult:
                 f"at row {self.index} (column '{self.column}')"
             )
         if self.status == "unverified":
-            return "unverified (no shared passthrough columns — positional only)"
+            return "unverified (no identifying shared passthrough keys — positional only)"
         return "n/a (single config)"
 
 
 def shared_alignment_keys(ds_a: Dataset, ds_b: Dataset) -> list[str]:
     """Passthrough columns present in *both* datasets, in canonical order."""
     return [k for k in ALIGNMENT_KEYS if k in ds_a.column_names and k in ds_b.column_names]
+
+
+def _alignment_values_equal(a: object, b: object) -> bool:
+    """Equality for passthrough values, treating two NaNs as the same missing value."""
+    if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):
+        return True
+    return a == b
 
 
 def _first_value_mismatch(ref: list, cur: list) -> int | None:
@@ -104,11 +112,48 @@ def _first_value_mismatch(ref: list, cur: list) -> int | None:
     """
     n = min(len(ref), len(cur))
     for i in range(n):
-        if ref[i] != cur[i]:
+        if not _alignment_values_equal(ref[i], cur[i]):
             return i
     if len(ref) != len(cur):
         return n
     return None
+
+
+def _alignment_value_missing(value: object) -> bool:
+    """Whether a passthrough value cannot contribute to row identity."""
+    if value is None:
+        return True
+    if isinstance(value, float) and math.isnan(value):
+        return True
+    return isinstance(value, str) and not value.strip()
+
+
+def _alignment_value_key(value: object) -> object:
+    """Convert a possibly nested Arrow value into a hashable identity key."""
+    try:
+        hash(value)
+    except TypeError:
+        return json.dumps(value, sort_keys=True, default=str)
+    return value
+
+
+def alignment_keys_identify_rows(ds: Dataset, keys: list[str]) -> bool:
+    """True when the shared key tuple uniquely identifies every dataset row.
+
+    Equal constant/null columns cannot prove positional alignment: swapping two
+    pages leaves those columns unchanged. Verification therefore requires every
+    row to have at least one non-missing key value and the combined key tuple to
+    be unique across the config.
+    """
+    if not keys:
+        return False
+    columns = [ds[key] for key in keys]
+    identities: list[tuple[object, ...]] = []
+    for values in zip(*columns):
+        if all(_alignment_value_missing(value) for value in values):
+            return False
+        identities.append(tuple(_alignment_value_key(value) for value in values))
+    return bool(identities) and len(identities) == len(set(identities))
 
 
 def find_alignment_mismatch(
@@ -316,7 +361,6 @@ def check_config_alignment(loaded: list[LoadedConfig]) -> AlignmentResult:
             # overall "ok" just because a sibling config passed.
             unverified.append(lc.config)
             continue
-        used.update(keys)
         hit = find_alignment_mismatch(ref.ds, lc.ds, keys)
         if hit is not None:
             column, index = hit
@@ -330,6 +374,15 @@ def check_config_alignment(loaded: list[LoadedConfig]) -> AlignmentResult:
                 verified_configs=verified,
                 unverified_configs=unverified,
             )
+        if not (
+            alignment_keys_identify_rows(ref.ds, keys)
+            and alignment_keys_identify_rows(lc.ds, keys)
+        ):
+            # Matching constant/null/repeated values do not identify rows, so a
+            # permutation can pass equality while pairing different pages.
+            unverified.append(lc.config)
+            continue
+        used.update(keys)
         verified.append(lc.config)
 
     ordered = [k for k in ALIGNMENT_KEYS if k in used]
@@ -431,7 +484,7 @@ def load_config_dataset(
             status=alignment.status,
             reference=alignment.reference_config,
             unverified_configs=alignment.unverified_configs,
-            note="these configs share no passthrough column with the reference; "
+            note="these configs share no identifying passthrough keys with the reference; "
             "their positional alignment is unverified",
         )
 

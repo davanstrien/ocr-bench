@@ -204,6 +204,24 @@ class TestBudget:
         assert _published_metadata(m_publish).budget_exhausted is True
 
 
+class TestFailedModelStatus:
+    def test_fully_sentinel_model_is_marked_failed(self):
+        ds, ocr = make_ds(n=10)
+        ds._columns["col_a"] = ["[OCR ERROR]"] * 10
+
+        _, m_publish, _ = _run_judge(
+            ["--no-adaptive", "--checkpoint-every", "0"],
+            ds,
+            ocr,
+        )
+
+        board = m_publish.call_args.args[1]
+        metadata = _published_metadata(m_publish)
+        assert "model-a" not in board.elo
+        assert metadata.failed_models == ["model-a"]
+        assert metadata.failed_outputs == {"model-a": 10}
+
+
 class TestCheckpointFullRejudge:
     def test_default_disabled_under_full_rejudge(self, capsys):
         # No explicit --checkpoint-every + --full-rejudge -> checkpointing off,

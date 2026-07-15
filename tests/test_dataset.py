@@ -508,6 +508,35 @@ class TestCheckConfigAlignment:
         ]
         assert check_config_alignment(loaded).status == "unverified"
 
+    def test_constant_shared_key_is_unverified(self):
+        # A document-level identifier can match after rows are permuted, so it
+        # cannot prove row-for-row alignment by itself.
+        loaded = [
+            self._lc("a", _config_ds("m-a", ["a1", "a2"], b_number=[7, 7])),
+            self._lc("b", _config_ds("m-b", ["b2", "b1"], b_number=[7, 7])),
+        ]
+        assert check_config_alignment(loaded).status == "unverified"
+
+    def test_null_shared_key_is_unverified(self):
+        loaded = [
+            self._lc("a", _config_ds("m-a", ["a1", "a2"], id=[None, None])),
+            self._lc("b", _config_ds("m-b", ["b2", "b1"], id=[None, None])),
+        ]
+        assert check_config_alignment(loaded).status == "unverified"
+
+    def test_combined_keys_can_identify_rows(self):
+        loaded = [
+            self._lc(
+                "a",
+                _config_ds("m-a", ["a1", "a2"], b_number=[7, 7], page_index=[0, 1]),
+            ),
+            self._lc(
+                "b",
+                _config_ds("m-b", ["b1", "b2"], b_number=[7, 7], page_index=[0, 1]),
+            ),
+        ]
+        assert check_config_alignment(loaded).status == "ok"
+
     def test_partial_when_some_configs_share_no_keys(self):
         # One sibling verifies, another shares nothing — the whole set must NOT
         # read as "ok" off the single passing config (review finding #1).

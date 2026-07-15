@@ -49,6 +49,9 @@ class EvalMetadata:
     from_prs: bool = False
     # model → count of error-sentinel outputs excluded from judging (issue #46).
     failed_outputs: dict[str, int] = field(default_factory=dict)
+    # All-sentinel models. They remain visible in the published data but must
+    # not receive an ordinary ELO or leaderboard rank.
+    failed_models: list[str] = field(default_factory=list)
     timestamp: str = ""
 
     def __post_init__(self):
@@ -107,11 +110,25 @@ def _get_model_sizes() -> dict[str, str]:
     return {cfg.model_id: cfg.size for cfg in MODEL_REGISTRY.values()}
 
 
-def build_leaderboard_rows(board: Leaderboard) -> list[dict]:
-    """Convert a Leaderboard into rows suitable for a Hub dataset."""
+def build_leaderboard_rows(
+    board: Leaderboard,
+    failed_models: list[str] | None = None,
+    failed_outputs: dict[str, int] | None = None,
+) -> list[dict]:
+    """Convert a Leaderboard into rows suitable for a Hub dataset.
+
+    All-sentinel models are appended as explicit ``status="failed"`` rows
+    without an ELO or rankable score. Models with a
+    smaller non-zero failure count remain rankable but carry ``degraded`` status
+    so every consumer, including the web viewer, can surface the caveat.
+    """
     sizes = _get_model_sizes()
+    failed = set(failed_models or [])
+    failure_counts = failed_outputs or {}
     rows = []
     for model, elo in board.ranked:
+        if model in failed:
+            continue
         total = board.wins[model] + board.losses[model] + board.ties[model]
         row = {
             "model": model,
@@ -121,12 +138,29 @@ def build_leaderboard_rows(board: Leaderboard) -> list[dict]:
             "losses": board.losses[model],
             "ties": board.ties[model],
             "win_pct": round(board.wins[model] / total * 100) if total > 0 else 0,
+            "status": "degraded" if failure_counts.get(model, 0) else "ranked",
+            "failed_outputs": failure_counts.get(model, 0),
         }
         if board.elo_ci and model in board.elo_ci:
             lo, hi = board.elo_ci[model]
             row["elo_low"] = round(lo)
             row["elo_high"] = round(hi)
         rows.append(row)
+
+    for model in sorted(failed):
+        rows.append(
+            {
+                "model": model,
+                "elo": None,
+                "params": sizes.get(model, ""),
+                "wins": board.wins.get(model, 0),
+                "losses": board.losses.get(model, 0),
+                "ties": board.ties.get(model, 0),
+                "win_pct": None,
+                "status": "failed",
+                "failed_outputs": failure_counts.get(model, 0),
+            }
+        )
     return rows
 
 
@@ -144,6 +178,7 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
         "budget_exhausted": metadata.budget_exhausted,
         "from_prs": metadata.from_prs,
         "failed_outputs": json.dumps(metadata.failed_outputs),
+        "failed_models": json.dumps(metadata.failed_models),
         "timestamp": metadata.timestamp,
     }
 
@@ -220,7 +255,11 @@ def publish_results(
         logger.info("published_comparisons", repo=repo_id, n=len(board.comparison_log))
 
     # Leaderboard — dual push: default config + named config
-    rows = build_leaderboard_rows(board)
+    rows = build_leaderboard_rows(
+        board,
+        failed_models=metadata.failed_models,
+        failed_outputs=metadata.failed_outputs,
+    )
     lb_ds = Dataset.from_list(rows)
     lb_ds.push_to_hub(repo_id)
     lb_ds.push_to_hub(repo_id, config_name="leaderboard")
@@ -281,6 +320,10 @@ def _build_readme(
     failed_outputs: dict[str, int] = {
         model: count for model, count in (failed or {}).items() if count
     }
+    failed_model_values = metadata.failed_models
+    if isinstance(failed_model_values, str):
+        failed_model_values = json.loads(failed_model_values) if failed_model_values else []
+    failed_models = set(failed_model_values or [])
 
     # The card license describes the published results DATA (which embeds
     # OCR text derived from the source dataset), not this tool — so there is
@@ -331,19 +374,35 @@ def _build_readme(
         lines.append("| Rank | Model | Params | ELO | Wins | Losses | Ties | Win% |")
         lines.append("|------|-------|--------|-----|------|--------|------|------|")
 
-    for rank, row in enumerate(rows, 1):
+    rank = 0
+    for row in rows:
         # Escape pipes so arbitrary model names can't break the table
-        model = str(row["model"]).replace("|", "\\|")
-        if row["model"] in failed_outputs:
-            # Flag rows whose model produced excluded error sentinels so a
-            # failed run is never mistaken for a genuinely low-ranked model.
+        model_name = row["model"]
+        model = str(model_name).replace("|", "\\|")
+        status = "failed" if model_name in failed_models else row.get("status", "ranked")
+        if model_name in failed_outputs:
             model = f"{model} ⚠"
-        elo = row["elo"]
         params = row.get("params", "")
-        if has_ci and "elo_low" in row:
+
+        if status == "failed":
+            if has_ci:
+                lines.append(f"| — | {model} | {params} | **FAILED** | — | — | — | — | — |")
+            else:
+                lines.append(f"| — | {model} | {params} | **FAILED** | — | — | — | — |")
+            continue
+
+        rank += 1
+        elo = row["elo"]
+        if has_ci and row.get("elo_low") is not None:
             ci = f"{row['elo_low']}\u2013{row['elo_high']}"
             lines.append(
                 f"| {rank} | {model} | {params} | {elo} | {ci} "
+                f"| {row['wins']} | {row['losses']} | {row['ties']} "
+                f"| {row['win_pct']}% |"
+            )
+        elif has_ci:
+            lines.append(
+                f"| {rank} | {model} | {params} | {elo} | — "
                 f"| {row['wins']} | {row['losses']} | {row['ties']} "
                 f"| {row['win_pct']}% |"
             )

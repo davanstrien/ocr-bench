@@ -63,6 +63,27 @@ class TestBuildLeaderboardRows:
         rows = build_leaderboard_rows(board)
         assert rows[0]["win_pct"] == 0
 
+    def test_failed_model_is_unranked_row_without_elo(self):
+        board = _make_board()
+        rows = build_leaderboard_rows(
+            board,
+            failed_models=["model-b"],
+            failed_outputs={"model-b": 50},
+        )
+        assert [row["model"] for row in rows] == ["model-a", "model-c", "model-b"]
+        failed = rows[-1]
+        assert failed["status"] == "failed"
+        assert failed["elo"] is None
+        assert failed["win_pct"] is None
+        assert failed["failed_outputs"] == 50
+
+    def test_partial_failure_remains_ranked_but_degraded(self):
+        rows = build_leaderboard_rows(_make_board(), failed_outputs={"model-a": 1})
+        model_a = next(row for row in rows if row["model"] == "model-a")
+        assert model_a["status"] == "degraded"
+        assert model_a["elo"] == 1550
+        assert model_a["failed_outputs"] == 1
+
 
 class TestBuildMetadataRow:
     def test_auto_timestamp(self):
@@ -179,7 +200,23 @@ class TestBuildMetadataRow:
             total_comparisons=0,
             valid_comparisons=0,
         )
-        assert build_metadata_row(meta)["failed_outputs"] == "{}"
+        row = build_metadata_row(meta)
+        assert row["failed_outputs"] == "{}"
+        assert row["failed_models"] == "[]"
+
+    def test_failed_models_serialized(self):
+        import json
+
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=[],
+            seed=42,
+            max_samples=10,
+            total_comparisons=1,
+            valid_comparisons=1,
+            failed_models=["model-x"],
+        )
+        assert json.loads(build_metadata_row(meta)["failed_models"]) == ["model-x"]
 
 
 class TestAlignMetadataRows:
@@ -249,6 +286,28 @@ class TestPublishResults:
         assert calls[3].kwargs["config_name"] == "metadata"
         # README uploaded
         mock_api_cls.return_value.upload_file.assert_called_once()
+
+    @patch("ocr_bench.publish.HfApi")
+    @patch("ocr_bench.publish.Dataset")
+    def test_publishes_failed_model_as_status_row(self, mock_ds_cls, mock_api_cls):
+        board = _make_board()
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=["j1"],
+            seed=42,
+            max_samples=10,
+            total_comparisons=1,
+            valid_comparisons=1,
+            failed_outputs={"model-b": 5},
+            failed_models=["model-b"],
+        )
+
+        publish_results("user/results", board, meta)
+
+        leaderboard_rows = mock_ds_cls.from_list.call_args_list[1].args[0]
+        failed = next(row for row in leaderboard_rows if row["model"] == "model-b")
+        assert failed["status"] == "failed"
+        assert failed["elo"] is None
 
     @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.Dataset")
@@ -462,7 +521,7 @@ class TestBuildReadme:
             ties={"model-a": 0, "model-b": 0},
         )
 
-    def _metadata_with_failed(self, failed) -> EvalMetadata:
+    def _metadata_with_failed(self, failed, failed_models=None) -> EvalMetadata:
         return EvalMetadata(
             source_dataset="user/data",
             judge_models=["org/judge"],
@@ -471,6 +530,7 @@ class TestBuildReadme:
             total_comparisons=1,
             valid_comparisons=1,
             failed_outputs=failed,
+            failed_models=failed_models or [],
         )
 
     def test_failed_outputs_section_and_row_marker(self):
@@ -479,10 +539,14 @@ class TestBuildReadme:
         board = self._board_two_models()
         rows = build_leaderboard_rows(board)
         readme = _build_readme(
-            "user/results", rows, board, self._metadata_with_failed({"model-b": 50})
+            "user/results",
+            rows,
+            board,
+            self._metadata_with_failed({"model-b": 50}, failed_models=["model-b"]),
         )
         assert "## ⚠ Failed outputs" in readme
-        assert "model-b ⚠" in readme  # flagged in the leaderboard row
+        assert "| — | model-b ⚠" in readme
+        assert "**FAILED**" in readme
         assert "| model-b | 50 |" in readme  # listed in the failures table
         # A flagged run must not be mistaken for a low-quality model.
         assert "excluded from judging" in readme.lower()
