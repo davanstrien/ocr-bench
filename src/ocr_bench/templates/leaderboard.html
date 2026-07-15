@@ -32,15 +32,19 @@
   <tbody>
     {% for row in rows %}
     <tr>
-      <td>{{ loop.index }}</td>
-      <td class="model">{{ row.model_short }}</td>
+      <td>{{ row.rank if row.rank is not none else "—" }}</td>
+      <td class="model">
+        {{ row.model_short }}
+        {% if row.status == "failed" %}<strong style="color: #e06666;">FAILED</strong>
+        {% elif row.status == "degraded" %}<span title="{{ row.failed_outputs }} failed output(s)" style="color: #f6b26b;">⚠</span>{% endif %}
+      </td>
       <td class="num">{{ row.params if row.params else "—" }}</td>
-      <td class="num">{{ row.elo }}</td>
-      {% if has_ci %}<td class="num">{{ row.elo_low }}&ndash;{{ row.elo_high }}</td>{% endif %}
-      <td class="num">{{ row.wins }}</td>
-      <td class="num">{{ row.losses }}</td>
-      <td class="num">{{ row.ties }}</td>
-      <td class="num">{{ row.win_pct }}%</td>
+      <td class="num">{{ row.elo if row.elo is not none else "—" }}</td>
+      {% if has_ci %}<td class="num">{% if row.elo_low is not none %}{{ row.elo_low }}&ndash;{{ row.elo_high }}{% else %}—{% endif %}</td>{% endif %}
+      <td class="num">{{ row.wins if row.status != "failed" else "—" }}</td>
+      <td class="num">{{ row.losses if row.status != "failed" else "—" }}</td>
+      <td class="num">{{ row.ties if row.status != "failed" else "—" }}</td>
+      <td class="num">{% if row.win_pct is not none %}{{ row.win_pct }}%{% else %}—{% endif %}</td>
       {% if has_human_elo %}
       <td class="num">{{ row.human_elo if row.human_elo is not none else "—" }}</td>
       <td class="num">{{ row.human_win_pct if row.human_win_pct is not none else "—" }}</td>

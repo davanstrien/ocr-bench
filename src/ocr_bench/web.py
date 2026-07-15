@@ -320,27 +320,43 @@ def create_app(
         sizes = _get_model_sizes()
 
         rows = []
-        for row in sorted(state.leaderboard_rows, key=lambda r: r.get("elo", 0), reverse=True):
+        ordered_rows = sorted(
+            state.leaderboard_rows,
+            key=lambda r: (
+                r.get("status") != "failed",
+                r.get("elo") if r.get("elo") is not None else float("-inf"),
+            ),
+            reverse=True,
+        )
+        rank = 0
+        for row in ordered_rows:
             model = row.get("model", "")
             short = model.split("/")[-1] if "/" in model else model
+            status = row.get("status", "ranked")
+            elo_value = row.get("elo")
+            if status != "failed":
+                rank += 1
             human_elo = None
             human_win_pct = None
-            if human_board and model in human_board.elo:
+            if human_board and model in human_board.elo and status != "failed":
                 human_elo = round(human_board.elo[model])
                 wp = human_board.win_pct(model)
                 human_win_pct = f"{wp:.0f}" if wp is not None else None
 
             rows.append({
+                "rank": rank if status != "failed" else None,
                 "model": model,
                 "model_short": short,
                 "params": row.get("params") or sizes.get(model, ""),
-                "elo": round(row.get("elo", 0)),
+                "elo": round(elo_value) if elo_value is not None else None,
                 "elo_low": row.get("elo_low"),
                 "elo_high": row.get("elo_high"),
                 "wins": row.get("wins", 0),
                 "losses": row.get("losses", 0),
                 "ties": row.get("ties", 0),
-                "win_pct": row.get("win_pct", 0),
+                "win_pct": row.get("win_pct"),
+                "status": status,
+                "failed_outputs": row.get("failed_outputs", 0),
                 "human_elo": human_elo,
                 "human_win_pct": human_win_pct,
             })
@@ -350,7 +366,9 @@ def create_app(
         # Build chart data — params (numeric) vs win%
         chart_points = []
         for r in rows:
-            params_str = r.get("params", "")
+            if r.get("status") == "failed" or r.get("elo") is None:
+                continue
+            params_str = str(r.get("params") or "")
             if params_str:
                 try:
                     params_num = float(params_str.rstrip("B"))
