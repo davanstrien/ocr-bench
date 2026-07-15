@@ -37,6 +37,7 @@ from ocr_bench.judge import (
     Comparison,
     _normalize_pair,
     build_comparisons,
+    is_sentinel,
     sample_indices,
 )
 from ocr_bench.publish import (
@@ -381,6 +382,21 @@ def _resolve_results_repo(dataset: str, save_results: str | None, no_publish: bo
     return f"{dataset}-results"
 
 
+def _filter_existing_sentinel_comparisons(
+    results: list[ComparisonResult],
+) -> tuple[list[ComparisonResult], int]:
+    """Remove historical comparisons where an error sentinel competed as OCR.
+
+    Results repos created before issue #46 was fixed can contain verdicts for
+    strings such as ``[OCR ERROR]``. Reusing those rows would preserve the
+    poisoned ELO and add their pair/sample keys to the resume skip map, so the
+    corrected comparison builder would never get a chance to reconsider them.
+    Filter them before either operation and report how many were discarded.
+    """
+    kept = [r for r in results if not (is_sentinel(r.text_a) or is_sentinel(r.text_b))]
+    return kept, len(results) - len(kept)
+
+
 def _refresh_viewer_space(results_repo: str) -> None:
     """Keep the deployed ``{results}-viewer`` Space in sync after a judge run.
 
@@ -607,7 +623,26 @@ def cmd_judge(args: argparse.Namespace) -> None:
         # adaptive runs, where a checkpoint can persist a pair at (say) 3/50
         # samples — a pair-level skip would freeze it there forever.
         # --full-rejudge forces a clean re-run (ignores all existing).
-        existing_results = load_existing_comparisons(results_repo)
+        loaded_existing = load_existing_comparisons(results_repo)
+        existing_results, discarded_sentinels = _filter_existing_sentinel_comparisons(
+            loaded_existing
+        )
+        # Preserve the append-only metadata history even when integrity filtering
+        # removes every old comparison.
+        existing_meta_rows = load_existing_metadata(results_repo)
+
+        if discarded_sentinels:
+            console.print(
+                f"\n[bold yellow]Discarded {discarded_sentinels} existing comparison(s) "
+                "containing OCR error sentinels.[/bold yellow] They will not affect "
+                "ELO or the resume skip map."
+            )
+            logger.warning(
+                "discarded_existing_sentinel_comparisons",
+                repo=results_repo,
+                n=discarded_sentinels,
+            )
+
         if existing_results:
             skip_samples = {}
             for r in existing_results:
@@ -615,11 +650,15 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     r.sample_idx
                 )
             console.print(
-                f"\nIncremental mode: {len(existing_results)} existing comparisons "
+                f"\nIncremental mode: {len(existing_results)} reusable existing comparisons "
                 f"across {len(skip_samples)} model pairs — skipping already-judged "
                 f"(pair, sample) combinations, topping up the rest."
             )
-            existing_meta_rows = load_existing_metadata(results_repo)
+        elif discarded_sentinels:
+            console.print(
+                "\nNo reusable existing comparisons remain after integrity filtering — "
+                "rebuilding from the current OCR outputs."
+            )
         else:
             console.print("\nNo existing comparisons found — full judge run.")
 
