@@ -1,0 +1,9 @@
+name,comparisons_consumed,comparisons_saved,percentage_saved,stopping_round,stopping_reason,kendall_tau,spearman_rho,top3_membership_matches,top3_order_matches,median_absolute_elo_delta,max_absolute_elo_delta,deterministic_across_repeats
+full_stored_board,4293,0,0.0,10,reference_full_stored_board,1.0,1.0,True,True,0.0,0.0,True
+balanced_adaptive,4293,0,0.0,10,sample_batches_exhausted,1.0,1.0,True,True,0.0,0.0,True
+targeted,870,3423,79.73445143256464,10,sample_batches_exhausted,0.9340659340659341,0.9824175824175824,True,False,36.324012616772166,85.48806834881134,True
+targeted_size_3_min_10,736,3557,82.8558117866294,10,sample_batches_exhausted,0.9120879120879122,0.9780219780219781,True,False,58.990128796044814,105.94030058452245,True
+targeted_size_2_min_10,629,3664,85.3482413230841,10,sample_batches_exhausted,0.8901098901098902,0.9516483516483516,False,False,79.17359272935346,167.3788996229182,
+targeted_size_3_min_5,735,3558,82.87910552061496,10,sample_batches_exhausted,0.8241758241758242,0.9120879120879121,True,False,78.99465533836747,155.25138218007942,
+targeted_size_3_min_15,786,3507,81.69112508735151,10,sample_batches_exhausted,0.9340659340659341,0.9824175824175824,True,False,45.96421937350601,98.40518201923669,
+targeted_size_5_min_10,810,3483,81.13207547169812,10,sample_batches_exhausted,0.9340659340659341,0.9824175824175824,True,False,35.79769882564415,85.05249919270636,
