@@ -83,6 +83,13 @@ BOARDS = (
         "8b6602826e2b71c615ed229d388221a7aa7c69b9",
         "same-corpus judge/model-grid sensitivity",
     ),
+    BoardSpec(
+        "moh-table-fidelity",
+        "moh",
+        "davanstrien/ocr-bench-moh-results",
+        "05d24695f131432c38984dd2cb55f5a18a3c2580",
+        "independent 14-model collection",
+    ),
 )
 
 BUDGET_FRACTIONS = (0.25, 0.40, 0.60)

@@ -1,9 +1,10 @@
 # Adaptive stopping counterfactual replay
 
 **Recommendation: keep targeted allocation experimental and do not run a live trial.** Follow-up
-replays tested stronger adaptive allocation, fixed outcome-independent designs, and six published
-boards spanning four collections and three Rubenstein judges. There is no collection-robust basis
-for a production change, especially for large model grids.
+replays tested stronger adaptive allocation, fixed outcome-independent designs, and seven
+published boards spanning five collections and three Rubenstein judges. A newly collected
+independent 14-model MOH board confirms there is no basis for a production change or live targeted
+trial.
 
 The opt-in targeted allocator delivers the expected call reduction, but not by stopping early:
 it uses all 10 five-sample rounds while selecting fewer pairs per round. Against the full stored
@@ -245,7 +246,7 @@ membership much more stable than independently sampling each pair.
 
 ## Cross-collection, page-clustered replay
 
-The fixed designs were then replayed on six suitable published boards without new judge calls.
+The fixed designs were then replayed on seven suitable published boards without new judge calls.
 Revisions are pinned in [`multi_board.py`](multi_board.py).
 
 | Board | Collection/role | Outcomes | Models | Samples |
@@ -256,9 +257,10 @@ Revisions are pinned in [`multi_board.py`](multi_board.py).
 | UFO 30B | independent collection | 294 | 4 | 49 |
 | BPL | independent, incomplete board | 147 | 4 | 41 |
 | Britannica Qwen35 | same corpus, earlier 6-model/judge sensitivity | 720 | 6 | 50 |
+| MOH table fidelity | independent large-grid collection | 4,505 | 14 | 50 |
 
-Rubenstein's three judges are not counted as three independent collections. This gives four
-collection groups, but only the original Britannica board has a 14-model graph.
+Rubenstein's three judges are not counted as three independent collections. This gives five
+collection groups and two independent 14-model boards: Britannica and MOH.
 
 ### Uncertainty method
 
@@ -290,10 +292,12 @@ as pass criteria after the first replay showed that they can be unstable even fo
 | UFO 30B | 5 | 6 | 100.0% | 84.0% |
 | BPL | 4 | 6 | 52.0% | 28.5% |
 | Britannica Qwen35 | 13 | 15 | 100.0% | 65.0% |
+| MOH table fidelity | 51 | 91 | 19.0% | 10.5% |
 
-BPL and the Rubenstein jury board cannot meet a 90% top-3 stability target reliably even when all
-stored outcomes are used. Their failures below are therefore evidence that the reference board is
-under-resolved, not simply that subsampling is bad.
+BPL, the Rubenstein jury board, and MOH cannot meet a 90% top-3 stability target reliably even when
+all stored outcomes are used. Their failures below are therefore evidence that the reference board
+is under-resolved, not simply that subsampling is bad. MOH still has 51 robust pair directions;
+its instability is concentrated around exact ordering rather than every relationship.
 
 ### Results at a 40% outcome budget
 
@@ -305,11 +309,12 @@ under-resolved, not simply that subsampling is bad.
 | UFO 30B | pass | pass | 99.9% / 99.6% | 100.0% / 99.9% |
 | BPL | fail | fail | 65.4% / 62.2% | 86.9% / 85.9% |
 | Britannica Qwen35 | pass | pass | 98.8% / 98.9% | 98.3% / 98.3% |
+| MOH table fidelity | fail | fail | 47.4% / 37.2% | 98.4% / 98.3% |
 
 At 40%, both fixed designs pass on Rubenstein 30B, Rubenstein Kimi, UFO, and the 6-model
-Britannica board; both fail on the intrinsically unstable Rubenstein jury and BPL boards. At 25%,
-results are more collection-dependent. Increasing to 60% still cannot rescue unstable reference
-boards.
+Britannica board; both fail on the intrinsically unstable Rubenstein jury, BPL, and MOH boards.
+At 25%, results are more collection-dependent. Increasing to 60% still cannot rescue unstable
+reference boards.
 
 There is no consistent winner between pair-balanced and mixed-random allocation on these small
 model grids. Board/judge stability matters more than the choice between the two fixed selectors.
@@ -317,9 +322,13 @@ Small samples also produce heavy ELO tails—Britannica Qwen35 has extreme page-
 outliers despite stable rank decisions—so rank/pairwise summaries are safer than treating ELO
 error as approximately Gaussian.
 
-This broadens the evidence, but does not validate large-grid behavior: five of the six additional
-boards have only four models, and the sixth has six. See
-[`multi-board-summary.csv`](multi-board-summary.csv) and
+MOH supplies the previously missing independent large grid. Its plain targeted replay uses 996
+outcomes (77.9% saved) but moves the full order to Kendall τ 0.846 and swaps ranks 2–3; size-aware
+targeting uses 803 outcomes and falls to τ 0.780. Neither stops early. Full MOH details are in
+[`moh/README.md`](moh/README.md).
+
+Across the two 14-model boards, targeted allocation consistently saves roughly 80% while moving
+rankings and ELOs materially. See [`multi-board-summary.csv`](multi-board-summary.csv) and
 [`multi-board-results.json`](multi-board-results.json).
 
 ## Current sentinel-policy robustness check
@@ -377,9 +386,9 @@ collection.
 5. **Bradley–Terry fit under sparse, nonuniform allocation.** The graph is connected, so a fit is
    identifiable, but adjacency-driven edge counts can amplify model misspecification and shift the
    global ELO scale relative to a balanced grid.
-6. **Large-grid evidence remains one collection.** The cross-board follow-up adds collections and
-   judges, but its additional grids have only four or six models. It cannot establish sparse
-   allocation behavior for another 10+ model board.
+6. **Large-grid evidence is still limited.** Britannica and MOH provide two independent 14-model
+   boards under different criteria, and both warn against targeted allocation. More collections
+   would be needed before claiming a universal effect size.
 7. **Unobserved failed judge calls.** Six attempted comparisons have no published valid verdict.
    The replay cannot know how a different allocation would have distributed those failures, so
    savings are relative to 4,293 valid stored outcomes rather than the 4,299 attempted calls.
@@ -387,22 +396,22 @@ collection.
    robustness replay is closer to current input integrity semantics but has only 13 rankable
    models.
 9. **Legacy cross-board schemas.** Several older boards do not store OCR text, so historical
-   sentinel rows cannot be rechecked. Five of the six additional boards have only four models,
-   limiting what they say about sparse large-grid allocation.
+   sentinel rows cannot be rechecked. Five additional boards have only four models, limiting their
+   contribution to sparse large-grid allocation evidence.
 10. **Judge variants are not independent data.** The three Rubenstein boards measure sensitivity
     to judge choice on the same pages; they do not triple the collection-level evidence.
 
 ## Recommendation and next experiment
 
 **Keep `targeted` opt-in, retain `balanced` as the default, and do not implement the tested v2 or
-fixed designs in production.** The cross-collection replay shows that fixed 40% subsampling can
-preserve robust decisions on already-stable 4–6 model boards, but cannot repair an unstable full
-board and does not test a large independent model grid.
+fixed designs in production.** MOH provides the missing independent 14-model test and fails the
+fidelity criteria: targeted allocation does not preserve the full board closely, while the full
+board's own leading order is highly page-sensitive.
 
-The evidence is now sufficient to stop retrospective threshold tuning. Before any live adaptive
-trial, obtain at least one additional independent, fully stored board with roughly 10+ models and
-50+ pages, then apply the same page-clustered/design-aware protocol. If that passes across seeds,
-a budget-capped live trial becomes defensible.
+The evidence is now sufficient to stop allocation tuning and reject a live targeted trial for this
+strategy. The next product-level question is different: whether leaderboards should report
+page-clustered rank tiers or robust pairwise relations rather than a single exact order. That work
+requires a separate design issue and must not be smuggled into this experiment PR.
 
 Keep the 3× rule as a post-hoc deployment annotation only. Current evidence does not support
 letting it influence sampling, making it a default, or treating it as statistical resolution.
@@ -445,6 +454,8 @@ Generated artifacts:
 - [`static-design-summary.csv`](static-design-summary.csv): five-seed fixed-design aggregates
 - [`multi-board-summary.csv`](multi-board-summary.csv): cross-board design-aware aggregates
 - [`multi-board-results.json`](multi-board-results.json): pinned board and page-bootstrap details
+- [`moh/README.md`](moh/README.md): independent 14-model replay conclusions
+- [`moh/results.json`](moh/results.json): complete pinned MOH replay metrics
 - [`results-sentinels-excluded.json`](results-sentinels-excluded.json): robustness replay
 
 Validation commands:
