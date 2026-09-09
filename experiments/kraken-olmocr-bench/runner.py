@@ -25,6 +25,13 @@ CATEGORIES = (
     "arxiv_math", "headers_footers", "long_tiny_text", "multi_column",
     "old_scans", "old_scans_math", "table_tests",
 )
+# These pinned benchmark pages exceed Pillow's default limit at the fixed
+# 300 DPI. Allow their known sizes only when reopening our own rendered PNGs.
+LARGE_RENDER_PIXELS = {
+    ("old_scans/48.pdf", 1): 253864905,
+    ("old_scans/51.pdf", 1): 331857945,
+    ("old_scans/57.pdf", 1): 323914932,
+}
 START = time.perf_counter()
 
 
@@ -113,8 +120,17 @@ def render(page):
                 bitmap.close()
             finally:
                 pdf_page.close()
-    with Image.open(path) as im:
-        return im.convert("RGB"), read_json(meta_path)
+    expected_pixels = LARGE_RENDER_PIXELS.get((page["pdf"], page["page"]))
+    original_limit = Image.MAX_IMAGE_PIXELS
+    try:
+        if expected_pixels is not None:
+            Image.MAX_IMAGE_PIXELS = expected_pixels
+        with Image.open(path) as im:
+            if expected_pixels is not None and im.width * im.height != expected_pixels:
+                raise RuntimeError(f"Unexpected dimensions for known large page: {key(page)}")
+            return im.convert("RGB"), read_json(meta_path)
+    finally:
+        Image.MAX_IMAGE_PIXELS = original_limit
 
 
 def load_stack(weights, prepared):
@@ -229,6 +245,7 @@ def run_pages(pages, root, weights, staged, resume_check=False):
     root.mkdir(parents=True, exist_ok=True)
     write_json(root / "selected_pages.json", pages)
     results = []
+    existing_errors = read_json(root / "errors.json") if (root / "errors.json").exists() else []
 
     def paths(page):
         stem = root / "pages" / key(page)
@@ -297,7 +314,7 @@ def run_pages(pages, root, weights, staged, resume_check=False):
     def failed(page, phase):
         error = {"page": page, "phase": phase, "error": traceback.format_exc()}
         failures.append(error)
-        write_json(root / "errors.json", failures)
+        write_json(root / "errors.json", existing_errors + failures)
         log(f"ERROR {key(page)} {phase}: {error['error']}")
 
     if staged:
@@ -333,6 +350,17 @@ def run_pages(pages, root, weights, staged, resume_check=False):
     log(json.dumps(summary))
     if failures or len(results) != len(pages):
         raise RuntimeError("Incomplete inference; inspect errors and resume")
+    error_path = root / "errors.json"
+    if error_path.exists():
+        # Retain the original attempt's errors, but clear the active error marker
+        # only after every page has completed successfully on this resumed Job.
+        previous = read_json(error_path)
+        archive = root / "errors-before-successful-resume.json"
+        if archive.exists():
+            previous = read_json(archive) + previous
+        write_json(archive, previous)
+        assert read_json(archive) == previous
+        error_path.unlink()
 
 
 def main():

@@ -12,6 +12,10 @@ test (three fixed pages per category) and the full 1,403-page benchmark.
 - Pin the model and dataset revisions in `runner.py`; verify recognition weight
   bytes against SHA-256 before loading.
 - Render PDF pages to RGB at 300 DPI using pypdfium2. No PDF text extraction.
+- The pinned `old_scans/48.pdf`, `51.pdf` and `57.pdf` pages render to
+  253,864,905, 331,857,945 and 323,914,932 pixels at this DPI. Their cached PNGs
+  have explicit Pillow size allowances and dimension checks; other pages retain
+  Pillow's default limit. No page is downscaled to bypass it.
 - Use fp32, batch size 32, in-process line extraction, default reading order,
   bidi reordering and 16-pixel recognition padding. Torch CPU threads are limited
   to four on A10G-small.
@@ -72,6 +76,10 @@ when applying a cumulative budget; do not blindly relaunch all shards after one
 fails. Inspect `errors.json` and resume only the incomplete shard with the same
 run identifier and inference settings. Read retries are bounded at 30 seconds for
 mounted-Bucket visibility delays; missing/corrupt artifacts remain hard failures.
+For example, `sh "$experiment/launch.sh" resume-0 "$bucket" full-v1` resumes
+shard zero with a 45-minute cap. A successful complete resume preserves the earlier
+error ledger as `errors-before-successful-resume.json` before clearing its active
+`errors.json` marker. Include both Job attempts in the cost total.
 
 ## Artifacts and interpretation
 

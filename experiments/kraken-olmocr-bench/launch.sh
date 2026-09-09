@@ -2,7 +2,7 @@
 # Submit the reproducible experiment. Inference and all runtime checks run on Jobs.
 set -eu
 if [ "$#" -ne 3 ]; then
-    echo "Usage: sh launch.sh smoke|full|score-smoke|score-full NAMESPACE/BUCKET RUN_ID" >&2
+    echo "Usage: sh launch.sh smoke|full|resume-0|resume-1|resume-2|resume-3|score-smoke|score-full NAMESPACE/BUCKET RUN_ID" >&2
     exit 2
 fi
 phase=$1
@@ -34,6 +34,11 @@ case "$phase" in
             submit a10g-small 3h "kraken-$run_id-shard-$shard" \
                 sh /input/bootstrap.sh --mode full --run-id "$run_id" --shard "$shard"
         done
+        ;;
+    resume-0|resume-1|resume-2|resume-3)
+        shard=${phase#resume-}
+        submit a10g-small 45m "kraken-$run_id-resume-$shard" \
+            sh /input/bootstrap.sh --mode full --run-id "$run_id" --shard "$shard"
         ;;
     score-smoke|score-full)
         mode=${phase#score-}
