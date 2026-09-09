@@ -80,6 +80,9 @@ For example, `sh "$experiment/launch.sh" resume-0 "$bucket" full-v1` resumes
 shard zero with a 45-minute cap. A successful complete resume preserves the earlier
 error ledger as `errors-before-successful-resume.json` before clearing its active
 `errors.json` marker. Include both Job attempts in the cost total.
+Hub downloads retry transient transport errors and HTTP 408/429/500/502/503/504 responses
+up to five attempts, with bounded backoff. Permanent errors still fail the Job;
+successful retries retain the same revision and subsequent byte-identity checks.
 
 ## Artifacts and interpretation
 

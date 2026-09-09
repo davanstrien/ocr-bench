@@ -39,6 +39,26 @@ def log(message):
     print(f"[{time.perf_counter() - START:.1f}s] {message}", flush=True)
 
 
+def hub_download(*args, **kwargs):
+    from huggingface_hub import hf_hub_download
+    from huggingface_hub.errors import HfHubHTTPError
+    from requests.exceptions import ConnectionError, Timeout
+
+    for attempt in range(5):
+        try:
+            return hf_hub_download(*args, **kwargs)
+        except (HfHubHTTPError, ConnectionError, Timeout) as exc:
+            if isinstance(exc, HfHubHTTPError):
+                status = getattr(exc.response, "status_code", None)
+                if status not in (408, 429, 500, 502, 503, 504):
+                    raise
+            if attempt == 4:
+                raise
+            delay = 2 ** (attempt + 1)
+            log(f"Retrying Hub download after {type(exc).__name__} in {delay}s")
+            time.sleep(delay)
+
+
 def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
@@ -65,14 +85,12 @@ def key(page):
 
 
 def manifest(bucket):
-    from huggingface_hub import hf_hub_download
-
     if (bucket / "manifest.json").exists():
         return read_json(bucket / "manifest.json")
     pages = {}
     tests = []
     for category in CATEGORIES:
-        source = Path(hf_hub_download(
+        source = Path(hub_download(
             DATASET, f"bench_data/{category}.jsonl", repo_type="dataset", revision=DATA_REV,
         ))
         for line in source.read_text().splitlines():
@@ -97,13 +115,12 @@ def manifest(bucket):
 
 def render(page):
     import pypdfium2 as pdfium
-    from huggingface_hub import hf_hub_download
     from PIL import Image
 
     path = Path("/tmp/rendered") / f"{key(page)}.png"
     meta_path = path.with_suffix(".json")
     if not path.exists():
-        pdf = Path(hf_hub_download(
+        pdf = Path(hub_download(
             DATASET, f"bench_data/pdfs/{page['pdf']}", repo_type="dataset", revision=DATA_REV,
         ))
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -365,7 +382,6 @@ def run_pages(pages, root, weights, staged, resume_check=False):
 
 def main():
     import torch
-    from huggingface_hub import hf_hub_download
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("smoke", "full"), required=True)
@@ -392,7 +408,7 @@ def main():
     write_json(run_root / f"{args.mode}-{args.shard}-{suffix}.json", provenance)
     log(f"GPU verified: {provenance['gpu']}; torch {torch.__version__}")
     pages = manifest(args.bucket)
-    weights = Path(hf_hub_download(MODEL, "medium.safetensors", revision=MODEL_REV))
+    weights = Path(hub_download(MODEL, "medium.safetensors", revision=MODEL_REV))
     assert digest(weights) == WEIGHTS_SHA, "Recognition weights hash mismatch"
     if args.mode == "smoke":
         pages = [p for p in pages if p["smoke"]]

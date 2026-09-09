@@ -13,9 +13,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
-from huggingface_hub import hf_hub_download
 
-from runner import CATEGORIES, DATA_REV, DATASET, digest, key, read_json, write_json
+from runner import CATEGORIES, DATA_REV, DATASET, digest, hub_download, key, read_json, write_json
 
 SCORER_REV = "f7cfe4c22098b154c76b6ec950d1c0a464eecf8d"
 CANDIDATE = "kraken_ppocrv6_medium"
@@ -40,7 +39,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     test_categories = {}
     for category in CATEGORIES:
-        source = Path(hf_hub_download(
+        source = Path(hub_download(
             DATASET, f"bench_data/{category}.jsonl", repo_type="dataset", revision=DATA_REV,
         ))
         rows = [json.loads(line) for line in source.read_text().splitlines()]
@@ -64,7 +63,7 @@ def main():
         dest = workspace / CANDIDATE / f"{key(page)}_repeat1.md"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(text)
-        pdf = Path(hf_hub_download(
+        pdf = Path(hub_download(
             DATASET, f"bench_data/pdfs/{page['pdf']}", repo_type="dataset", revision=DATA_REV,
         ))
         if digest(pdf) != result["render"]["pdf_sha256"]:
