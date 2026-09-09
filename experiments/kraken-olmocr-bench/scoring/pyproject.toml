@@ -1,0 +1,13 @@
+[project]
+name = "kraken-official-olmocr-scoring"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "olmocr[bench] @ git+https://github.com/allenai/olmocr@f7cfe4c22098b154c76b6ec950d1c0a464eecf8d",
+  "huggingface-hub==0.36.2",
+  "numpy",
+  "tqdm",
+  "matplotlib",
+  "ruff==0.15.6",
+]
+
