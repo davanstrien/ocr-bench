@@ -1,0 +1,13 @@
+[project]
+name = "kraken-olmocr-bench"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "kraken @ git+https://github.com/mittagessen/kraken@3e6893a0d5eb06273494bfcdb9d3cac6159e0611",
+  "huggingface-hub>=0.34,<1.0",
+  "pypdfium2>=4.30",
+  "ruff==0.15.6",
+]
+
+[tool.ruff]
+line-length = 100
