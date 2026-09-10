@@ -5,6 +5,12 @@ through Kraken's Python API on Hugging Face Jobs, then scores the raw outputs wi
 the pinned official olmOCR-bench implementation. It includes a 21-page smoke
 test (three fixed pages per category) and the full 1,403-page benchmark.
 
+The [completed 9 September 2026 run](RESULTS-2026-09-09.md) scored **36.8% overall**
+(95% CI 35.9–37.7), including **74.4% on long/tiny text**. Its
+[public artifact bundle](https://huggingface.co/buckets/davanstrien/kraken-olmbench-results-20260909)
+contains scores and execution metadata; source document images and text remain
+in a separate archive.
+
 ## Method
 
 - Pin Kraken to `3e6893a0d5eb06273494bfcdb9d3cac6159e0611`, which includes the GPU
