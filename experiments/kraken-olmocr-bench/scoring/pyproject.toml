@@ -10,4 +10,3 @@ dependencies = [
   "matplotlib",
   "ruff==0.15.6",
 ]
-
