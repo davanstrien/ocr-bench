@@ -83,6 +83,14 @@ Targeted allocation is experimental and remains opt-in because it conditions lat
 
 To avoid wasting judge calls on uninformative pairs, the judge skips comparisons where **both** outputs are shorter than `--min-chars` (default 20 — neither model produced meaningful text), and scores **identical** outputs as an automatic tie without calling the judge. Pass `--min-chars 0` to disable the length filter.
 
+> [!IMPORTANT]
+> If an existing results repository was judged with an older `ocr-bench`
+> checkout from output configs containing multiple appended `inference_info`
+> entries, run the first upgraded evaluation with `--full-rejudge`. Older
+> versions could pair the latest model identity with an earlier OCR text
+> column, and their incremental skip data does not record enough provenance to
+> distinguish those verdicts safely.
+
 **`ocr-bench view`** serves a local web viewer with a leaderboard, comparison browser, and human validation. Vote on comparisons to cross-check the automated judge with human judgement.
 
 ## Available models
