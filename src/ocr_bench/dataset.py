@@ -397,12 +397,13 @@ def _load_configs(
         if revision:
             kwargs["revision"] = revision
         ds = load_dataset(**kwargs)
+        model_id, text_col = _resolve_config_output(ds, config)
         loaded.append(
             LoadedConfig(
                 config=config,
-                model_id=_extract_model_id(ds, config),
+                model_id=model_id,
                 ds=ds,
-                text_col=_find_text_column(ds),
+                text_col=text_col,
             )
         )
     return loaded
@@ -617,48 +618,66 @@ def load_config_dataset(
     return unified, ocr_columns
 
 
-def _extract_model_id(ds: Dataset, config: str) -> str:
-    """Extract model_id from inference_info in first row, falling back to config name.
+def _select_inference_info_entry(ds: Dataset) -> dict | None:
+    """Choose the metadata entry that identifies this config's usable output.
 
-    Takes the *last* entry in the inference_info list, since OCR scripts append
-    new entries — the last one is the model that actually produced this config.
+    OCR scripts append entries. For list-valued metadata, choose the last entry
+    whose declared output column still exists; this keeps model identity and
+    output text coupled even when the newest entry is incomplete. Scalar legacy
+    metadata remains usable even when it relies on text-column heuristics.
     """
     if "inference_info" not in ds.column_names:
-        return config
+        return None
     try:
         info_raw = ds["inference_info"][0]  # column access avoids image decode
-        if info_raw:
-            info = json.loads(info_raw)
-            if isinstance(info, list):
-                info = info[-1]
-            return info.get("model_id", info.get("model_name", config))
+        if not info_raw:
+            return None
+        info = json.loads(info_raw)
+        if isinstance(info, list):
+            for entry in reversed(info):
+                if not isinstance(entry, dict):
+                    continue
+                column_name = entry.get("column_name", "")
+                if column_name and column_name in ds.column_names:
+                    return entry
+            return None
+        if isinstance(info, dict):
+            return info
     except (json.JSONDecodeError, TypeError, KeyError, IndexError):
         pass
-    return config
+    return None
+
+
+def _extract_model_id(ds: Dataset, config: str) -> str:
+    """Extract the model from the same inference entry as the output column."""
+    info = _select_inference_info_entry(ds)
+    if info is None:
+        return config
+    return info.get("model_id", info.get("model_name", config))
 
 
 def _find_text_column(ds: Dataset) -> str | None:
     """Find the likely OCR text column in a dataset.
 
     Priority:
-      1. ``inference_info[0]["column_name"]`` if present and exists in dataset.
+      1. The last ``inference_info`` entry whose ``column_name`` exists in the
+         dataset. OCR scripts append entries, and using one shared entry keeps
+         the selected model identity and output column in sync.
       2. First column matching ``markdown`` (case-insensitive).
       3. First column matching ``ocr`` (case-insensitive).
       4. Column named exactly ``text``.
     """
-    # Try inference_info first (column access avoids image decoding)
-    if "inference_info" in ds.column_names:
-        try:
-            info_raw = ds["inference_info"][0]
-            if info_raw:
-                info = json.loads(info_raw)
-                if isinstance(info, list):
-                    info = info[0]
-                col_name = info.get("column_name", "")
-                if col_name and col_name in ds.column_names:
-                    return col_name
-        except (json.JSONDecodeError, TypeError, KeyError, IndexError):
-            pass
+    info = _select_inference_info_entry(ds)
+    if info is not None:
+        col_name = info.get("column_name", "")
+        if col_name and col_name in ds.column_names:
+            return col_name
+
+    return _find_text_column_by_heuristic(ds)
+
+
+def _find_text_column_by_heuristic(ds: Dataset) -> str | None:
+    """Find a likely output column when metadata cannot identify one."""
 
     # Prioritized heuristic: markdown > ocr > text
     for pattern in ["markdown", "ocr"]:
@@ -668,6 +687,23 @@ def _find_text_column(ds: Dataset) -> str | None:
     if "text" in ds.column_names:
         return "text"
     return None
+
+
+def _resolve_config_output(ds: Dataset, config: str) -> tuple[str, str | None]:
+    """Resolve a config's model label and text column as one atomic choice."""
+    info = _select_inference_info_entry(ds)
+    if info is not None:
+        column_name = info.get("column_name", "")
+        if column_name and column_name in ds.column_names:
+            model_id = info.get("model_id", info.get("model_name", config))
+            return model_id, column_name
+
+        # Scalar legacy metadata often records only a model id. Preserve that
+        # behavior while using the established heuristic for its sole output.
+        model_id = info.get("model_id", info.get("model_name", config))
+        return model_id, _find_text_column_by_heuristic(ds)
+
+    return config, _find_text_column_by_heuristic(ds)
 
 
 # ---------------------------------------------------------------------------
