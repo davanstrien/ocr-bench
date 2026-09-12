@@ -105,7 +105,7 @@ ocr-bench ships with 16 registered OCR models. Five form the default set:
 | `deepseek-ocr`  | 4B   | Diverse documents          | Most consistent across types |
 | `dots-ocr`      | 1.7B | General                    | Struggles on historical text |
 
-The opt-in registry also includes compact models at different quality/cost points, including `falcon-ocr` (0.3B) and `ovis-ocr2` (0.9B). List every available model with:
+The opt-in registry also includes compact models at different quality/cost points, including `falcon-ocr` (0.3B, v1 weights), `falcon-ocr-1.5` (0.3B, the v1.5 weights TII pushed to the same repo on 2026-09-11; both slugs pin a commit) and `ovis-ocr2` (0.9B). List every available model with:
 
 ```bash
 ocr-bench run --list-models
