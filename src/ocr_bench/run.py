@@ -44,10 +44,13 @@ _VLLM_OPENAI_ENV = {"PYTHONPATH": "/usr/local/lib/python3.12/dist-packages"}
 
 
 # tiiuae/Falcon-OCR ships v1 and v1.5 in the SAME repo: TII overwrote `main`
-# with the v1.5 weights on 2026-09-11 (no tag, no branch). Both entries pin a
-# commit so a run reproduces regardless of where `main` points next. The
-# script's `--revision` flag resolves the commit and records it in inference_info.
+# with the v1.5 weights on 2026-09-11 (no tag, no branch). uv-scripts split the
+# recipe by version identity (falcon-ocr.py pins v1, falcon-ocr-1.5.py pins the
+# v1.5 release head) and both scripts default to their pin; the explicit
+# `--revision` here is belt-and-braces so the bench never depends on a script
+# default. The script resolves the commit and records it in inference_info.
 _FALCON_OCR_SCRIPT = "https://huggingface.co/datasets/uv-scripts/ocr/raw/main/falcon-ocr.py"
+_FALCON_OCR_15_SCRIPT = "https://huggingface.co/datasets/uv-scripts/ocr/raw/main/falcon-ocr-1.5.py"
 FALCON_OCR_V1_REVISION = "42ec56b72a23984ac059e7c8a6d397a8529423fe"  # last v1, 2026-07-03
 FALCON_OCR_V15_REVISION = "fe757d59ecd79d4d68760162306a70a015761ad9"  # v1.5 head, 2026-09-11
 
@@ -62,7 +65,7 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         default_args=["--revision", FALCON_OCR_V1_REVISION],
     ),
     "falcon-ocr-1.5": ModelConfig(
-        script=_FALCON_OCR_SCRIPT,
+        script=_FALCON_OCR_15_SCRIPT,
         model_id="tiiuae/Falcon-OCR",
         size="0.3B",
         default_flavor="l4x1",

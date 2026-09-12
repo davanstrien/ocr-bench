@@ -70,7 +70,7 @@ class TestModelRegistry:
     def test_compact_models_use_standard_l4_launch(self):
         expected = {
             "falcon-ocr": ("tiiuae/Falcon-OCR", "0.3B", "falcon-ocr.py"),
-            "falcon-ocr-1.5": ("tiiuae/Falcon-OCR", "0.3B", "falcon-ocr.py"),
+            "falcon-ocr-1.5": ("tiiuae/Falcon-OCR", "0.3B", "falcon-ocr-1.5.py"),
             "ovis-ocr2": ("ATH-MaaS/OvisOCR2", "0.9B", "ovis-ocr2.py"),
         }
         for slug, (model_id, size, script_name) in expected.items():
