@@ -49,7 +49,7 @@ class TestModelConfig:
 
 class TestModelRegistry:
     def test_has_core_models(self):
-        assert len(MODEL_REGISTRY) == 16
+        assert len(MODEL_REGISTRY) == 17
 
     def test_default_models_exist_in_registry(self):
         for slug in DEFAULT_MODELS:
@@ -70,6 +70,7 @@ class TestModelRegistry:
     def test_compact_models_use_standard_l4_launch(self):
         expected = {
             "falcon-ocr": ("tiiuae/Falcon-OCR", "0.3B", "falcon-ocr.py"),
+            "falcon-ocr-1.5": ("tiiuae/Falcon-OCR", "0.3B", "falcon-ocr-1.5.py"),
             "ovis-ocr2": ("ATH-MaaS/OvisOCR2", "0.9B", "ovis-ocr2.py"),
         }
         for slug, (model_id, size, script_name) in expected.items():
@@ -78,13 +79,26 @@ class TestModelRegistry:
             assert cfg.size == size
             assert cfg.script.endswith(f"/{script_name}")
             assert cfg.default_flavor == "l4x1"
-            assert cfg.default_args == []
             assert cfg.image is None
             assert cfg.python is None
             assert cfg.env is None
+        assert MODEL_REGISTRY["ovis-ocr2"].default_args == []
+
+    def test_falcon_ocr_versions_pin_distinct_commits(self):
+        # Same Hub repo holds v1 and v1.5 (main was overwritten 2026-09-11), so
+        # each slug must pin its own full commit sha or runs stop reproducing.
+        pins = {}
+        for slug in ("falcon-ocr", "falcon-ocr-1.5"):
+            args = MODEL_REGISTRY[slug].default_args
+            assert args[0] == "--revision", slug
+            sha = args[1]
+            assert len(sha) == 40 and all(c in "0123456789abcdef" for c in sha), slug
+            pins[slug] = sha
+        assert pins["falcon-ocr"] != pins["falcon-ocr-1.5"]
 
     def test_compact_models_are_opt_in(self):
         assert "falcon-ocr" not in DEFAULT_MODELS
+        assert "falcon-ocr-1.5" not in DEFAULT_MODELS
         assert "ovis-ocr2" not in DEFAULT_MODELS
 
     def test_image_mode_models_configured(self):
