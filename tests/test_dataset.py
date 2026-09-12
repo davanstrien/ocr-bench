@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from datasets import Dataset
+from PIL import Image
 
 from ocr_bench.dataset import (
     DatasetError,
@@ -16,11 +17,62 @@ from ocr_bench.dataset import (
     discover_configs,
     discover_ocr_columns,
     discover_pr_configs,
+    evaluation_input_fingerprints,
     find_alignment_mismatch,
     load_config_dataset,
     load_flat_dataset,
     shared_alignment_keys,
 )
+
+
+class TestEvaluationInputFingerprints:
+    def _dataset(self, *, first_text: str = "a0", first_pixel: str = "white"):
+        return Dataset.from_dict(
+            {
+                "id": ["page-0", "page-1"],
+                "image": [
+                    Image.new("RGB", (2, 2), first_pixel),
+                    Image.new("RGB", (2, 2), "white"),
+                ],
+                "ocr_a": [first_text, "a1"],
+                "ocr_b": ["b0", "b1"],
+            }
+        )
+
+    def test_fingerprints_pages_and_columns_independently(self):
+        original = self._dataset()
+        page_fp, column_fps = evaluation_input_fingerprints(
+            original, {"ocr_a": "A", "ocr_b": "B"}, [0, 1]
+        )
+
+        changed_text = self._dataset(first_text="changed")
+        changed_page_fp, changed_column_fps = evaluation_input_fingerprints(
+            changed_text, {"ocr_a": "A", "ocr_b": "B"}, [0, 1]
+        )
+        assert changed_page_fp == page_fp
+        assert changed_column_fps["ocr_a"] != column_fps["ocr_a"]
+        assert changed_column_fps["ocr_b"] == column_fps["ocr_b"]
+
+        changed_image = self._dataset(first_pixel="black")
+        image_page_fp, _ = evaluation_input_fingerprints(
+            changed_image, {"ocr_a": "A", "ocr_b": "B"}, [0, 1]
+        )
+        assert image_page_fp != page_fp
+
+    def test_adding_model_does_not_change_existing_fingerprints(self):
+        original = self._dataset()
+        page_fp, column_fps = evaluation_input_fingerprints(
+            original, {"ocr_a": "A", "ocr_b": "B"}, [0, 1]
+        )
+        extended = original.add_column("ocr_c", ["c0", "c1"])
+        extended_page_fp, extended_column_fps = evaluation_input_fingerprints(
+            extended,
+            {"ocr_a": "A", "ocr_b": "B", "ocr_c": "C"},
+            [0, 1],
+        )
+        assert extended_page_fp == page_fp
+        assert extended_column_fps["ocr_a"] == column_fps["ocr_a"]
+        assert extended_column_fps["ocr_b"] == column_fps["ocr_b"]
 
 # ---------------------------------------------------------------------------
 # discover_ocr_columns
