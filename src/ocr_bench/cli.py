@@ -882,11 +882,17 @@ def cmd_judge(args: argparse.Namespace) -> None:
 
     # --- Load dataset (cascading auto-detection) ---
     source_configs: list[str] = []
+    source_output_columns: dict[str, str] = {}
     if args.configs:
         # Explicit configs — use them directly
         config_names = args.configs
         source_configs = list(config_names)
-        ds, ocr_columns = load_config_dataset(args.dataset, config_names, split=args.split)
+        ds, ocr_columns = load_config_dataset(
+            args.dataset,
+            config_names,
+            split=args.split,
+            source_output_columns=source_output_columns,
+        )
     elif args.columns:
         # Explicit columns — flat loading
         ds, ocr_columns = load_flat_dataset(args.dataset, split=args.split, columns=args.columns)
@@ -903,6 +909,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             config_names,
             split=args.split,
             pr_revisions=pr_revisions if not merge else None,
+            source_output_columns=source_output_columns,
         )
     else:
         # Auto-detect: PRs + main branch configs combined, fall back to flat
@@ -929,10 +936,14 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 config_names,
                 split=args.split,
                 pr_revisions=pr_revisions if pr_configs else None,
+                source_output_columns=source_output_columns,
             )
         else:
             # No configs anywhere — fall back to flat loading
             ds, ocr_columns = load_flat_dataset(args.dataset, split=args.split)
+
+    if not source_configs:
+        source_output_columns = {column: column for column in ocr_columns}
 
     console.print(f"Loaded {len(ds)} samples with {len(ocr_columns)} models:")
     for col, model in ocr_columns.items():
@@ -1003,6 +1014,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     column: source_column_fingerprints[column] for column in pair
                 },
                 source_columns={column: ocr_columns[column] for column in pair},
+                source_output_columns={
+                    column: source_output_columns[column] for column in pair
+                },
                 judge_specs=model_specs,
                 seed=args.seed,
                 max_samples=requested_max_samples,
@@ -1507,6 +1521,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     source_column_fingerprints=source_column_fingerprints,
                     source_configs=source_configs,
                     source_columns=ocr_columns,
+                    source_output_columns=source_output_columns,
                     judge_models=judge_names,
                     judge_spec_hashes=judge_spec_hashes,
                     seed=args.seed,
@@ -1641,6 +1656,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             source_column_fingerprints=source_column_fingerprints,
             source_configs=source_configs,
             source_columns=ocr_columns,
+            source_output_columns=source_output_columns,
             judge_models=judge_names,
             judge_spec_hashes=judge_spec_hashes,
             seed=args.seed,

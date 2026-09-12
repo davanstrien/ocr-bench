@@ -59,6 +59,8 @@ class EvalMetadata:
     source_column_fingerprints: dict[str, str] = field(default_factory=dict)
     source_configs: list[str] = field(default_factory=list)
     source_columns: dict[str, str] = field(default_factory=dict)
+    # Unified column -> original output column selected from the source config.
+    source_output_columns: dict[str, str] = field(default_factory=dict)
     # One-way identities of the raw CLI judge specs. Raw endpoint specs may
     # contain credentials or private hostnames and must never be published.
     judge_spec_hashes: list[str] = field(default_factory=list)
@@ -189,6 +191,7 @@ def evaluation_provenance_hash(
     source_fingerprint: str,
     source_column_fingerprints: dict[str, str],
     source_columns: dict[str, str],
+    source_output_columns: dict[str, str],
     judge_specs: list[str],
     seed: int,
     max_samples: int,
@@ -211,6 +214,7 @@ def evaluation_provenance_hash(
         "source_fingerprint": source_fingerprint,
         "source_column_fingerprints": source_column_fingerprints,
         "source_columns": source_columns,
+        "source_output_columns": source_output_columns,
         "judge_specs": judge_specs,
         "seed": seed,
         "max_samples": max_samples,
@@ -303,6 +307,7 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
         ),
         "source_configs": json.dumps(metadata.source_configs),
         "source_columns": json.dumps(metadata.source_columns, sort_keys=True),
+        "source_output_columns": json.dumps(metadata.source_output_columns, sort_keys=True),
         "judge_models": json.dumps(metadata.judge_models),
         "judge_spec_hashes": json.dumps(metadata.judge_spec_hashes),
         "seed": metadata.seed,

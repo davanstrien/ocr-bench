@@ -7,10 +7,12 @@ checkpoint, and resume-skip control flow without any network I/O.
 
 from __future__ import annotations
 
+import json
 from contextlib import nullcontext
 from unittest.mock import patch
 
 import pytest
+from datasets import Dataset
 from PIL import Image
 
 from ocr_bench import cli
@@ -98,14 +100,15 @@ def _run_judge(
     stamp_existing_provenance: bool = True,
     checkpoint_resume: bool = False,
     existing_meta_override: list[dict] | None = None,
+    config_datasets: dict[str, Dataset] | None = None,
 ):
     """Run cmd_judge with dataset load, judge, and Hub calls patched out."""
     judge = judge or FakeJudge()
     argv = [
         "judge",
         "user/ds",
-        "--columns",
-        *ocr_columns.keys(),
+        "--configs" if config_datasets is not None else "--columns",
+        *(config_datasets if config_datasets is not None else ocr_columns),
         "--save-results",
         "user/results",
         *argv_extra,
@@ -143,6 +146,12 @@ def _run_judge(
 
     with (
         patch.object(cli, "load_flat_dataset", return_value=(ds, ocr_columns)),
+        patch(
+            "ocr_bench.dataset.load_dataset",
+            side_effect=lambda path, name, **kwargs: config_datasets[name],
+        )
+        if config_datasets is not None
+        else nullcontext(),
         patch.object(cli, "parse_judge_spec", return_value=judge),
         patch.object(cli, "load_existing_comparisons", return_value=existing or []),
         patch.object(cli, "load_existing_metadata", return_value=existing_meta),
@@ -558,6 +567,103 @@ class TestCheckpointing:
 
 
 class TestResume:
+    @staticmethod
+    def _saved_results(published):
+        return [
+            ComparisonResult(
+                sample_idx=row["sample_idx"],
+                model_a=row["model_a"],
+                model_b=row["model_b"],
+                winner=row["winner"],
+                col_a=row["col_a"],
+                col_b=row["col_b"],
+                provenance_hash=row["provenance_hash"],
+            )
+            for row in published.call_args.args[1].comparison_log
+        ]
+
+    @staticmethod
+    def _configs(ds, ocr, *, output_column="old_ocr", incomplete=False):
+        configs = {}
+        for column, model in ocr.items():
+            entries = [{"column_name": output_column, "model_id": model}]
+            if incomplete:
+                entries.append({"model_id": "org/unfinished"})
+            configs[column] = Dataset.from_dict(
+                {
+                    "id": list(range(len(ds))),
+                    "image": ds["image"],
+                    # Equal contents make the original column name the only change.
+                    "old_ocr": ds[column],
+                    "new_ocr": ds[column],
+                    "inference_info": [json.dumps(entries)] * len(ds),
+                }
+            )
+        return configs
+
+    @pytest.mark.parametrize("change", ["unchanged", "output_column", "incomplete_entry"])
+    def test_config_resolution_controls_resume_provenance(self, change, capsys):
+        ds, ocr = make_ds(n=2, models=("a", "b"))
+        flags = ["--no-adaptive", "--checkpoint-every", "0"]
+        _, published, _ = _run_judge(
+            flags, ds, ocr, stamp_existing_provenance=False,
+            config_datasets=self._configs(ds, ocr),
+        )
+        assert _published_metadata(published).source_output_columns == {
+            column: "old_ocr" for column in ocr
+        }
+        configs = self._configs(
+            ds, ocr,
+            output_column="new_ocr" if change == "output_column" else "old_ocr",
+            incomplete=change == "incomplete_entry",
+        )
+        judge = FakeJudge()
+        with pytest.raises(SystemExit) if change == "output_column" else nullcontext():
+            _run_judge(
+                flags, ds, ocr, existing=self._saved_results(published), judge=judge,
+                stamp_existing_provenance=False, checkpoint_resume=True,
+                config_datasets=configs,
+            )
+        assert judge.judged == 0
+        if change == "output_column":
+            assert "resume provenance mismatch" in capsys.readouterr().out
+
+    def test_new_config_reuses_unchanged_pair_with_real_provenance(self):
+        ds, ocr = make_ds(n=2, models=("a", "b"))
+        flags = ["--no-adaptive", "--checkpoint-every", "0"]
+        _, published, _ = _run_judge(
+            flags, ds, ocr, stamp_existing_provenance=False,
+            config_datasets=self._configs(ds, ocr),
+        )
+        ds, ocr = make_ds(n=2, models=("a", "b", "c"))
+        judge, _, _ = _run_judge(
+            flags, ds, ocr, existing=self._saved_results(published),
+            stamp_existing_provenance=False, checkpoint_resume=True,
+            config_datasets=self._configs(ds, ocr),
+        )
+        assert judge.judged == 4
+        assert all("model-c" in pair for pair in judge.pairs_seen)
+
+    @pytest.mark.parametrize("change", ["ocr_text", "judge", "split"])
+    def test_changed_inputs_reject_real_checkpoint_provenance(self, change, capsys):
+        ds, ocr = make_ds(n=2, models=("a", "b"))
+        flags = ["--no-adaptive", "--checkpoint-every", "0"]
+        _, published, _ = _run_judge(flags, ds, ocr, stamp_existing_provenance=False)
+        if change == "ocr_text":
+            ds._columns["col_a"][0] = "Changed OCR transcription for the same source page"
+        elif change == "judge":
+            flags += ["--model", "different-judge"]
+        else:
+            flags += ["--split", "validation"]
+        judge = FakeJudge()
+        with pytest.raises(SystemExit):
+            _run_judge(
+                flags, ds, ocr, existing=self._saved_results(published), judge=judge,
+                stamp_existing_provenance=False, checkpoint_resume=True,
+            )
+        assert judge.judged == 0
+        assert "resume provenance mismatch" in capsys.readouterr().out
+
     def test_comparisons_only_checkpoint_resumes_from_row_provenance(self):
         ds, ocr = make_ds(n=4, models=("a", "b"))
         _, first_publish, _ = _run_judge(

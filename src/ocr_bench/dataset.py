@@ -484,11 +484,14 @@ def load_config_dataset(
     config_names: list[str],
     split: str = "train",
     pr_revisions: dict[str, str] | None = None,
+    *,
+    source_output_columns: dict[str, str] | None = None,
 ) -> tuple[Dataset, dict[str, str]]:
     """Load multiple configs from a Hub dataset and merge into one.
 
     Each config becomes a column whose name is the config name and whose value
-    is the OCR text (from the first column matching heuristics, or ``markdown``).
+    is the OCR text selected together with its model identity from inference
+    metadata, falling back to column heuristics for legacy configs.
 
     Before merging, row alignment is verified across configs on shared
     passthrough columns (see :data:`ALIGNMENT_KEYS`). A mismatch raises
@@ -500,6 +503,8 @@ def load_config_dataset(
         config_names: List of config names to load.
         split: Dataset split to load.
         pr_revisions: Optional mapping of config_name → revision for PR-based loading.
+        source_output_columns: Optional output mapping populated with each loaded
+            config's original OCR column name, before renaming it for the merge.
 
     Returns:
         Tuple of (unified Dataset, {column_name: model_id}).
@@ -567,6 +572,8 @@ def load_config_dataset(
         if text_col is None:  # filtered into `usable` above; narrows the type
             continue
         ocr_columns[config] = lc.model_id
+        if source_output_columns is not None:
+            source_output_columns[config] = text_col
 
         # Build unified dataset using Arrow-level ops (no per-row image decode).
         # Row counts are already verified equal above, so no truncation is needed.

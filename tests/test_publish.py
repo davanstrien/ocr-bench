@@ -146,6 +146,7 @@ class TestBuildMetadataRow:
             source_column_fingerprints={"a": "aaa", "b": "bbb"},
             source_configs=["a", "b"],
             source_columns={"a": "org/A", "b": "org/B"},
+            source_output_columns={"a": "ocr_v2", "b": "markdown"},
             judge_models=["judge-a"],
             judge_spec_hashes=hash_judge_specs(
                 ["https://judge.example/v1/:judge-a"]
@@ -161,6 +162,7 @@ class TestBuildMetadataRow:
         assert json.loads(row["source_column_fingerprints"]) == {"a": "aaa", "b": "bbb"}
         assert json.loads(row["source_configs"]) == ["a", "b"]
         assert json.loads(row["source_columns"]) == {"a": "org/A", "b": "org/B"}
+        assert json.loads(row["source_output_columns"]) == {"a": "ocr_v2", "b": "markdown"}
         assert json.loads(row["judge_spec_hashes"]) == hash_judge_specs(
             ["https://judge.example/v1/:judge-a"]
         )
@@ -195,6 +197,7 @@ class TestEvaluationProvenanceHash:
             "source_fingerprint": "pages",
             "source_column_fingerprints": {"a": "aaa", "b": "bbb"},
             "source_columns": {"a": "A", "b": "B"},
+            "source_output_columns": {"a": "ocr_v2", "b": "markdown"},
             "judge_specs": ["https://judge.example/v1/:judge"],
             "seed": 42,
             "max_samples": 10,
@@ -217,10 +220,18 @@ class TestEvaluationProvenanceHash:
         [
             ("source_split", "validation"),
             ("source_fingerprint", "different-pages"),
+            ("source_column_fingerprints", {"a": "changed", "b": "bbb"}),
+            ("source_columns", {"a": "different-model", "b": "B"}),
+            ("source_output_columns", {"a": "ocr_v3", "b": "markdown"}),
             ("judge_specs", ["https://other.example/v1/:judge"]),
             ("seed", 7),
             ("prompt_hash", "other-prompt"),
             ("min_chars", 0),
+            ("max_samples", 5),
+            ("judge_text_mode", "raw"),
+            ("max_ocr_text_len", 1000),
+            ("judge_image_dim", 512),
+            ("max_tokens", 2048),
         ],
     )
     def test_changes_when_guarded_input_changes(self, field, changed):
