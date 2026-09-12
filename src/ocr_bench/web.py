@@ -148,10 +148,16 @@ def create_app(
     metadata = _load_source_metadata(repo_id)
     source_dataset = metadata.get("source_dataset", "")
     from_prs = metadata.get("from_prs", False)
+    # Results written before source_split was recorded always came from train.
+    source_split = metadata.get("source_split") or "train"
 
     img_loader: ImageLoader | None = None
     if source_dataset:
-        img_loader = ImageLoader(source_dataset, from_prs=from_prs)
+        img_loader = ImageLoader(
+            source_dataset,
+            from_prs=from_prs,
+            source_split=source_split,
+        )
 
     validation_comps = build_validation_comparisons(
         comparison_rows,

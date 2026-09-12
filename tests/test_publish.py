@@ -119,8 +119,21 @@ class TestBuildMetadataRow:
         )
         row = build_metadata_row(meta)
         assert row["source_dataset"] == "repo/data"
+        assert row["source_split"] == "train"
         assert row["timestamp"]  # auto-filled
         assert '"judge-a"' in row["judge_models"]
+
+    def test_source_split_recorded(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            source_split="validation",
+            judge_models=["judge-a"],
+            seed=42,
+            max_samples=10,
+            total_comparisons=30,
+            valid_comparisons=28,
+        )
+        assert build_metadata_row(meta)["source_split"] == "validation"
 
     def test_preserved_timestamp(self):
         meta = EvalMetadata(
@@ -755,6 +768,18 @@ class TestBuildReadme:
             "user/results", rows, board, self._make_metadata(), license_id="cc0-1.0"
         )
         assert "license: cc0-1.0" in readme
+
+    def test_source_split_included(self):
+        from ocr_bench.publish import _build_readme
+
+        board = _make_board()
+        rows = build_leaderboard_rows(board)
+        meta = self._make_metadata()
+        meta.source_split = "validation"
+
+        readme = _build_readme("user/results", rows, board, meta)
+
+        assert "- **Source split**: `validation`" in readme
 
     def test_pipes_in_model_names_escaped(self):
         from ocr_bench.publish import _build_readme

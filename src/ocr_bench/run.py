@@ -190,6 +190,7 @@ def build_script_args(
     output_repo: str,
     config_name: str,
     *,
+    split: str = "train",
     max_samples: int | None = None,
     shuffle: bool = False,
     seed: int = 42,
@@ -202,6 +203,8 @@ def build_script_args(
         "--config",
         config_name,
         "--create-pr",
+        "--split",
+        split,
     ]
     if max_samples is not None:
         args += ["--max-samples", str(max_samples)]
@@ -250,6 +253,7 @@ def launch_ocr_jobs(
             input_dataset,
             output_repo,
             slug,
+            split=split,
             max_samples=max_samples,
             shuffle=shuffle,
             seed=seed,

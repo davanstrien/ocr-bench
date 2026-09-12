@@ -112,7 +112,19 @@ class TestListModels:
 class TestBuildScriptArgs:
     def test_basic_args(self):
         args = build_script_args("input/ds", "output/repo", "glm-ocr")
-        assert args == ["input/ds", "output/repo", "--config", "glm-ocr", "--create-pr"]
+        assert args == [
+            "input/ds",
+            "output/repo",
+            "--config",
+            "glm-ocr",
+            "--create-pr",
+            "--split",
+            "train",
+        ]
+
+    def test_non_default_split(self):
+        args = build_script_args("in", "out", "x", split="validation")
+        assert args[args.index("--split") + 1] == "validation"
 
     def test_max_samples(self):
         args = build_script_args("in", "out", "x", max_samples=50)
@@ -172,6 +184,25 @@ class TestLaunchOcrJobs:
         assert len(jobs) == 2
         assert jobs[0].model_slug == "glm-ocr"
         assert jobs[1].model_slug == "dots-ocr"
+
+    @patch("ocr_bench.run.get_token", return_value="fake-token")
+    def test_passes_split_to_every_job(self, mock_token):
+        mock_api = MagicMock()
+        mock_job = MagicMock(id="job-1", url="https://example.com")
+        mock_api.run_uv_job.return_value = mock_job
+
+        launch_ocr_jobs(
+            "input/ds",
+            "output/repo",
+            models=["glm-ocr", "dots-ocr"],
+            split="validation",
+            api=mock_api,
+        )
+
+        assert mock_api.run_uv_job.call_count == 2
+        for call in mock_api.run_uv_job.call_args_list:
+            script_args = call.kwargs["script_args"]
+            assert script_args[script_args.index("--split") + 1] == "validation"
 
     @patch("ocr_bench.run.get_token", return_value="fake-token")
     def test_unknown_model_raises(self, mock_token):
@@ -332,4 +363,3 @@ class TestCLIParser:
         parser = build_parser()
         args = parser.parse_args(["run", "in", "out", "--models", "glm-ocr", "dots-ocr"])
         assert args.models == ["glm-ocr", "dots-ocr"]
-

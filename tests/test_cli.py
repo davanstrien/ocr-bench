@@ -935,6 +935,23 @@ class TestCmdRun:
         assert exc.value.code == 2
         assert "requires INPUT_DATASET and OUTPUT_REPO" in capsys.readouterr().out
 
+    def test_dry_run_includes_split_in_job_args(self, capsys):
+        args = build_parser().parse_args(
+            [
+                "run",
+                "in/ds",
+                "out/repo",
+                "--models",
+                "glm-ocr",
+                "--split",
+                "validation",
+                "--dry-run",
+            ]
+        )
+
+        assert cli.cmd_run(args) == []
+        assert "--split validation" in capsys.readouterr().out
+
     def _run(self, monkeypatch, statuses):
         from ocr_bench.run import JobRun
 

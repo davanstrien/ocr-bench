@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from ocr_bench.viewer import (
+    ImageLoader,
     _filter_comparisons,
     _load_source_metadata,
     _winner_badge,
@@ -110,6 +111,48 @@ class TestLoadSourceMetadata:
         assert meta["source_dataset"] == "user/source"
         mock_rev.assert_called_once_with("user/results")
         assert mock_load.call_args.kwargs.get("revision") == "sha456"
+
+    @patch("ocr_bench.viewer._latest_revision", return_value="sha456")
+    @patch("ocr_bench.viewer.load_dataset")
+    def test_returns_latest_metadata_row(self, mock_load, mock_rev):
+        rows = [
+            {"source_dataset": "user/source"},
+            {"source_dataset": "user/source", "source_split": "validation"},
+        ]
+        mock_ds = MagicMock()
+        mock_ds.__len__ = MagicMock(return_value=len(rows))
+        mock_ds.__getitem__ = MagicMock(side_effect=rows.__getitem__)
+        mock_load.return_value = mock_ds
+
+        meta = _load_source_metadata("user/results")
+
+        assert meta["source_split"] == "validation"
+
+
+class TestImageLoader:
+    @patch("ocr_bench.viewer.load_dataset")
+    def test_uses_source_split_for_probe_and_row(self, mock_load):
+        probe = MagicMock()
+        probe.column_names = ["image"]
+        mock_load.side_effect = [probe, [{"image": "page-image"}]]
+
+        loader = ImageLoader("user/source", source_split="validation")
+
+        assert loader.get(3) == "page-image"
+        assert mock_load.call_args_list[0].kwargs["split"] == "validation[:1]"
+        assert mock_load.call_args_list[1].kwargs["split"] == "validation[3:4]"
+
+    @patch("ocr_bench.viewer.load_dataset")
+    def test_old_metadata_defaults_to_train(self, mock_load):
+        probe = MagicMock()
+        probe.column_names = ["image"]
+        mock_load.side_effect = [probe, [{"image": "page-image"}]]
+
+        loader = ImageLoader("user/source")
+
+        assert loader.get(0) == "page-image"
+        assert mock_load.call_args_list[0].kwargs["split"] == "train[:1]"
+        assert mock_load.call_args_list[1].kwargs["split"] == "train[0:1]"
 
 
 class TestFilterComparisons:

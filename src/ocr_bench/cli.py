@@ -1418,6 +1418,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             if results_repo:
                 metadata = EvalMetadata(
                     source_dataset=args.dataset,
+                    source_split=args.split,
                     judge_models=[],
                     seed=args.seed,
                     max_samples=args.max_samples or len(ds),
@@ -1545,6 +1546,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
     if results_repo:
         metadata = EvalMetadata(
             source_dataset=args.dataset,
+            source_split=args.split,
             judge_models=[j.name for j in judges],
             seed=args.seed,
             max_samples=args.max_samples or len(ds),
@@ -1659,6 +1661,7 @@ def cmd_run(args: argparse.Namespace) -> list[JobRun]:
                 args.input_dataset,
                 args.output_repo,
                 slug,
+                split=args.split,
                 max_samples=args.max_samples,
                 shuffle=args.shuffle,
                 seed=args.seed,

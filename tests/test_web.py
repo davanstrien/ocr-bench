@@ -288,6 +288,61 @@ class TestImage:
             assert resp.status_code == 200
             assert resp.headers["content-type"] == "image/png"
 
+    def test_passes_recorded_source_split_to_image_loader(self, tmp_path):
+        with (
+            patch("ocr_bench.web.load_results") as mock_load,
+            patch("ocr_bench.web._load_source_metadata") as mock_meta,
+            patch("ocr_bench.web.load_annotations") as mock_ann,
+            patch("ocr_bench.web.ImageLoader") as mock_loader,
+        ):
+            mock_load.return_value = (SAMPLE_LEADERBOARD, SAMPLE_COMPARISONS)
+            mock_meta.return_value = {
+                "source_dataset": "user/source",
+                "source_split": "validation",
+                "from_prs": False,
+            }
+            mock_ann.return_value = ({}, [])
+
+            from ocr_bench.web import create_app
+
+            create_app(
+                "user/test-results",
+                output_path=str(tmp_path / "ann.json"),
+            )
+
+            mock_loader.assert_called_once_with(
+                "user/source",
+                from_prs=False,
+                source_split="validation",
+            )
+
+    def test_old_metadata_defaults_source_split_to_train(self, tmp_path):
+        with (
+            patch("ocr_bench.web.load_results") as mock_load,
+            patch("ocr_bench.web._load_source_metadata") as mock_meta,
+            patch("ocr_bench.web.load_annotations") as mock_ann,
+            patch("ocr_bench.web.ImageLoader") as mock_loader,
+        ):
+            mock_load.return_value = (SAMPLE_LEADERBOARD, SAMPLE_COMPARISONS)
+            mock_meta.return_value = {
+                "source_dataset": "user/source",
+                "from_prs": False,
+            }
+            mock_ann.return_value = ({}, [])
+
+            from ocr_bench.web import create_app
+
+            create_app(
+                "user/test-results",
+                output_path=str(tmp_path / "ann.json"),
+            )
+
+            mock_loader.assert_called_once_with(
+                "user/source",
+                from_prs=False,
+                source_split="train",
+            )
+
     def test_image_not_found(self, tmp_path):
         """Test image 404 when loader returns None."""
         with (

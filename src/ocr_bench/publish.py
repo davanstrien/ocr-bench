@@ -49,6 +49,10 @@ class EvalMetadata:
     max_samples: int
     total_comparisons: int
     valid_comparisons: int
+    # Source dataset split used to build the comparison grid. Historical
+    # metadata rows predate this field and are interpreted as ``train`` by the
+    # viewer for backward compatibility.
+    source_split: str = "train"
     auto_tied: int = 0
     # Global comparison budget for the run (--max-comparisons); None = uncapped.
     # ``budget_exhausted`` records whether the run stopped because it hit the cap
@@ -233,6 +237,7 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
     """Convert EvalMetadata into a single row for a Hub dataset."""
     return {
         "source_dataset": metadata.source_dataset,
+        "source_split": metadata.source_split,
         "judge_models": json.dumps(metadata.judge_models),
         "seed": metadata.seed,
         "max_samples": metadata.max_samples,
@@ -558,6 +563,7 @@ def _build_readme(
         "",
         f"- **Source dataset**: [`{metadata.source_dataset}`]"
         f"(https://huggingface.co/datasets/{metadata.source_dataset})",
+        f"- **Source split**: `{metadata.source_split}`",
         f"- **Judge**: {judge_str}",
         f"- **Judge criteria**: {metadata.criteria}",
         f"- **Judge prompt hash**: `{metadata.prompt_hash or 'unrecorded'}`",

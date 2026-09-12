@@ -65,12 +65,12 @@ def load_results(repo_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any
 
 
 def _load_source_metadata(repo_id: str) -> dict[str, Any]:
-    """Load metadata config from results repo to find the source dataset."""
+    """Load the latest run metadata used to resolve source images."""
     revision = _latest_revision(repo_id)
     try:
         meta_ds = load_dataset(repo_id, name="metadata", split="train", revision=revision)
         if len(meta_ds) > 0:
-            return dict(meta_ds[0])
+            return dict(meta_ds[-1])
     except Exception as exc:
         logger.warning("could_not_load_metadata", repo=repo_id, error=str(exc))
     return {}
@@ -79,9 +79,15 @@ def _load_source_metadata(repo_id: str) -> dict[str, Any]:
 class ImageLoader:
     """Lazy image loader — fetches images from source dataset by sample_idx."""
 
-    def __init__(self, source_dataset: str, from_prs: bool = False):
+    def __init__(
+        self,
+        source_dataset: str,
+        from_prs: bool = False,
+        source_split: str = "train",
+    ):
         self._source = source_dataset
         self._from_prs = from_prs
+        self._source_split = source_split
         self._cache: dict[int, Any] = {}
         self._image_col: str | None = None
         self._pr_revision: str | None = None
@@ -105,7 +111,10 @@ class ImageLoader:
                     self._pr_revision = revisions[first_config]
 
             # Probe for image column by loading 1 row
-            kwargs: dict[str, Any] = {"path": self._source, "split": "train[:1]"}
+            kwargs: dict[str, Any] = {
+                "path": self._source,
+                "split": f"{self._source_split}[:1]",
+            }
             if self._pr_revision:
                 # Load from the first PR config
                 first_config = next(iter(revisions))
@@ -133,7 +142,7 @@ class ImageLoader:
         try:
             kwargs: dict[str, Any] = {
                 "path": self._source,
-                "split": f"train[{sample_idx}:{sample_idx + 1}]",
+                "split": f"{self._source_split}[{sample_idx}:{sample_idx + 1}]",
             }
             if self._pr_revision:
                 from ocr_bench.dataset import discover_pr_configs
@@ -224,5 +233,4 @@ def _build_pair_summary(comparisons: list[dict[str, Any]]) -> str:
         wins, losses, ties = counts["W"], counts["L"], counts["T"]
         parts.append(f"**{short_a}** vs **{short_b}**: {wins}W {losses}L {ties}T")
     return " | ".join(parts)
-
 
