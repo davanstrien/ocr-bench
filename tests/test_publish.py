@@ -8,6 +8,7 @@ import pytest
 
 from ocr_bench.adaptive import AdjacentPairDecision
 from ocr_bench.elo import ComparisonResult, Leaderboard
+from ocr_bench.metrics import MetricResult, MetricSummary
 from ocr_bench.publish import (
     EvalMetadata,
     _align_metadata_rows,
@@ -15,7 +16,9 @@ from ocr_bench.publish import (
     build_metadata_row,
     load_existing_comparisons,
     load_existing_metadata,
+    load_existing_metric_metadata,
     publish_checkpoint,
+    publish_metric_results,
     publish_results,
 )
 
@@ -29,6 +32,40 @@ def _make_board() -> Leaderboard:
         comparison_log=[
             {"sample_idx": 0, "model_a": "model-a", "model_b": "model-b", "winner": "A"},
         ],
+    )
+
+
+def _make_metric_result() -> MetricResult:
+    return MetricResult(
+        summaries=[
+            MetricSummary(
+                model="model-a",
+                column="ocr_a",
+                char_errors=1,
+                reference_chars=10,
+                word_errors=1,
+                reference_words=3,
+                evaluated_samples=1,
+                skipped_samples=0,
+                failed_outputs=0,
+            )
+        ],
+        details=[
+            {
+                "sample_idx": 0,
+                "id": "card-1",
+                "model": "model-a",
+                "column": "ocr_a",
+                "cer": 0.1,
+                "wer": 1 / 3,
+                "char_errors": 1,
+                "reference_chars": 10,
+                "word_errors": 1,
+                "reference_words": 3,
+                "failed_output": False,
+            }
+        ],
+        reference_column="reference",
     )
 
 
@@ -734,6 +771,73 @@ class TestLoadExistingMetadata:
         ]
         with pytest.raises(OSError, match="refusing to overwrite Hub history"):
             load_existing_metadata("user/results")
+
+
+class TestPublishMetricResults:
+    @patch("ocr_bench.publish.load_existing_metric_metadata", return_value=[])
+    @patch("ocr_bench.publish.Dataset")
+    def test_publishes_dedicated_configs(self, mock_dataset, _mock_existing):
+        aggregate_ds = MagicMock()
+        detail_ds = MagicMock()
+        metadata_ds = MagicMock()
+        mock_dataset.from_list.side_effect = [aggregate_ds, detail_ds, metadata_ds]
+
+        publish_metric_results(
+            "user/results",
+            _make_metric_result(),
+            source_dataset="user/source",
+            source_split="validation",
+            from_prs=True,
+        )
+
+        aggregate_ds.push_to_hub.assert_called_once_with(
+            "user/results", config_name="metrics"
+        )
+        detail_ds.push_to_hub.assert_called_once_with(
+            "user/results", config_name="metric_details"
+        )
+        metadata_ds.push_to_hub.assert_called_once_with(
+            "user/results", config_name="metric_metadata"
+        )
+        metadata_row = mock_dataset.from_list.call_args_list[-1].args[0][0]
+        assert metadata_row["reference_column"] == "reference"
+        assert metadata_row["normalization"] == "NFC, flattened HTML, collapsed whitespace"
+
+    @patch(
+        "ocr_bench.publish.load_existing_metric_metadata",
+        side_effect=OSError("history unavailable"),
+    )
+    @patch("ocr_bench.publish.Dataset")
+    def test_metadata_read_failure_happens_before_any_write(
+        self, mock_dataset, _mock_existing
+    ):
+        with pytest.raises(OSError, match="history unavailable"):
+            publish_metric_results(
+                "user/results",
+                _make_metric_result(),
+                source_dataset="user/source",
+                source_split="train",
+                from_prs=False,
+            )
+
+        mock_dataset.from_list.assert_not_called()
+
+    @patch("ocr_bench.publish.HfApi")
+    @patch("ocr_bench.publish.load_dataset")
+    def test_metric_metadata_missing_is_empty(self, mock_load, mock_api_cls):
+        mock_load.side_effect = Exception("missing")
+        mock_api_cls.return_value.list_repo_files.return_value = ["README.md"]
+        assert load_existing_metric_metadata("user/results") == []
+
+    @patch("ocr_bench.publish.HfApi")
+    @patch("ocr_bench.publish.load_dataset")
+    def test_metric_metadata_existing_files_fail_closed(self, mock_load, mock_api_cls):
+        mock_load.side_effect = Exception("temporary failure")
+        mock_api_cls.return_value.list_repo_files.return_value = [
+            "metric_metadata/train-00000-of-00001.parquet"
+        ]
+        with pytest.raises(OSError, match="refusing to overwrite Hub history"):
+            load_existing_metric_metadata("user/results")
 
 
 class TestBuildReadme:

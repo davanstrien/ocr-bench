@@ -20,6 +20,7 @@ from ocr_bench.adaptive import (
 )
 from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo
 from ocr_bench.judge import MAX_IMAGE_DIM, MAX_OCR_TEXT_LENGTH
+from ocr_bench.metrics import MetricResult
 from ocr_bench.run import MODEL_REGISTRY
 
 logger = structlog.get_logger()
@@ -164,6 +165,61 @@ def load_existing_metadata(repo_id: str) -> list[dict]:
             f"Existing metadata in {repo_id} could not be loaded; refusing to "
             "overwrite Hub history"
         ) from exc
+
+
+def load_existing_metric_metadata(repo_id: str) -> list[dict]:
+    """Load the append-only metric run log, failing closed on uncertain reads."""
+    try:
+        ds = load_dataset(repo_id, name="metric_metadata", split="train")
+        return [dict(row) for row in ds]
+    except Exception as exc:
+        if _config_is_absent(repo_id, "metric_metadata"):
+            logger.info("no_existing_metric_metadata", repo=repo_id, reason=str(exc))
+            return []
+        raise OSError(
+            f"Existing metric metadata in {repo_id} could not be loaded; refusing "
+            "to overwrite Hub history"
+        ) from exc
+
+
+def publish_metric_results(
+    repo_id: str,
+    result: MetricResult,
+    *,
+    source_dataset: str,
+    source_split: str,
+    from_prs: bool,
+) -> None:
+    """Publish aggregate and per-sample CER/WER with run provenance."""
+    # Verify the append-only history is readable before replacing any configs.
+    # Otherwise a transient metadata read failure could leave new scores without
+    # the provenance row that explains how they were produced.
+    metadata_rows = load_existing_metric_metadata(repo_id)
+
+    aggregate_rows = [summary.as_row() for summary in result.summaries]
+    Dataset.from_list(aggregate_rows).push_to_hub(repo_id, config_name="metrics")
+    logger.info("published_metrics", repo=repo_id, n=len(aggregate_rows))
+
+    if result.details:
+        Dataset.from_list(result.details).push_to_hub(
+            repo_id, config_name="metric_details"
+        )
+        logger.info("published_metric_details", repo=repo_id, n=len(result.details))
+
+    metadata_rows.append(
+        {
+            "source_dataset": source_dataset,
+            "source_split": source_split,
+            "reference_column": result.reference_column,
+            "from_prs": from_prs,
+            "normalization": "NFC, flattened HTML, collapsed whitespace",
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+        }
+    )
+    Dataset.from_list(_align_metadata_rows(metadata_rows)).push_to_hub(
+        repo_id, config_name="metric_metadata"
+    )
+    logger.info("published_metric_metadata", repo=repo_id, n=len(metadata_rows))
 
 
 def _get_model_sizes() -> dict[str, str]:

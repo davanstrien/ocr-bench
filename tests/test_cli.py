@@ -115,6 +115,20 @@ class TestBuildParser:
         args = parser.parse_args(["judge", "user/dataset", "--merge"])
         assert args.merge is True
 
+    def test_score_subcommand_defaults(self):
+        args = build_parser().parse_args(
+            ["score", "user/dataset", "--reference-column", "reference"]
+        )
+        assert args.command == "score"
+        assert args.dataset == "user/dataset"
+        assert args.reference_column == "reference"
+        assert args.split == "train"
+        assert args.no_publish is False
+
+    def test_score_requires_reference_column(self):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["score", "user/dataset"])
+
     def test_no_adaptive_flag(self):
         parser = build_parser()
         args = parser.parse_args(["judge", "user/dataset", "--no-adaptive"])
@@ -988,6 +1002,88 @@ class TestCmdRun:
         out = capsys.readouterr().out
         assert "did not complete" in out
         assert "Evaluate:" not in out  # don't suggest judging a partial run
+
+
+class TestCmdScore:
+    def test_scores_and_prints_without_publishing(self, monkeypatch, capsys):
+        from datasets import Dataset
+
+        dataset = Dataset.from_dict(
+            {"reference": ["hello world"], "ocr": ["hello world"]}
+        )
+        monkeypatch.setattr(
+            cli,
+            "load_flat_dataset",
+            lambda *args, **kwargs: (dataset, {"ocr": "model-a"}),
+        )
+        publish = MagicMock()
+        monkeypatch.setattr(cli, "publish_metric_results", publish)
+        args = build_parser().parse_args(
+            [
+                "score",
+                "user/dataset",
+                "--reference-column",
+                "reference",
+                "--columns",
+                "ocr",
+                "--no-publish",
+            ]
+        )
+
+        cli.cmd_score(args)
+
+        assert "OCR Ground-Truth Metrics" in capsys.readouterr().out
+        publish.assert_not_called()
+
+    def test_publishes_to_shared_results_repo(self, monkeypatch):
+        from datasets import Dataset
+
+        dataset = Dataset.from_dict({"reference": ["abc"], "ocr": ["axc"]})
+        monkeypatch.setattr(
+            cli,
+            "load_flat_dataset",
+            lambda *args, **kwargs: (dataset, {"ocr": "model-a"}),
+        )
+        publish = MagicMock()
+        monkeypatch.setattr(cli, "publish_metric_results", publish)
+        args = build_parser().parse_args(
+            [
+                "score",
+                "user/dataset",
+                "--reference-column",
+                "reference",
+                "--columns",
+                "ocr",
+            ]
+        )
+
+        cli.cmd_score(args)
+
+        assert publish.call_args.args[0] == "user/dataset-results"
+        assert publish.call_args.kwargs["source_dataset"] == "user/dataset"
+
+    def test_empty_reference_fails_cleanly(self, monkeypatch):
+        from datasets import Dataset
+
+        dataset = Dataset.from_dict({"reference": [""], "ocr": ["text"]})
+        monkeypatch.setattr(
+            cli,
+            "load_flat_dataset",
+            lambda *args, **kwargs: (dataset, {"ocr": "model-a"}),
+        )
+        args = build_parser().parse_args(
+            [
+                "score",
+                "user/dataset",
+                "--reference-column",
+                "reference",
+                "--columns",
+                "ocr",
+                "--no-publish",
+            ]
+        )
+        with pytest.raises(DatasetError, match="no non-empty rows"):
+            cli.cmd_score(args)
 
 
 class TestCmdJudgeEmptyGuard:

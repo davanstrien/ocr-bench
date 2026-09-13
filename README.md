@@ -67,6 +67,14 @@ ocr-bench bench <input-dataset> <output-repo> --max-samples 50
 
 **`ocr-bench run`** launches OCR models on your dataset via [HF Jobs](https://huggingface.co/docs/hub/jobs-overview). Each model writes its output as a PR on the same Hub dataset, keeping everything together without merge conflicts.
 
+**`ocr-bench score`** independently computes corpus-level Character Error Rate (CER) and Word Error Rate (WER) when an output dataset has a ground-truth transcription column. It makes no model or judge calls:
+
+```bash
+ocr-bench score <output-repo> --reference-column reference
+```
+
+Known HTML is flattened, Unicode is canonicalised, and whitespace is collapsed so line wrapping does not dominate the score; case and punctuation remain significant. Failed OCR sentinels count as empty predictions rather than being dropped. The published `metrics`, `metric_details`, and `metric_metadata` configs preserve aggregate scores and provenance.
+
 **`ocr-bench judge`** runs pairwise comparisons using a VLM judge (default: [Qwen3.5-35B-A3B](https://huggingface.co/Qwen/Qwen3.5-35B-A3B) via HF Inference Providers). For each document, the judge sees the original image and two OCR outputs (anonymised as A/B) and picks the better transcription. Results are fit to a [Bradley-Terry model](https://en.wikipedia.org/wiki/Bradley%E2%80%93Terry_model) to produce ELO ratings with bootstrap 95% confidence intervals. Adaptive stopping halts early when rankings are statistically resolved.
 
 The historical `balanced` adaptive strategy judges every model pair in each five-page batch. Large model grids can opt into targeted allocation once the run has enough balanced evidence to compute an initial board:
@@ -92,6 +100,10 @@ To avoid wasting judge calls on uninformative pairs, the judge skips comparisons
 > distinguish those verdicts safely.
 
 **`ocr-bench view`** serves a local web viewer with a leaderboard, comparison browser, and human validation. Vote on comparisons to cross-check the automated judge with human judgement.
+
+### Kat57 ground truth
+
+[`experiments/kat57`](experiments/kat57) contains a bounded-memory converter for Lund University Library's [Kat57 PAGE XML release](https://zenodo.org/records/14679534). It turns the 10,695 manually transcribed catalogue cards into a Hugging Face image-and-reference dataset suitable for `ocr-bench run` and `ocr-bench score`; the completed conversion is available as [`tadad/kat57-ground-truth`](https://huggingface.co/datasets/tadad/kat57-ground-truth). The [published 500-card acceptance benchmark](https://huggingface.co/datasets/tadad/kat57-ocr-bench-500-results) reports CER/WER only and documents the limitations of applying sequence metrics to nonlinear catalogue cards.
 
 ## Available models
 

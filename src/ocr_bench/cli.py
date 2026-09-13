@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
+from datasets import Dataset
 from openai import OpenAIError
 from rich.console import Console
 from rich.table import Table
@@ -56,11 +57,13 @@ from ocr_bench.judge import (
     sample_indices,
     validate_prompt_template,
 )
+from ocr_bench.metrics import MetricResult, score_dataset
 from ocr_bench.publish import (
     EvalMetadata,
     load_existing_comparisons,
     load_existing_metadata,
     publish_checkpoint,
+    publish_metric_results,
     publish_results,
 )
 
@@ -296,6 +299,38 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Number of concurrent judge API calls (default: 1)",
+    )
+
+    # --- score subcommand ---
+    score = sub.add_parser(
+        "score", help="Compute CER/WER against ground-truth transcriptions"
+    )
+    score.add_argument("dataset", help="HF dataset repo id with OCR outputs")
+    score.add_argument(
+        "--reference-column",
+        required=True,
+        help="Column containing ground-truth transcriptions",
+    )
+    score.add_argument("--split", default="train", help="Dataset split (default: train)")
+    score.add_argument("--columns", nargs="+", default=None, help="Explicit OCR column names")
+    score.add_argument(
+        "--configs", nargs="+", default=None, help="Config-per-model: list of config names"
+    )
+    score.add_argument(
+        "--from-prs", action="store_true", help="Force PR-based config discovery"
+    )
+    score.add_argument(
+        "--merge",
+        action="store_true",
+        help="Merge PRs to main after discovery (default: load via revision)",
+    )
+    score.add_argument(
+        "--save-results",
+        default=None,
+        help="HF repo for metric results (default: {dataset}-results)",
+    )
+    score.add_argument(
+        "--no-publish", action="store_true", help="Print scores without publishing"
     )
 
     # --- run subcommand ---
@@ -803,13 +838,131 @@ def _existing_preprocessing_provenance(meta_rows: list[dict]) -> tuple[str, int,
     )
 
 
+def _load_evaluation_dataset(
+    args: argparse.Namespace,
+) -> tuple[Dataset, dict[str, str], bool]:
+    """Load OCR outputs for judge/score using one shared discovery policy.
+
+    Returns ``(dataset, ocr_columns, from_prs)`` so both commands support the
+    same flat, config-based, and pull-request-backed dataset layouts.
+    """
+    merge = args.merge
+    from_prs = False
+
+    if args.configs:
+        ds, ocr_columns = load_config_dataset(
+            args.dataset, args.configs, split=args.split
+        )
+    elif args.columns:
+        ds, ocr_columns = load_flat_dataset(
+            args.dataset, split=args.split, columns=args.columns
+        )
+    elif args.from_prs:
+        config_names, pr_revisions = discover_pr_configs(args.dataset, merge=merge)
+        if not config_names:
+            raise DatasetError("No configs found in open PRs")
+        from_prs = True
+        console.print(f"Discovered {len(config_names)} configs from PRs: {config_names}")
+        ds, ocr_columns = load_config_dataset(
+            args.dataset,
+            config_names,
+            split=args.split,
+            pr_revisions=pr_revisions if not merge else None,
+        )
+    else:
+        pr_configs, pr_revisions = discover_pr_configs(args.dataset, merge=merge)
+        main_configs = discover_configs(args.dataset)
+        config_names = list(pr_configs)
+        for main_config in main_configs:
+            if main_config not in pr_configs:
+                config_names.append(main_config)
+
+        if config_names:
+            if pr_configs:
+                from_prs = True
+                console.print(
+                    f"Auto-detected {len(pr_configs)} configs from PRs: {pr_configs}"
+                )
+            main_only = [config for config in main_configs if config not in pr_configs]
+            if main_only:
+                console.print(
+                    f"Auto-detected {len(main_only)} configs on main: {main_only}"
+                )
+            ds, ocr_columns = load_config_dataset(
+                args.dataset,
+                config_names,
+                split=args.split,
+                pr_revisions=pr_revisions if pr_configs else None,
+            )
+        else:
+            ds, ocr_columns = load_flat_dataset(args.dataset, split=args.split)
+
+    return ds, ocr_columns, from_prs
+
+
+def print_metric_leaderboard(result: MetricResult) -> None:
+    """Print a corpus-level CER/WER table, best scores first."""
+    table = Table(title="OCR Ground-Truth Metrics")
+    table.add_column("Rank", style="bold")
+    table.add_column("Model")
+    table.add_column("CER", justify="right")
+    table.add_column("WER", justify="right")
+    table.add_column("Samples", justify="right")
+    table.add_column("Failed", justify="right")
+    table.add_column("Skipped", justify="right")
+
+    for rank, summary in enumerate(result.summaries, 1):
+        table.add_row(
+            str(rank),
+            summary.model,
+            f"{summary.cer:.4f}",
+            f"{summary.wer:.4f}",
+            str(summary.evaluated_samples),
+            str(summary.failed_outputs),
+            str(summary.skipped_samples),
+        )
+    console.print(table)
+    console.print(f"[dim]Reference: {result.reference_column}; lower is better.[/dim]")
+
+
+def cmd_score(args: argparse.Namespace) -> None:
+    """Load OCR outputs, compute ground-truth metrics, print, and publish."""
+    ds, ocr_columns, from_prs = _load_evaluation_dataset(args)
+    try:
+        result = score_dataset(
+            ds,
+            ocr_columns,
+            args.reference_column,
+        )
+    except ValueError as exc:
+        raise DatasetError(str(exc)) from exc
+
+    if not any(summary.evaluated_samples for summary in result.summaries):
+        raise DatasetError(
+            f"Reference column '{args.reference_column}' has no non-empty rows to score"
+        )
+
+    console.print(f"Loaded {len(ds)} samples with {len(result.summaries)} models:")
+    for summary in result.summaries:
+        console.print(f"  {summary.column} → {summary.model}")
+    print_metric_leaderboard(result)
+    results_repo = _resolve_results_repo(args.dataset, args.save_results, args.no_publish)
+    if results_repo:
+        publish_metric_results(
+            results_repo,
+            result,
+            source_dataset=args.dataset,
+            source_split=args.split,
+            from_prs=from_prs,
+        )
+        console.print(f"\nMetrics published to [bold]{results_repo}[/bold]")
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Orchestrate: load → compare → judge → elo → print → publish."""
     # --- Resolve flags ---
     adaptive = not args.no_adaptive
-    merge = args.merge
     results_repo = _resolve_results_repo(args.dataset, args.save_results, args.no_publish)
-    from_prs = False  # track for metadata
     max_comparisons = args.max_comparisons  # global budget; None = uncapped
     adaptive_strategy = args.adaptive_strategy
     if not adaptive and adaptive_strategy != "balanced":
@@ -871,55 +1024,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
     if results_repo:
         console.print(f"Results will be published to [bold]{results_repo}[/bold]")
 
-    # --- Load dataset (cascading auto-detection) ---
-    if args.configs:
-        # Explicit configs — use them directly
-        config_names = args.configs
-        ds, ocr_columns = load_config_dataset(args.dataset, config_names, split=args.split)
-    elif args.columns:
-        # Explicit columns — flat loading
-        ds, ocr_columns = load_flat_dataset(args.dataset, split=args.split, columns=args.columns)
-    elif args.from_prs:
-        # Forced PR discovery
-        config_names, pr_revisions = discover_pr_configs(args.dataset, merge=merge)
-        if not config_names:
-            raise DatasetError("No configs found in open PRs")
-        from_prs = True
-        console.print(f"Discovered {len(config_names)} configs from PRs: {config_names}")
-        ds, ocr_columns = load_config_dataset(
-            args.dataset,
-            config_names,
-            split=args.split,
-            pr_revisions=pr_revisions if not merge else None,
-        )
-    else:
-        # Auto-detect: PRs + main branch configs combined, fall back to flat
-        pr_configs, pr_revisions = discover_pr_configs(args.dataset, merge=merge)
-        main_configs = discover_configs(args.dataset)
-
-        # Combine: PR configs + main configs not already in PRs
-        config_names = list(pr_configs)
-        for mc in main_configs:
-            if mc not in pr_configs:
-                config_names.append(mc)
-
-        if config_names:
-            if pr_configs:
-                from_prs = True
-                console.print(f"Auto-detected {len(pr_configs)} configs from PRs: {pr_configs}")
-            if main_configs:
-                main_only = [c for c in main_configs if c not in pr_configs]
-                if main_only:
-                    console.print(f"Auto-detected {len(main_only)} configs on main: {main_only}")
-            ds, ocr_columns = load_config_dataset(
-                args.dataset,
-                config_names,
-                split=args.split,
-                pr_revisions=pr_revisions if pr_configs else None,
-            )
-        else:
-            # No configs anywhere — fall back to flat loading
-            ds, ocr_columns = load_flat_dataset(args.dataset, split=args.split)
+    # --- Load dataset (shared cascading auto-detection) ---
+    ds, ocr_columns, from_prs = _load_evaluation_dataset(args)
 
     console.print(f"Loaded {len(ds)} samples with {len(ocr_columns)} models:")
     for col, model in ocr_columns.items():
@@ -1992,6 +2098,8 @@ def main() -> None:
     try:
         if args.command == "judge":
             cmd_judge(args)
+        elif args.command == "score":
+            cmd_score(args)
         elif args.command == "run":
             cmd_run(args)
         elif args.command == "view":
