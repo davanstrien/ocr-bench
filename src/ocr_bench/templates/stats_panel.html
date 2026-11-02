@@ -1,10 +1,12 @@
 {% if vote_count > 0 %}
 <span>{{ vote_count }} vote{{ "s" if vote_count != 1 else "" }}</span>
 &middot;
-<span>{{ agreement_pct }}% agree</span>
-{% if hard_disagree_rate > 25 %}
+<span>{{ agreement_pct }}% same verdict</span>
+&middot;
+<span>{{ soft_disagree_pct }}% winner vs tie</span>
+&middot;
+<span>{{ hard_disagree_rate }}% opposite winner</span>
+{% if hard_disagree_rate > 25 and vote_count >= 15 %}
 &middot; <span class="warning">judge may be miscalibrated</span>
-{% elif vote_count >= 15 %}
-&middot; <span class="calibrated">judge well-calibrated</span>
 {% endif %}
 {% endif %}

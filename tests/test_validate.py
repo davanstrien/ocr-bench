@@ -71,7 +71,12 @@ class TestIsSplitJury:
 class TestAgreementStats:
     def test_agreement_rate(self):
         stats = AgreementStats(agree=7, soft_disagree=2, hard_disagree=1, total=10)
-        assert stats.agreement_rate == pytest.approx(0.9)
+        assert stats.agreement_rate == pytest.approx(0.7)
+
+    def test_soft_disagreements_are_not_agreement(self):
+        stats = AgreementStats(agree=0, soft_disagree=20, hard_disagree=0, total=20)
+        assert stats.agreement_rate == 0.0
+        assert stats.soft_disagree_rate == 1.0
 
     def test_hard_disagree_rate(self):
         stats = AgreementStats(agree=7, soft_disagree=0, hard_disagree=3, total=10)
@@ -345,10 +350,11 @@ class TestAgreementBanner:
         banner = _agreement_banner(stats)
         assert "not be calibrated" in banner
 
-    def test_confidence_message_for_low_disagreement(self):
-        stats = AgreementStats(agree=14, soft_disagree=0, hard_disagree=1, total=15)
+    def test_no_reliability_claim_without_hard_disagreements(self):
+        stats = AgreementStats(agree=0, soft_disagree=20, hard_disagree=0, total=20)
         banner = _agreement_banner(stats)
-        assert "Very few" in banner
+        assert "reliable" not in banner
+        assert "trustworthy" not in banner
 
 
 class TestBuildPairSummary:
