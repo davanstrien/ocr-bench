@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -39,6 +40,20 @@ def _hash_value(hasher: Any, value: Any) -> None:
         ).encode()
     update(len(payload).to_bytes(8, "big"))
     update(payload)
+
+
+def _stored_image_bytes(image: dict[str, Any], column: str) -> bytes:
+    """Return an undecoded image's content, reading the file for path-only images."""
+    if image.get("bytes"):
+        return image["bytes"]
+    path = image.get("path")
+    if not path or not os.path.isfile(path):
+        raise DatasetError(
+            f"Cannot fingerprint evaluated pages: column '{column}' has an image "
+            f"with no stored bytes or readable file (path: {path!r})"
+        )
+    with open(path, "rb") as image_file:
+        return image_file.read()
 
 
 def evaluation_input_fingerprints(
@@ -80,8 +95,8 @@ def evaluation_input_fingerprints(
         for column in identity_columns:
             _hash_value(page_digest, column)
             value = row[column]
-            if isinstance(value, dict) and value.get("bytes"):
-                value = value["bytes"]
+            if isinstance(identity_rows.features.get(column), Image) and isinstance(value, dict):
+                value = _stored_image_bytes(value, column)
             _hash_value(page_digest, value)
 
     column_fingerprints: dict[str, str] = {}

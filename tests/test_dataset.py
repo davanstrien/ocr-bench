@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from datasets import Dataset
+from datasets import Image as HFImage
 from PIL import Image
 
 from ocr_bench.dataset import (
@@ -65,6 +66,31 @@ class TestEvaluationInputFingerprints:
         with patch("PIL.Image.open", side_effect=AssertionError("image was decoded")):
             actual, _ = evaluation_input_fingerprints(dataset, {"ocr_a": "A"}, [0, 1])
         assert actual == expected
+
+    def _path_only_dataset(self, path) -> Dataset:
+        return Dataset.from_dict({"image": [str(path)], "ocr_a": ["a0"]}).cast_column(
+            "image", HFImage()
+        )
+
+    def test_path_only_image_fingerprint_follows_file_content(self, tmp_path):
+        path = tmp_path / "page.png"
+        Image.new("RGB", (2, 2), "white").save(path)
+        before, _ = evaluation_input_fingerprints(
+            self._path_only_dataset(path), {"ocr_a": "A"}, [0]
+        )
+        Image.new("RGB", (2, 2), "black").save(path)
+        after, _ = evaluation_input_fingerprints(
+            self._path_only_dataset(path), {"ocr_a": "A"}, [0]
+        )
+        assert before != after
+
+    def test_unreadable_path_only_image_fails_closed(self, tmp_path):
+        path = tmp_path / "page.png"
+        Image.new("RGB", (2, 2), "white").save(path)
+        dataset = self._path_only_dataset(path)
+        path.unlink()
+        with pytest.raises(DatasetError, match="Cannot fingerprint"):
+            evaluation_input_fingerprints(dataset, {"ocr_a": "A"}, [0])
 
     def test_adding_model_does_not_change_existing_fingerprints(self):
         original = self._dataset()
