@@ -81,7 +81,7 @@ class AlignmentResult:
         if self.status == "partial":
             return (
                 f"PARTIAL — verified {', '.join(self.verified_configs)} on "
-                f"{', '.join(self.shared_keys)}; unverified (no identifying keys): "
+                f"{', '.join(self.shared_keys)}; unverified (no identifying keys or images): "
                 f"{', '.join(self.unverified_configs)}"
             )
         if self.status == "misaligned":
