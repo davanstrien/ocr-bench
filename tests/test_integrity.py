@@ -134,7 +134,8 @@ class TestAuditRepo:
         mock_pr.return_value = ([], {})
         mock_main.return_value = ["cfg_a", "cfg_b", "cfg_c"]
         no_text = LoadedConfig(
-            config="cfg_c", model_id="model-c", ds=Dataset.from_dict({"x": [1]}), text_col=None
+            config="cfg_c", model_id="model-c", ds=Dataset.from_dict({"inference_info": ["{}"]}),
+            text_col=None,
         )
         mock_load.return_value = [
             _loaded_config("cfg_a", "model-a", ["good one here"], {"b_number": [1]}),
@@ -146,6 +147,25 @@ class TestAuditRepo:
         assert report.unjudgeable_configs == ["cfg_c"]
         assert not report.too_few_models
         assert report.has_problems
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_auxiliary_config_is_reported_but_not_a_problem(self, mock_pr, mock_main, mock_load):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = ["cfg_a", "cfg_b", "metadata"]
+        metadata = LoadedConfig(
+            config="metadata", model_id="", ds=Dataset.from_dict({"run": ["x"]}), text_col=None
+        )
+        mock_load.return_value = [
+            _loaded_config("cfg_a", "model-a", ["good one here"], {"b_number": [1]}),
+            _loaded_config("cfg_b", "model-b", ["good two here"], {"b_number": [1]}),
+            metadata,
+        ]
+        report = audit_repo("user/repo")
+        assert report.auxiliary_configs == ["metadata"]
+        assert report.configs_without_text == []
+        assert not report.has_problems
 
     @patch("ocr_bench.integrity._load_configs")
     @patch("ocr_bench.integrity.discover_configs")

@@ -1920,7 +1920,7 @@ def cmd_audit(args: argparse.Namespace) -> None:
         console.print(f"[red]Audit could not complete:[/red] {exc}")
         sys.exit(_AUDIT_EXIT_OPERATIONAL)
 
-    if not report.configs and not report.configs_without_text:
+    if not report.configs and not report.configs_without_text and not report.auxiliary_configs:
         console.print("[red]No OCR configs/columns found to audit.[/red]")
         sys.exit(_AUDIT_EXIT_OPERATIONAL)
 
@@ -1956,6 +1956,8 @@ def cmd_audit(args: argparse.Namespace) -> None:
         )
     for config in report.configs_without_text:
         table.add_row(config, "[red]no OCR text column[/red]", *["-"] * 8)
+    for config in report.auxiliary_configs:
+        table.add_row(config, "[dim]skipped: not OCR output[/dim]", *["-"] * 8)
 
     console.print(table)
 

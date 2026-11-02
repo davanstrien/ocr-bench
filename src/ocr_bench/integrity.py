@@ -168,6 +168,7 @@ class AuditReport:
     max_ocr_text_len: int
     judge_text_mode: str = "normalized"
     configs_without_text: list[str] = field(default_factory=list)
+    auxiliary_configs: list[str] = field(default_factory=list)
 
     @property
     def unjudgeable_configs(self) -> list[str]:
@@ -217,6 +218,12 @@ class AuditReport:
         )
 
 
+def _looks_like_ocr_output(loaded_config: Any) -> bool:
+    """True if a config has the page images or run metadata of an OCR output."""
+    columns = set(loaded_config.ds.column_names)
+    return bool(columns & {"image", "inference_info"})
+
+
 def audit_repo(
     repo_id: str,
     split: str = "train",
@@ -243,7 +250,11 @@ def audit_repo(
     if config_names:
         loaded = _load_configs(repo_id, config_names, split, pr_revisions)
         usable = [lc for lc in loaded if lc.text_col is not None]
-        configs_without_text = [lc.config for lc in loaded if lc.text_col is None]
+        # A config with no text is only a failed OCR run if it looks like OCR
+        # output. Repositories can also hold auxiliary configs such as metadata.
+        no_text = [lc for lc in loaded if lc.text_col is None]
+        configs_without_text = [lc.config for lc in no_text if _looks_like_ocr_output(lc)]
+        auxiliary_configs = [lc.config for lc in no_text if not _looks_like_ocr_output(lc)]
         alignment = check_config_alignment(usable)
         configs = []
         for lc in usable:
@@ -260,6 +271,7 @@ def audit_repo(
             configs.append(ConfigAudit(stats))
     else:
         configs_without_text = []
+        auxiliary_configs = []
         ds, ocr_columns = load_flat_dataset(repo_id, split=split)
         alignment = AlignmentResult(status="n/a")
         configs = [
@@ -276,4 +288,5 @@ def audit_repo(
         max_ocr_text_len=max_ocr_text_len,
         judge_text_mode=judge_text_mode,
         configs_without_text=configs_without_text,
+        auxiliary_configs=auxiliary_configs,
     )
