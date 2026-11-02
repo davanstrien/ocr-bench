@@ -50,12 +50,18 @@ class Leaderboard:
     ties: dict[str, int] = field(default_factory=dict)
     comparison_log: list[dict[str, object]] = field(default_factory=list)
     elo_ci: dict[str, tuple[float, float]] = field(default_factory=dict)
-    n_pages: int | None = None
+    pages_by_model: dict[str, int] = field(default_factory=dict)
 
-    @property
-    def has_enough_pages_to_resolve(self) -> bool:
-        """False when page-level intervals rest on too few pages to stop on."""
-        return self.n_pages is None or self.n_pages >= MIN_PAGES_TO_RESOLVE
+    def has_enough_pages_to_resolve(self, model: str) -> bool:
+        """False when a model's interval rests on too few pages to stop on.
+
+        Counts are per model, because targeted judging can give one model far
+        fewer pages than the rest of the board. Boards with no recorded page
+        counts are not gated.
+        """
+        if not self.pages_by_model:
+            return True
+        return self.pages_by_model.get(model, 0) >= MIN_PAGES_TO_RESOLVE
 
     @property
     def ranked(self) -> list[tuple[str, float]]:
@@ -258,7 +264,7 @@ def rankings_resolved(board: Leaderboard) -> bool:
     every pair of adjacent models in the ranking, the higher-ranked model's
     CI lower bound exceeds the lower-ranked model's CI upper bound.
     """
-    if not board.elo_ci or not board.has_enough_pages_to_resolve:
+    if not board.elo_ci:
         return False
     ranked = board.ranked
     if len(ranked) < 2:
@@ -267,6 +273,11 @@ def rankings_resolved(board: Leaderboard) -> bool:
         model_hi, _ = ranked[i]
         model_lo, _ = ranked[i + 1]
         if model_hi not in board.elo_ci or model_lo not in board.elo_ci:
+            return False
+        if not (
+            board.has_enough_pages_to_resolve(model_hi)
+            and board.has_enough_pages_to_resolve(model_lo)
+        ):
             return False
         lo_of_higher, _ = board.elo_ci[model_hi]
         _, hi_of_lower = board.elo_ci[model_lo]
@@ -346,6 +357,10 @@ def compute_elo(
     # Bootstrap CIs
     if n_bootstrap > 0 and results:
         board.elo_ci = _bootstrap_ci(results, model_names, n_bootstrap=n_bootstrap)
-        board.n_pages = len({result.sample_idx for result in results})
+        pages_seen: dict[str, set[int]] = {name: set() for name in model_names}
+        for result in results:
+            pages_seen.setdefault(result.model_a, set()).add(result.sample_idx)
+            pages_seen.setdefault(result.model_b, set()).add(result.sample_idx)
+        board.pages_by_model = {name: len(pages) for name, pages in pages_seen.items()}
 
     return board

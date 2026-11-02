@@ -252,7 +252,7 @@ class TestBootstrapCI:
             for page in range(5)
         ]
         board = compute_elo(identical_pages, ["alpha", "beta"], n_bootstrap=50)
-        assert board.n_pages == 5
+        assert board.pages_by_model == {"alpha": 5, "beta": 5}
         assert not rankings_resolved(board)
 
     def test_enough_consistent_pages_can_resolve(self):
@@ -263,6 +263,19 @@ class TestBootstrapCI:
         board = compute_elo(pages, ["alpha", "beta"], n_bootstrap=50)
         board.elo_ci = {"alpha": (1600.0, 1700.0), "beta": (1300.0, 1400.0)}
         assert rankings_resolved(board)
+
+    def test_model_on_few_pages_never_resolves(self):
+        one_page_for_rare = [
+            ComparisonResult(sample_idx=0, model_a="rare", model_b="alpha", winner="A"),
+            ComparisonResult(sample_idx=0, model_a="rare", model_b="beta", winner="A"),
+        ]
+        many_pages = [
+            ComparisonResult(sample_idx=page, model_a="alpha", model_b="beta", winner="A")
+            for page in range(1, 31)
+        ]
+        board = compute_elo(one_page_for_rare + many_pages, ["alpha", "beta", "rare"], n_bootstrap=50)
+        assert board.pages_by_model["rare"] == 1
+        assert not rankings_resolved(board)
 
     def test_model_absent_from_replicate_gets_no_arbitrary_rating(self):
         warm_up = [
