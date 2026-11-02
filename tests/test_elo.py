@@ -273,7 +273,9 @@ class TestBootstrapCI:
             ComparisonResult(sample_idx=page, model_a="alpha", model_b="beta", winner="A")
             for page in range(1, 31)
         ]
-        board = compute_elo(one_page_for_rare + many_pages, ["alpha", "beta", "rare"], n_bootstrap=50)
+        board = compute_elo(
+            one_page_for_rare + many_pages, ["alpha", "beta", "rare"], n_bootstrap=50
+        )
         assert board.pages_by_model["rare"] == 1
         assert not rankings_resolved(board)
 
