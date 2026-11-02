@@ -226,6 +226,25 @@ class TestBootstrapCI:
             assert lo <= board.elo[model] + 5  # small tolerance
             assert hi >= board.elo[model] - 5
 
+    def test_ci_resamples_whole_pages(self):
+        """Comparisons from one page stay together, so page conflict widens the CI."""
+        page_where_alpha_wins = [
+            ComparisonResult(sample_idx=0, model_a="alpha", model_b="beta", winner="A")
+            for _ in range(20)
+        ]
+        page_where_beta_wins = [
+            ComparisonResult(sample_idx=1, model_a="alpha", model_b="beta", winner="B")
+            for _ in range(20)
+        ]
+        board = compute_elo(
+            page_where_alpha_wins + page_where_beta_wins,
+            ["alpha", "beta"],
+            n_bootstrap=200,
+        )
+        low, high = board.elo_ci["alpha"]
+        assert low < 1400
+        assert high > 1600
+
     def test_ci_disabled_when_zero(self):
         """n_bootstrap=0 should produce empty elo_ci."""
         results = [

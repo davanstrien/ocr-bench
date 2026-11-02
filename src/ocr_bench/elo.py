@@ -195,18 +195,22 @@ def _bootstrap_ci(
 ) -> dict[str, tuple[float, float]]:
     """Compute bootstrap confidence intervals for ELO ratings.
 
-    Resamples comparisons with replacement, fits BT-MLE each time,
-    returns percentile-based CIs.
+    Resamples whole pages with replacement, fits BT-MLE each time, and
+    returns percentile-based CIs. Comparisons from one page share that page's
+    image and difficulty, so a page is the independent unit.
     """
     if not results or not model_names:
         return {}
 
     rng = random.Random(seed)
-    n = len(results)
+    results_by_page: dict[int, list[ComparisonResult]] = {}
+    for result in results:
+        results_by_page.setdefault(result.sample_idx, []).append(result)
+    pages = [results_by_page[page_idx] for page_idx in sorted(results_by_page)]
     elo_samples: dict[str, list[float]] = {name: [] for name in model_names}
 
     for _ in range(n_bootstrap):
-        boot = rng.choices(results, k=n)
+        boot = [result for page in rng.choices(pages, k=len(pages)) for result in page]
         win_counts, _ = _build_win_matrix(boot)
         theta = _bt_mle(win_counts, model_names)
         elos = _theta_to_elo(theta)

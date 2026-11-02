@@ -578,7 +578,7 @@ def _build_readme(
             if metadata.size_tie_ratio is not None
             else "- **Size-aware stopping**: disabled"
         ),
-        "- **Method**: Bradley-Terry MLE with bootstrap 95% CIs",
+        "- **Method**: Bradley-Terry MLE with page-level bootstrap 95% CIs",
         "",
         "## Configs",
         "",
