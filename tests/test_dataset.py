@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from datasets import Dataset
+from datasets import Image as HFImage
 from PIL import Image
 
 from ocr_bench.dataset import (
@@ -557,8 +558,6 @@ def _png_bytes(shade: int) -> bytes:
 
 
 def _image_ds(shades: list[int], reencoded: bool = False) -> Dataset:
-    from datasets import Image as HFImage
-
     suffix = b"x" if reencoded else b""
     images = [{"bytes": _png_bytes(shade) + suffix, "path": None} for shade in shades]
     ds = Dataset.from_dict({"markdown": ["text"] * len(shades), "image": images})
