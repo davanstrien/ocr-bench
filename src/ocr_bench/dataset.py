@@ -132,16 +132,16 @@ class AlignmentResult:
     """Outcome of checking row alignment across configs.
 
     ``status``:
-      - ``ok``: every non-reference config shared a passthrough column with the
-        reference and all matched.
+      - ``ok``: every non-reference config matched the reference on shared
+        passthrough columns or on stored image bytes.
       - ``misaligned``: a shared column disagrees — ``config``/``column``/
         ``index`` locate the first mismatch against ``reference_config``.
       - ``partial``: some configs were verified against the reference but others
-        shared no identifying passthrough keys, so their alignment is unchecked. The
-        unchecked configs are listed in ``unverified_configs``. A single passing
+        had no identifying passthrough keys or comparable images, so their alignment
+        is unchecked. The unchecked configs are listed in ``unverified_configs``. A single passing
         config must NOT let the whole set read as verified.
-      - ``unverified``: no config shared identifying passthrough keys with the
-        reference, so alignment is positional-only and could not be checked.
+      - ``unverified``: no config could be checked against the reference with
+        passthrough keys or images, so alignment is positional-only.
       - ``n/a``: fewer than two configs (nothing to compare).
     """
 
@@ -173,7 +173,7 @@ class AlignmentResult:
         if self.status == "partial":
             return (
                 f"PARTIAL — verified {', '.join(self.verified_configs)} on "
-                f"{', '.join(self.shared_keys)}; unverified (no identifying keys): "
+                f"{', '.join(self.shared_keys)}; unverified (no identifying keys or images): "
                 f"{', '.join(self.unverified_configs)}"
             )
         if self.status == "misaligned":
@@ -432,8 +432,44 @@ def _load_configs(
     return loaded
 
 
+def _image_fingerprints(ds: Dataset) -> list[str] | None:
+    """Hash each row's stored image bytes, or return None if any row has no bytes."""
+    feature = ds.features.get("image")
+    if not isinstance(feature, Image):
+        return None
+    undecoded = ds.select_columns(["image"]).cast_column("image", Image(decode=False))
+    fingerprints: list[str] = []
+    for row in undecoded:
+        image_bytes = (row["image"] or {}).get("bytes")
+        if not image_bytes:
+            return None
+        fingerprints.append(hashlib.sha256(image_bytes).hexdigest())
+    return fingerprints
+
+
+def _find_image_mismatch(reference: list[str] | None, other: Dataset) -> int | None | str:
+    """Compare page order using stored image bytes.
+
+    Returns the first differing row when both configs hold the same images in a
+    different order, ``None`` when the order matches, and ``"unverified"`` when
+    the check cannot decide. Different image sets stay unverified, because a
+    recipe may re-encode images without changing the page order.
+    """
+    fingerprints = _image_fingerprints(other)
+    if reference is None or fingerprints is None or len(reference) != len(fingerprints):
+        return "unverified"
+    if reference == fingerprints:
+        return None
+    if sorted(reference) != sorted(fingerprints):
+        return "unverified"
+    return next(i for i, (a, b) in enumerate(zip(reference, fingerprints)) if a != b)
+
+
 def check_config_alignment(loaded: list[LoadedConfig]) -> AlignmentResult:
-    """Verify row-for-row alignment across configs via shared passthrough keys.
+    """Verify row-for-row alignment across configs.
+
+    Shared passthrough keys are checked first. Configs they cannot verify fall
+    back to comparing stored image bytes.
 
     The first config is the reference. Returns an :class:`AlignmentResult`; this
     function never raises, so it is reusable by the read-only audit. Callers that
@@ -447,16 +483,25 @@ def check_config_alignment(loaded: list[LoadedConfig]) -> AlignmentResult:
     used: set[str] = set()
     verified: list[str] = []
     unverified: list[str] = []
+    verified_by_image = False
+    reference_images: list[str] | None = None
+    reference_images_loaded = False
+
+    def check_images(lc: LoadedConfig) -> int | None | str:
+        nonlocal reference_images, reference_images_loaded
+        if not reference_images_loaded:
+            reference_images = _image_fingerprints(ref.ds)
+            reference_images_loaded = True
+        return _find_image_mismatch(reference_images, lc.ds)
+
     for lc in loaded[1:]:
         keys = shared_alignment_keys(ref.ds, lc.ds)
         if not keys:
             # No shared passthrough column with the reference — this config's
             # alignment can't be checked. It must NOT be silently folded into an
             # overall "ok" just because a sibling config passed.
-            unverified.append(lc.config)
-            continue
-        hit = find_alignment_mismatch(ref.ds, lc.ds, keys)
-        if hit is not None:
+            pass
+        elif (hit := find_alignment_mismatch(ref.ds, lc.ds, keys)) is not None:
             column, index = hit
             return AlignmentResult(
                 status="misaligned",
@@ -468,18 +513,36 @@ def check_config_alignment(loaded: list[LoadedConfig]) -> AlignmentResult:
                 verified_configs=verified,
                 unverified_configs=unverified,
             )
-        if not (
-            alignment_keys_identify_rows(ref.ds, keys)
-            and alignment_keys_identify_rows(lc.ds, keys)
+        elif alignment_keys_identify_rows(ref.ds, keys) and alignment_keys_identify_rows(
+            lc.ds, keys
         ):
-            # Matching constant/null/repeated values do not identify rows, so a
-            # permutation can pass equality while pairing different pages.
-            unverified.append(lc.config)
+            used.update(keys)
+            verified.append(lc.config)
             continue
-        used.update(keys)
-        verified.append(lc.config)
+        # Matching constant/null/repeated values do not identify rows, so a
+        # permutation can pass equality while pairing different pages. Fall back
+        # to the images themselves.
+        image_result = check_images(lc)
+        if image_result is None:
+            verified_by_image = True
+            verified.append(lc.config)
+        elif image_result == "unverified":
+            unverified.append(lc.config)
+        else:
+            return AlignmentResult(
+                status="misaligned",
+                reference_config=ref.config,
+                config=lc.config,
+                column="image",
+                index=int(image_result),
+                shared_keys=["image"],
+                verified_configs=verified,
+                unverified_configs=unverified,
+            )
 
     ordered = [k for k in ALIGNMENT_KEYS if k in used]
+    if verified_by_image:
+        ordered.append("image")
     if not verified:
         # Nothing could be checked against the reference at all.
         return AlignmentResult(
