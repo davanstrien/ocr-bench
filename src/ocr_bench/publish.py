@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 from dataclasses import dataclass, field
 
@@ -19,7 +20,7 @@ from ocr_bench.adaptive import (
     practical_preferences,
 )
 from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo
-from ocr_bench.judge import MAX_IMAGE_DIM, MAX_OCR_TEXT_LENGTH
+from ocr_bench.judge import DEFAULT_MIN_CHARS, MAX_IMAGE_DIM, MAX_OCR_TEXT_LENGTH
 from ocr_bench.run import MODEL_REGISTRY
 
 logger = structlog.get_logger()
@@ -53,6 +54,16 @@ class EvalMetadata:
     # metadata rows predate this field and are interpreted as ``train`` by the
     # viewer for backward compatibility.
     source_split: str = "train"
+    # Exact loaded-dataset identity and selection used by the resume guard.
+    source_fingerprint: str = ""
+    source_column_fingerprints: dict[str, str] = field(default_factory=dict)
+    source_configs: list[str] = field(default_factory=list)
+    source_columns: dict[str, str] = field(default_factory=dict)
+    # Unified column -> original output column selected from the source config.
+    source_output_columns: dict[str, str] = field(default_factory=dict)
+    # One-way identities of the raw CLI judge specs. Raw endpoint specs may
+    # contain credentials or private hostnames and must never be published.
+    judge_spec_hashes: list[str] = field(default_factory=list)
     auto_tied: int = 0
     # Global comparison budget for the run (--max-comparisons); None = uncapped.
     # ``budget_exhausted`` records whether the run stopped because it hit the cap
@@ -76,6 +87,7 @@ class EvalMetadata:
     # "normalized" (HTML flattened before the cap) or "raw" (capped as-is).
     # Changes verdicts, so it's provenance alongside the caps.
     judge_text_mode: str = "normalized"
+    min_chars: int = DEFAULT_MIN_CHARS
     # Comparison-allocation provenance. ``balanced`` is the historical default;
     # ``targeted`` tops up only unresolved adjacent pairs after enough balanced evidence.
     adaptive_strategy: str = "balanced"
@@ -136,6 +148,7 @@ def load_existing_comparisons(repo_id: str) -> list[ComparisonResult]:
                     col_b=row.get("col_b", ""),
                     truncated_a=row.get("truncated_a", False),
                     truncated_b=row.get("truncated_b", False),
+                    provenance_hash=row.get("provenance_hash", ""),
                 )
             )
     except Exception as exc:
@@ -169,6 +182,56 @@ def load_existing_metadata(repo_id: str) -> list[dict]:
 def _get_model_sizes() -> dict[str, str]:
     """Build model_id → size lookup from the model registry."""
     return {cfg.model_id: cfg.size for cfg in MODEL_REGISTRY.values()}
+
+
+def evaluation_provenance_hash(
+    *,
+    source_dataset: str,
+    source_split: str,
+    source_fingerprint: str,
+    source_column_fingerprints: dict[str, str],
+    source_columns: dict[str, str],
+    source_output_columns: dict[str, str],
+    judge_specs: list[str],
+    seed: int,
+    max_samples: int,
+    prompt_hash: str,
+    judge_text_mode: str,
+    max_ocr_text_len: int,
+    judge_image_dim: int,
+    max_tokens: int,
+    min_chars: int,
+) -> str:
+    """Hash every input that determines which verdicts are safe to reuse.
+
+    The comparison config carries this hash on every row, including mid-run
+    checkpoints. That lets a killed first run resume safely before a final
+    metadata row exists, while results produced before this guard fail closed.
+    """
+    payload = {
+        "source_dataset": source_dataset,
+        "source_split": source_split,
+        "source_fingerprint": source_fingerprint,
+        "source_column_fingerprints": source_column_fingerprints,
+        "source_columns": source_columns,
+        "source_output_columns": source_output_columns,
+        "judge_specs": judge_specs,
+        "seed": seed,
+        "max_samples": max_samples,
+        "prompt_hash": prompt_hash,
+        "judge_text_mode": judge_text_mode,
+        "max_ocr_text_len": max_ocr_text_len,
+        "judge_image_dim": judge_image_dim,
+        "max_tokens": max_tokens,
+        "min_chars": min_chars,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def hash_judge_specs(judge_specs: list[str]) -> list[str]:
+    """Return publish-safe identities for potentially sensitive judge specs."""
+    return [hashlib.sha256(spec.encode()).hexdigest() for spec in judge_specs]
 
 
 def build_leaderboard_rows(
@@ -238,7 +301,15 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
     return {
         "source_dataset": metadata.source_dataset,
         "source_split": metadata.source_split,
+        "source_fingerprint": metadata.source_fingerprint,
+        "source_column_fingerprints": json.dumps(
+            metadata.source_column_fingerprints, sort_keys=True
+        ),
+        "source_configs": json.dumps(metadata.source_configs),
+        "source_columns": json.dumps(metadata.source_columns, sort_keys=True),
+        "source_output_columns": json.dumps(metadata.source_output_columns, sort_keys=True),
         "judge_models": json.dumps(metadata.judge_models),
+        "judge_spec_hashes": json.dumps(metadata.judge_spec_hashes),
         "seed": metadata.seed,
         "max_samples": metadata.max_samples,
         "total_comparisons": metadata.total_comparisons,
@@ -255,6 +326,7 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
         "max_ocr_text_len": metadata.max_ocr_text_len,
         "judge_image_dim": metadata.judge_image_dim,
         "judge_text_mode": metadata.judge_text_mode,
+        "min_chars": metadata.min_chars,
         "adaptive_strategy": metadata.adaptive_strategy,
         "size_tie_ratio": metadata.size_tie_ratio,
         "size_tie_min_samples": metadata.size_tie_min_samples,
