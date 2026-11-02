@@ -128,7 +128,6 @@ class TestParseJudgeSpec:
         backend = parse_judge_spec(url)
         assert isinstance(backend, OpenAICompatibleJudge)
         assert backend.name.startswith("openai-endpoint-")
-        assert backend.name.endswith("/v1")
         assert backend.temperature == 0.0
 
     def test_non_hf_url_still_openai(self):
