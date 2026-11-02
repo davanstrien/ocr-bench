@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-from datasets import Dataset
+from datasets import Dataset, Image
+from PIL import Image as PILImage
 
 from ocr_bench.dataset import (
     DatasetError,
@@ -546,6 +548,48 @@ class TestFindAlignmentMismatch:
         a = Dataset.from_dict({"b_number": [1], "id": ["x"]})
         b = Dataset.from_dict({"b_number": [1], "page_index": [0]})
         assert shared_alignment_keys(a, b) == ["b_number"]
+
+
+def _png_bytes(shade: int) -> bytes:
+    buffer = io.BytesIO()
+    PILImage.new("RGB", (2, 2), (shade, shade, shade)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _image_ds(shades: list[int], reencoded: bool = False) -> Dataset:
+    suffix = b"x" if reencoded else b""
+    images = [{"bytes": _png_bytes(shade) + suffix, "path": None} for shade in shades]
+    ds = Dataset.from_dict({"markdown": ["text"] * len(shades), "image": images})
+    return ds.cast_column("image", Image())
+
+
+class TestCheckConfigAlignmentByImage:
+    def _lc(self, name: str, ds: Dataset) -> LoadedConfig:
+        return LoadedConfig(config=name, model_id=name, ds=ds, text_col="markdown")
+
+    def test_same_images_same_order_is_verified(self):
+        loaded = [self._lc("a", _image_ds([1, 2, 3])), self._lc("b", _image_ds([1, 2, 3]))]
+        result = check_config_alignment(loaded)
+        assert result.status == "ok"
+        assert result.shared_keys == ["image"]
+
+    def test_same_images_reordered_is_misaligned(self):
+        loaded = [self._lc("a", _image_ds([1, 2, 3])), self._lc("b", _image_ds([1, 3, 2]))]
+        result = check_config_alignment(loaded)
+        assert result.status == "misaligned"
+        assert result.column == "image"
+        assert result.index == 1
+
+    def test_reencoded_images_stay_unverified(self):
+        loaded = [
+            self._lc("a", _image_ds([1, 2, 3])),
+            self._lc("b", _image_ds([1, 2, 3], reencoded=True)),
+        ]
+        assert check_config_alignment(loaded).status == "unverified"
+
+    def test_duplicate_pages_do_not_block_verification(self):
+        loaded = [self._lc("a", _image_ds([1, 1, 2])), self._lc("b", _image_ds([1, 1, 2]))]
+        assert check_config_alignment(loaded).status == "ok"
 
 
 class TestCheckConfigAlignment:
