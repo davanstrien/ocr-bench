@@ -7,6 +7,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from itertools import zip_longest
 from typing import Any
+from urllib.parse import urlsplit
 
 import stamina
 import structlog
@@ -115,10 +116,12 @@ class InferenceProviderJudge(JudgeBackend):
 
     def __init__(
         self, model: str, provider: str | None = None, max_tokens: int = DEFAULT_MAX_TOKENS,
+        concurrency: int = 1,
     ):
         self.name = f"{provider + ':' if provider else ''}{model}"
         self.model = model
         self.max_tokens = max_tokens
+        self.concurrency = concurrency
         self.client = InferenceClient(model=model, provider=provider)  # ty: ignore[invalid-argument-type]
 
     @stamina.retry(on=_is_retryable, attempts=_RETRY_ATTEMPTS)
@@ -189,6 +192,8 @@ def parse_judge_spec(
     Formats:
       - ``"https://xxx.endpoints.huggingface.cloud"`` → :class:`OpenAICompatibleJudge`
         (HF Inference Endpoints, OpenAI-compatible with HF token auth)
+      - ``"https://job--8000.hf.jobs/v1/:model"`` → :class:`OpenAICompatibleJudge`
+        (HF Jobs serving, OpenAI-compatible with HF token auth)
       - ``"http://..."`` or ``"https://..."`` (other) → :class:`OpenAICompatibleJudge`
       - ``"provider:org/model"`` (colon before first ``/``) → :class:`InferenceProviderJudge`
       - anything else → :class:`InferenceProviderJudge` (no provider)
@@ -202,8 +207,12 @@ def parse_judge_spec(
             url_part, model_name = spec.split("/v1/:", 1)
             url_part += "/v1"
 
-        # HF Inference Endpoints — OpenAI-compatible, auth via HF token
-        if ".endpoints.huggingface." in url_part:
+        # Authenticate only actual HTTPS HF serving hosts, never substring matches
+        # in a path, query, or lookalike hostname.
+        parsed_url = urlsplit(url_part)
+        hostname = (parsed_url.hostname or "").lower()
+        hf_host = hostname.endswith((".endpoints.huggingface.cloud", ".hf.jobs"))
+        if parsed_url.scheme == "https" and hf_host:
             from huggingface_hub import get_token
 
             base_url = url_part.rstrip("/")
@@ -230,9 +239,11 @@ def parse_judge_spec(
         slash_idx = spec.find("/")
         if slash_idx == -1 or colon_idx < slash_idx:
             provider, model = spec.split(":", 1)
-            return InferenceProviderJudge(model=model, provider=provider, max_tokens=max_tokens)
+            return InferenceProviderJudge(
+                model=model, provider=provider, max_tokens=max_tokens, concurrency=concurrency,
+            )
 
-    return InferenceProviderJudge(model=spec, max_tokens=max_tokens)
+    return InferenceProviderJudge(model=spec, max_tokens=max_tokens, concurrency=concurrency)
 
 
 # ---------------------------------------------------------------------------

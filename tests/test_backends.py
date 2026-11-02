@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 import requests
 
 from ocr_bench.backends import (
@@ -43,6 +44,14 @@ def _make_comparison(idx: int = 0) -> Comparison:
         swapped=False,
         messages=[{"role": "user", "content": "test"}],
     )
+
+
+@pytest.mark.parametrize("spec", ["novita:Qwen/Qwen3.5-35B-A3B", "Qwen/Qwen3.5-35B-A3B"])
+def test_provider_spec_preserves_requested_concurrency(spec):
+    with patch("ocr_bench.backends.InferenceClient"):
+        backend = parse_judge_spec(spec, concurrency=8)
+    assert isinstance(backend, InferenceProviderJudge)
+    assert backend.concurrency == 8
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +143,31 @@ class TestParseJudgeSpec:
         """Non-HF URLs still route to OpenAICompatibleJudge."""
         backend = parse_judge_spec("https://my-vllm-server.example.com/v1")
         assert isinstance(backend, OpenAICompatibleJudge)
+
+    @patch("ocr_bench.backends.OpenAI")
+    @patch("huggingface_hub.get_token", return_value="hf_test_token")
+    @pytest.mark.parametrize("suffix", ["", "/v1", "/v1/:judge"])
+    def test_hf_jobs_auth_and_model(self, mock_get_token, mock_openai, suffix):
+        backend = parse_judge_spec("https://abc--8000.hf.jobs" + suffix)
+        mock_openai.assert_called_once_with(
+            base_url="https://abc--8000.hf.jobs/v1", api_key="hf_test_token",
+        )
+        assert backend.model == ("judge" if suffix.endswith(":judge") else "default")
+        assert backend.extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+
+    @patch("ocr_bench.backends.OpenAI")
+    @patch("huggingface_hub.get_token", return_value="hf_test_token")
+    @pytest.mark.parametrize("url", [
+        "https://example.com/path.endpoints.huggingface.cloud/v1",
+        "https://abc.endpoints.huggingface.cloud.example.com/v1",
+        "https://abc.hf.jobs.example.com/v1",
+        "https://example.com/?host=abc.hf.jobs",
+        "http://abc--8000.hf.jobs/v1",
+    ])
+    def test_other_urls_never_receive_hf_token(self, mock_get_token, mock_openai, url):
+        parse_judge_spec(url)
+        mock_get_token.assert_not_called()
+        assert mock_openai.call_args.kwargs["api_key"] == "not-needed"
 
 
 # ---------------------------------------------------------------------------
