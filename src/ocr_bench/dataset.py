@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 import structlog
 from datasets import Dataset, Image, get_dataset_config_names, load_dataset
@@ -17,6 +18,97 @@ logger = structlog.get_logger()
 
 class DatasetError(Exception):
     """Raised when dataset loading or column discovery fails."""
+
+
+def _hash_value(hasher: Any, value: Any) -> None:
+    """Add one typed value to a hashlib-compatible digest deterministically."""
+    update = hasher.update
+    if isinstance(value, bytes):
+        payload = b"bytes:" + value
+    elif hasattr(value, "tobytes") and hasattr(value, "size"):
+        # PIL images: include geometry/mode as well as pixels.
+        payload = (
+            f"image:{getattr(value, 'mode', '')}:{getattr(value, 'size', '')}:".encode()
+            + value.tobytes()
+        )
+    else:
+        payload = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=repr,
+        ).encode()
+    update(len(payload).to_bytes(8, "big"))
+    update(payload)
+
+
+def _stored_image_bytes(image: dict[str, Any], column: str) -> bytes:
+    """Return an undecoded image's content, reading the file for path-only images."""
+    if image.get("bytes"):
+        return image["bytes"]
+    path = image.get("path")
+    if not path or not os.path.isfile(path):
+        raise DatasetError(
+            f"Cannot fingerprint evaluated pages: column '{column}' has an image "
+            f"with no stored bytes or readable file (path: {path!r})"
+        )
+    with open(path, "rb") as image_file:
+        return image_file.read()
+
+
+def evaluation_input_fingerprints(
+    dataset: Dataset,
+    ocr_columns: dict[str, str],
+    indices: list[int],
+) -> tuple[str, dict[str, str]]:
+    """Fingerprint evaluated pages and each OCR column over the sampled rows.
+
+    The page fingerprint includes stable passthrough identity columns when
+    present and stored image bytes when available. OCR columns are fingerprinted
+    independently so adding a new model does not invalidate safe comparisons
+    between unchanged existing models.
+    """
+    identity_columns = [key for key in ALIGNMENT_KEYS if key in dataset.column_names]
+    image_columns = [
+        col for col in dataset.column_names if col == "image" or "image" in col.lower()
+    ]
+    if image_columns:
+        # IDs detect reordering; image content also catches a page being replaced
+        # in place while retaining the same ID.
+        image_column = "image" if "image" in image_columns else image_columns[0]
+        identity_columns.append(image_column)
+    if not identity_columns:
+        raise DatasetError(
+            "Cannot fingerprint evaluated pages: no stable identity or image column found"
+        )
+
+    selected = dataset.select(indices)
+    # Hash stored image bytes, because decoded pixels can change with decoder versions.
+    identity_rows = selected.select_columns(identity_columns)
+    for column in identity_columns:
+        if isinstance(identity_rows.features.get(column), Image):
+            identity_rows = identity_rows.cast_column(column, Image(decode=False))
+    page_digest = hashlib.sha256()
+    for local_idx, source_idx in enumerate(indices):
+        row = identity_rows[local_idx]
+        _hash_value(page_digest, source_idx)
+        for column in identity_columns:
+            _hash_value(page_digest, column)
+            value = row[column]
+            if isinstance(identity_rows.features.get(column), Image) and isinstance(value, dict):
+                value = _stored_image_bytes(value, column)
+            _hash_value(page_digest, value)
+
+    column_fingerprints: dict[str, str] = {}
+    for column in ocr_columns:
+        digest = hashlib.sha256()
+        values = selected[column]
+        for source_idx, value in zip(indices, values):
+            _hash_value(digest, source_idx)
+            _hash_value(digest, value)
+        column_fingerprints[column] = digest.hexdigest()
+
+    return page_digest.hexdigest(), column_fingerprints
 
 
 # ---------------------------------------------------------------------------
@@ -478,11 +570,14 @@ def load_config_dataset(
     config_names: list[str],
     split: str = "train",
     pr_revisions: dict[str, str] | None = None,
+    *,
+    source_output_columns: dict[str, str] | None = None,
 ) -> tuple[Dataset, dict[str, str]]:
     """Load multiple configs from a Hub dataset and merge into one.
 
     Each config becomes a column whose name is the config name and whose value
-    is the OCR text (from the first column matching heuristics, or ``markdown``).
+    is the OCR text selected together with its model identity from inference
+    metadata, falling back to column heuristics for legacy configs.
 
     Before merging, row alignment is verified across configs on shared
     passthrough columns (see :data:`ALIGNMENT_KEYS`). A mismatch raises
@@ -494,6 +589,8 @@ def load_config_dataset(
         config_names: List of config names to load.
         split: Dataset split to load.
         pr_revisions: Optional mapping of config_name → revision for PR-based loading.
+        source_output_columns: Optional output mapping populated with each loaded
+            config's original OCR column name, before renaming it for the merge.
 
     Returns:
         Tuple of (unified Dataset, {column_name: model_id}).
@@ -561,6 +658,8 @@ def load_config_dataset(
         if text_col is None:  # filtered into `usable` above; narrows the type
             continue
         ocr_columns[config] = lc.model_id
+        if source_output_columns is not None:
+            source_output_columns[config] = text_col
 
         # Build unified dataset using Arrow-level ops (no per-row image decode).
         # Row counts are already verified equal above, so no truncation is needed.

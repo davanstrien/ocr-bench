@@ -12,7 +12,7 @@ Inspired by [Datalab's Benchmarks + Evals](https://www.datalab.to/blog/datalab-b
 
 | Module | What it does |
 |--------|-------------|
-| `elo.py` | Bradley-Terry MLE via scipy, bootstrap 95% CIs, ELO scale |
+| `elo.py` | Bradley-Terry MLE via scipy, page-level bootstrap 95% CIs, ELO scale |
 | `judge.py` | Criteria-profile/custom judge prompts, HTML normalization, truncation disclosure, Comparison dataclass, structured output schema |
 | `dataset.py` | Flat, config-per-model, PR-based dataset loading, OCR column discovery |
 | `backends.py` | API backends: InferenceProvider + OpenAI-compatible, concurrent calls |

@@ -500,9 +500,13 @@ class TestParseJudgeOutput:
         result = parse_judge_output(text)
         assert result["winner"] == "A"
 
-    def test_invalid_winner_defaults_to_tie(self):
+    def test_invalid_winner_returns_empty(self):
         result = parse_judge_output('{"winner": "C", "reason": "confused"}')
-        assert result["winner"] == "tie"
+        assert result == {}
+
+    @pytest.mark.parametrize("text", ['{}', '{"reason": "unsure"}'])
+    def test_missing_winner_returns_empty(self, text):
+        assert parse_judge_output(text) == {}
 
     def test_invalid_json_returns_empty(self):
         result = parse_judge_output("not json at all")
