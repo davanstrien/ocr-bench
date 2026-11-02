@@ -89,7 +89,8 @@ def classify_adjacent_pairs(
 ) -> list[AdjacentPairDecision]:
     """Classify adjacent ranks for adaptive sampling and practical preference.
 
-    Non-overlapping marginal 95% CIs are statistically resolved. An overlapping
+    Non-overlapping marginal 95% CIs are statistically resolved once the board
+    rests on enough distinct pages. An overlapping
     pair may be marked ``prefer-smaller`` when the parameter ratio reaches the
     configured threshold and the pair has enough direct comparisons. This is a
     deployment preference, not an equivalence test or a change to ELO/rank.
@@ -104,7 +105,12 @@ def classify_adjacent_pairs(
         higher_ci = board.elo_ci.get(higher_model)
         lower_ci = board.elo_ci.get(lower_model)
 
-        if higher_ci is not None and lower_ci is not None and lower_ci[1] < higher_ci[0]:
+        if (
+            board.has_enough_pages_to_resolve
+            and higher_ci is not None
+            and lower_ci is not None
+            and lower_ci[1] < higher_ci[0]
+        ):
             decisions.append(AdjacentPairDecision(higher_model, lower_model, "resolved", direct))
             continue
 

@@ -6,6 +6,7 @@ from ocr_bench.elo import (
     INITIAL_ELO,
     ComparisonResult,
     Leaderboard,
+    _bootstrap_ci,
     compute_elo,
     rankings_resolved,
 )
@@ -244,6 +245,36 @@ class TestBootstrapCI:
         low, high = board.elo_ci["alpha"]
         assert low < 1400
         assert high > 1600
+
+    def test_too_few_pages_never_resolve(self):
+        identical_pages = [
+            ComparisonResult(sample_idx=page, model_a="alpha", model_b="beta", winner="A")
+            for page in range(5)
+        ]
+        board = compute_elo(identical_pages, ["alpha", "beta"], n_bootstrap=50)
+        assert board.n_pages == 5
+        assert not rankings_resolved(board)
+
+    def test_enough_consistent_pages_can_resolve(self):
+        pages = [
+            ComparisonResult(sample_idx=page, model_a="alpha", model_b="beta", winner="A")
+            for page in range(9)
+        ] + [ComparisonResult(sample_idx=9, model_a="alpha", model_b="beta", winner="A")]
+        board = compute_elo(pages, ["alpha", "beta"], n_bootstrap=50)
+        board.elo_ci = {"alpha": (1600.0, 1700.0), "beta": (1300.0, 1400.0)}
+        assert rankings_resolved(board)
+
+    def test_model_absent_from_replicate_gets_no_arbitrary_rating(self):
+        warm_up = [
+            ComparisonResult(sample_idx=0, model_a="rare", model_b="alpha", winner="A"),
+        ]
+        targeted = [
+            ComparisonResult(sample_idx=page, model_a="alpha", model_b="beta", winner="A")
+            for page in range(1, 12)
+        ]
+        cis = _bootstrap_ci(warm_up + targeted, ["alpha", "beta", "rare"], n_bootstrap=200)
+        assert set(cis) == {"alpha", "beta", "rare"}
+        assert cis["rare"][0] > 1500
 
     def test_ci_disabled_when_zero(self):
         """n_bootstrap=0 should produce empty elo_ci."""

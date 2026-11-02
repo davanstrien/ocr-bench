@@ -16,6 +16,11 @@ INITIAL_ELO: float = 1500.0
 Winner = Literal["A", "B", "tie"]
 
 
+# A page-level bootstrap has few distinct resamples on a handful of pages, and
+# identical pages give zero-width intervals. Do not call a ranking resolved below this.
+MIN_PAGES_TO_RESOLVE = 10
+
+
 @dataclass
 class ComparisonResult:
     """Result of a single pairwise comparison, ready for ELO computation."""
@@ -45,6 +50,12 @@ class Leaderboard:
     ties: dict[str, int] = field(default_factory=dict)
     comparison_log: list[dict[str, object]] = field(default_factory=list)
     elo_ci: dict[str, tuple[float, float]] = field(default_factory=dict)
+    n_pages: int | None = None
+
+    @property
+    def has_enough_pages_to_resolve(self) -> bool:
+        """False when page-level intervals rest on too few pages to stop on."""
+        return self.n_pages is None or self.n_pages >= MIN_PAGES_TO_RESOLVE
 
     @property
     def ranked(self) -> list[tuple[str, float]]:
@@ -211,11 +222,15 @@ def _bootstrap_ci(
 
     for _ in range(n_bootstrap):
         boot = [result for page in rng.choices(pages, k=len(pages)) for result in page]
+        # A model absent from every resampled page has no evidence in this
+        # replicate, so it gets no rating rather than an arbitrary one.
+        models_seen = {name for result in boot for name in (result.model_a, result.model_b)}
+        replicate_models = [name for name in model_names if name in models_seen]
         win_counts, _ = _build_win_matrix(boot)
-        theta = _bt_mle(win_counts, model_names)
+        theta = _bt_mle(win_counts, replicate_models)
         elos = _theta_to_elo(theta)
-        for name in model_names:
-            elo_samples[name].append(elos.get(name, 1500.0))
+        for name in replicate_models:
+            elo_samples[name].append(elos[name])
 
     alpha = (1.0 - ci) / 2.0
     lo_pct = alpha * 100
@@ -224,6 +239,8 @@ def _bootstrap_ci(
     cis: dict[str, tuple[float, float]] = {}
     for name in model_names:
         samples = sorted(elo_samples[name])
+        if not samples:
+            continue
         lo_idx = int(len(samples) * lo_pct / 100)
         hi_idx = min(int(len(samples) * hi_pct / 100), len(samples) - 1)
         cis[name] = (samples[lo_idx], samples[hi_idx])
@@ -241,7 +258,7 @@ def rankings_resolved(board: Leaderboard) -> bool:
     every pair of adjacent models in the ranking, the higher-ranked model's
     CI lower bound exceeds the lower-ranked model's CI upper bound.
     """
-    if not board.elo_ci:
+    if not board.elo_ci or not board.has_enough_pages_to_resolve:
         return False
     ranked = board.ranked
     if len(ranked) < 2:
@@ -329,5 +346,6 @@ def compute_elo(
     # Bootstrap CIs
     if n_bootstrap > 0 and results:
         board.elo_ci = _bootstrap_ci(results, model_names, n_bootstrap=n_bootstrap)
+        board.n_pages = len({result.sample_idx for result in results})
 
     return board
