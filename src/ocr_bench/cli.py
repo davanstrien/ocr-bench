@@ -2032,7 +2032,7 @@ def cmd_audit(args: argparse.Namespace) -> None:
         console.print(f"[red]Audit could not complete:[/red] {exc}")
         sys.exit(_AUDIT_EXIT_OPERATIONAL)
 
-    if not report.configs:
+    if not report.configs and not report.configs_without_text and not report.auxiliary_configs:
         console.print("[red]No OCR configs/columns found to audit.[/red]")
         sys.exit(_AUDIT_EXIT_OPERATIONAL)
 
@@ -2066,6 +2066,10 @@ def cmd_audit(args: argparse.Namespace) -> None:
             _pct(s.over_max_rate),
             _align_cell(align.config_status(s.name)),
         )
+    for config in report.configs_without_text:
+        table.add_row(config, "[red]no OCR text column[/red]", *["-"] * 8)
+    for config in report.auxiliary_configs:
+        table.add_row(config, "[dim]skipped: not OCR output[/dim]", *["-"] * 8)
 
     console.print(table)
 
@@ -2088,6 +2092,10 @@ def cmd_audit(args: argparse.Namespace) -> None:
         if report.flagged_models:
             flagged = ", ".join(report.flagged_models)
             problems.append(f">{SENTINEL_FLAG_RATE:.0%} sentinels: {flagged}")
+        if report.unjudgeable_configs:
+            problems.append(f"no judgeable rows: {', '.join(report.unjudgeable_configs)}")
+        if report.too_few_models:
+            problems.append("fewer than two judgeable configs")
         console.print(f"\n[red]FAIL[/red] — {'; '.join(problems)}")
         sys.exit(_AUDIT_EXIT_INTEGRITY)
     console.print("\n[green]OK[/green] — no blocking issues found")
