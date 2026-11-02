@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -304,15 +305,35 @@ def _audit_report(sentinel_count: int = 0, n_rows: int = 10, status: str = "ok")
         max_len=200,
         max_ocr_text_len=2500,
     )
+    second_stats = replace(stats, name="cfg2", model="m2", n_sentinel=0)
     return AuditReport(
         repo_id="user/data",
-        configs=[ConfigAudit(stats)],
+        configs=[ConfigAudit(stats), ConfigAudit(second_stats)],
         alignment=AlignmentResult(status=status),
         max_ocr_text_len=2500,
     )
 
 
 class TestCmdAudit:
+    def test_config_without_text_exits_one(self, monkeypatch):
+        report = _audit_report()
+        report.configs_without_text = ["broken"]
+        monkeypatch.setattr(cli, "audit_repo", lambda *a, **k: report)
+        args = build_parser().parse_args(["audit", "user/data"])
+        with pytest.raises(SystemExit) as exc_info:
+            cli.cmd_audit(args)
+        assert exc_info.value.code == 1
+
+    def test_only_configs_without_text_exits_one(self, monkeypatch):
+        report = _audit_report()
+        report.configs = []
+        report.configs_without_text = ["broken"]
+        monkeypatch.setattr(cli, "audit_repo", lambda *a, **k: report)
+        args = build_parser().parse_args(["audit", "user/data"])
+        with pytest.raises(SystemExit) as exc_info:
+            cli.cmd_audit(args)
+        assert exc_info.value.code == 1
+
     def test_clean_repo_does_not_exit(self, monkeypatch):
         monkeypatch.setattr(cli, "audit_repo", lambda *a, **k: _audit_report())
         args = build_parser().parse_args(["audit", "user/data"])

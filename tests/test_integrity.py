@@ -130,6 +130,68 @@ class TestAuditRepo:
     @patch("ocr_bench.integrity._load_configs")
     @patch("ocr_bench.integrity.discover_configs")
     @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_mixed_usable_and_missing_text_is_a_problem(self, mock_pr, mock_main, mock_load):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = ["cfg_a", "cfg_b", "cfg_c"]
+        no_text = LoadedConfig(
+            config="cfg_c", model_id="model-c", ds=Dataset.from_dict({"x": [1]}), text_col=None
+        )
+        mock_load.return_value = [
+            _loaded_config("cfg_a", "model-a", ["good one here"], {"b_number": [1]}),
+            _loaded_config("cfg_b", "model-b", ["good two here"], {"b_number": [1]}),
+            no_text,
+        ]
+        report = audit_repo("user/repo")
+        assert report.configs_without_text == ["cfg_c"]
+        assert report.unjudgeable_configs == ["cfg_c"]
+        assert not report.too_few_models
+        assert report.has_problems
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_all_empty_configs_are_a_problem(self, mock_pr, mock_main, mock_load):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = ["cfg_a", "cfg_b"]
+        mock_load.return_value = [
+            _loaded_config("cfg_a", "model-a", ["", ""], {"b_number": [1, 2]}),
+            _loaded_config("cfg_b", "model-b", ["", ""], {"b_number": [1, 2]}),
+        ]
+        report = audit_repo("user/repo")
+        assert report.unjudgeable_configs == ["cfg_a", "cfg_b"]
+        assert report.too_few_models
+        assert report.has_problems
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_zero_row_config_is_a_problem(self, mock_pr, mock_main, mock_load):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = ["cfg_a", "cfg_b"]
+        mock_load.return_value = [
+            _loaded_config("cfg_a", "model-a", [], {}),
+            _loaded_config("cfg_b", "model-b", [], {}),
+        ]
+        report = audit_repo("user/repo")
+        assert report.unjudgeable_configs == ["cfg_a", "cfg_b"]
+        assert report.has_problems
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_single_usable_model_is_a_problem(self, mock_pr, mock_main, mock_load):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = ["cfg_a"]
+        mock_load.return_value = [
+            _loaded_config("cfg_a", "model-a", ["good one here"], {"b_number": [1]}),
+        ]
+        report = audit_repo("user/repo")
+        assert report.too_few_models
+        assert report.has_problems
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
     def test_flags_sentinel_config(self, mock_pr, mock_main, mock_load):
         mock_pr.return_value = ([], {})
         mock_main.return_value = ["cfg_a", "cfg_b"]

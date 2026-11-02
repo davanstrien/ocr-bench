@@ -9,7 +9,7 @@ functions here so the pre-flight report and the guard can never disagree.
 from __future__ import annotations
 
 import statistics
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from ocr_bench.dataset import (
@@ -167,6 +167,21 @@ class AuditReport:
     alignment: AlignmentResult
     max_ocr_text_len: int
     judge_text_mode: str = "normalized"
+    configs_without_text: list[str] = field(default_factory=list)
+
+    @property
+    def unjudgeable_configs(self) -> list[str]:
+        """Discovered configs that cannot contribute a single judged page."""
+        no_usable_rows = [
+            c.stats.name for c in self.configs if c.stats.n_rows == 0 or c.stats.empty_rate == 1.0
+        ]
+        return self.configs_without_text + no_usable_rows
+
+    @property
+    def too_few_models(self) -> bool:
+        """True if fewer than two configs can be judged, so no pair exists."""
+        unjudgeable = set(self.unjudgeable_configs)
+        return sum(c.stats.name not in unjudgeable for c in self.configs) < 2
 
     @property
     def flagged_models(self) -> list[str]:
@@ -187,8 +202,9 @@ class AuditReport:
     def has_problems(self) -> bool:
         """True if the repo should block an automated judge run.
 
-        A real misalignment, a row-count mismatch, or any config over the
-        sentinel threshold is a problem. ``partial``/``unverified`` alignment
+        A real misalignment, a row-count mismatch, any config over the sentinel
+        threshold, any config with no judgeable rows, or fewer than two judgeable
+        configs is a problem. ``partial``/``unverified`` alignment
         (some/all configs share no keys) is a caveat, not a failure, so it does
         not trip the exit code.
         """
@@ -196,6 +212,8 @@ class AuditReport:
             self.alignment.status == "misaligned"
             or self.row_count_mismatch
             or bool(self.flagged_models)
+            or bool(self.unjudgeable_configs)
+            or self.too_few_models
         )
 
 
@@ -225,6 +243,7 @@ def audit_repo(
     if config_names:
         loaded = _load_configs(repo_id, config_names, split, pr_revisions)
         usable = [lc for lc in loaded if lc.text_col is not None]
+        configs_without_text = [lc.config for lc in loaded if lc.text_col is None]
         alignment = check_config_alignment(usable)
         configs = []
         for lc in usable:
@@ -240,6 +259,7 @@ def audit_repo(
             )
             configs.append(ConfigAudit(stats))
     else:
+        configs_without_text = []
         ds, ocr_columns = load_flat_dataset(repo_id, split=split)
         alignment = AlignmentResult(status="n/a")
         configs = [
@@ -255,4 +275,5 @@ def audit_repo(
         alignment=alignment,
         max_ocr_text_len=max_ocr_text_len,
         judge_text_mode=judge_text_mode,
+        configs_without_text=configs_without_text,
     )
