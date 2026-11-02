@@ -153,7 +153,7 @@ class TestParseJudgeSpec:
             base_url="https://abc--8000.hf.jobs/v1", api_key="hf_test_token",
         )
         assert backend.model == ("judge" if suffix.endswith(":judge") else "default")
-        assert backend.extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+        assert "guided_json" in backend.extra_body
 
     @patch("ocr_bench.backends.OpenAI")
     @patch("huggingface_hub.get_token", return_value="hf_test_token")

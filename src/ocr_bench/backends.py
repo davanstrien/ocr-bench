@@ -211,8 +211,8 @@ def parse_judge_spec(
         # in a path, query, or lookalike hostname.
         parsed_url = urlsplit(url_part)
         hostname = (parsed_url.hostname or "").lower()
-        hf_host = hostname.endswith((".endpoints.huggingface.cloud", ".hf.jobs"))
-        if parsed_url.scheme == "https" and hf_host:
+        is_https = parsed_url.scheme == "https"
+        if is_https and hostname.endswith(".endpoints.huggingface.cloud"):
             from huggingface_hub import get_token
 
             base_url = url_part.rstrip("/")
@@ -226,6 +226,20 @@ def parse_judge_spec(
                 max_tokens=max_tokens,
                 temperature=0.0,
                 extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+                concurrency=concurrency,
+            )
+        if is_https and hostname.endswith(".hf.jobs"):
+            # Jobs serving usually runs vLLM, so keep the default guided_json schema.
+            from huggingface_hub import get_token
+
+            base_url = url_part.rstrip("/")
+            if not base_url.endswith("/v1"):
+                base_url += "/v1"
+            return OpenAICompatibleJudge(
+                base_url=base_url,
+                model=model_name,
+                api_key=get_token() or "not-needed",
+                max_tokens=max_tokens,
                 concurrency=concurrency,
             )
         return OpenAICompatibleJudge(
