@@ -123,7 +123,8 @@ class TestParseJudgeSpec:
     def test_http_url(self):
         backend = parse_judge_spec("http://localhost:8000/v1")
         assert isinstance(backend, OpenAICompatibleJudge)
-        assert "localhost" in backend.name
+        assert backend.name.startswith("openai-endpoint-")
+        assert "localhost" not in backend.name
 
     def test_https_url(self):
         backend = parse_judge_spec("https://api.example.com/v1")
@@ -135,8 +136,7 @@ class TestParseJudgeSpec:
         url = "https://wv8ln6va8cfzxkde.us-east-1.aws.endpoints.huggingface.cloud"
         backend = parse_judge_spec(url)
         assert isinstance(backend, OpenAICompatibleJudge)
-        assert "endpoints.huggingface" in backend.name
-        assert backend.name.endswith("/v1")
+        assert backend.name.startswith("openai-endpoint-")
         assert backend.temperature == 0.0
 
     def test_non_hf_url_still_openai(self):
