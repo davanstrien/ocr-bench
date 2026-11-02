@@ -797,7 +797,7 @@ def parse_judge_output(text: str) -> dict[str, str]:
     if not isinstance(result, dict):
         logger.warning("Judge output is not a JSON object: %s", text[:200])
         return {}
-    winner = result.get("winner", "tie")
+    winner = result.get("winner")
     if not isinstance(winner, str):
         logger.warning("Judge output has non-string winner: %s", text[:200])
         return {}
@@ -805,7 +805,8 @@ def parse_judge_output(text: str) -> dict[str, str]:
     if winner == "TIE":
         winner = "tie"
     if winner not in ("A", "B", "tie"):
-        winner = "tie"
+        logger.warning("Judge output has invalid winner: %s", text[:200])
+        return {}
     reason = result.get("reason", "")
     if not isinstance(reason, str):
         reason = json.dumps(reason)
