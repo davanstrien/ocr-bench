@@ -14,7 +14,7 @@ import structlog
 logger = structlog.get_logger()
 
 # Confidence thresholds
-MIN_ANNOTATIONS_FOR_CONFIDENCE = 15
+MIN_ANNOTATIONS_FOR_WARNING = 15
 HIGH_AGREEMENT_THRESHOLD = 0.75
 
 
@@ -29,8 +29,13 @@ class AgreementStats:
 
     @property
     def agreement_rate(self) -> float:
-        """Rate including soft disagreements as partial agreement."""
-        return (self.agree + self.soft_disagree) / self.total if self.total else 0.0
+        """Share of votes where the human and judge gave the same verdict."""
+        return self.agree / self.total if self.total else 0.0
+
+    @property
+    def soft_disagree_rate(self) -> float:
+        """Share of votes where one side picked a winner and the other a tie."""
+        return self.soft_disagree / self.total if self.total else 0.0
 
     @property
     def hard_disagree_rate(self) -> float:
@@ -339,24 +344,13 @@ def _agreement_banner(stats: AgreementStats) -> str:
         parts.append(f"**Hard: {stats.hard_disagree}**")
     parts.append(f"(of {stats.total})")
 
-    confidence = ""
-    if stats.total >= MIN_ANNOTATIONS_FOR_CONFIDENCE:
-        if stats.hard_disagree_rate == 0:
-            confidence = (
-                f" -- No hard disagreements after {stats.total} annotations. "
-                "Judge rankings reliable for this domain."
-            )
-        elif stats.hard_disagree_rate <= 0.1:
-            confidence = (
-                f" -- Very few hard disagreements ({stats.hard_disagree}). "
-                "Rankings likely trustworthy."
-            )
-        elif stats.hard_disagree_rate > 0.25:
-            confidence = (
-                f" -- Many hard disagreements ({stats.hard_disagree}/{stats.total}). "
-                "Judge may not be calibrated for this content."
-            )
+    warning = ""
+    if stats.total >= MIN_ANNOTATIONS_FOR_WARNING and stats.hard_disagree_rate > 0.25:
+        warning = (
+            f" -- Many hard disagreements ({stats.hard_disagree}/{stats.total}). "
+            "Judge may not be calibrated for this content."
+        )
 
-    return f"Judge: {' | '.join(parts)}{confidence}"
+    return f"Judge: {' | '.join(parts)}{warning}"
 
 

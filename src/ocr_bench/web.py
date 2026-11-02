@@ -301,6 +301,7 @@ def create_app(
         return {
             "vote_count": stats.total,
             "agreement_pct": round(stats.agreement_rate * 100) if stats.total else 0,
+            "soft_disagree_pct": round(stats.soft_disagree_rate * 100) if stats.total else 0,
             "hard_disagree_rate": round(stats.hard_disagree_rate * 100) if stats.total else 0,
         }
 
