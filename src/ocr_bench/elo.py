@@ -225,6 +225,8 @@ def _bootstrap_ci(
         results_by_page.setdefault(result.sample_idx, []).append(result)
     pages = [results_by_page[page_idx] for page_idx in sorted(results_by_page)]
     elo_samples: dict[str, list[float]] = {name: [] for name in model_names}
+    full_win_counts, _ = _build_win_matrix(results)
+    full_elos = _theta_to_elo(_bt_mle(full_win_counts, model_names))
 
     for _ in range(n_bootstrap):
         boot = [result for page in rng.choices(pages, k=len(pages)) for result in page]
@@ -235,8 +237,13 @@ def _bootstrap_ci(
         win_counts, _ = _build_win_matrix(boot)
         theta = _bt_mle(win_counts, replicate_models)
         elos = _theta_to_elo(theta)
+        # Each fit is centred on its own models. Without this shift, a replicate
+        # that omits a model sits on a different scale from the others.
+        scale_shift = sum(full_elos[name] - elos[name] for name in replicate_models) / len(
+            replicate_models
+        )
         for name in replicate_models:
-            elo_samples[name].append(elos[name])
+            elo_samples[name].append(elos[name] + scale_shift)
 
     alpha = (1.0 - ci) / 2.0
     lo_pct = alpha * 100

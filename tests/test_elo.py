@@ -279,6 +279,28 @@ class TestBootstrapCI:
         assert board.pages_by_model["rare"] == 1
         assert not rankings_resolved(board)
 
+    def test_rare_model_does_not_inflate_other_intervals(self):
+        def close_pair(page_offset: int = 0) -> list[ComparisonResult]:
+            winners = ["A"] * 7 + ["B"] * 5
+            return [
+                ComparisonResult(
+                    sample_idx=page + page_offset, model_a="alpha", model_b="beta", winner=winner
+                )
+                for page, winner in enumerate(winners)
+            ]
+
+        rare_pages = [
+            ComparisonResult(sample_idx=20 + page, model_a="rare", model_b="alpha", winner="A")
+            for page in range(2)
+        ]
+        with_rare = _bootstrap_ci(
+            close_pair() + rare_pages, ["alpha", "beta", "rare"], n_bootstrap=200
+        )
+        board = compute_elo(close_pair() + rare_pages, ["alpha", "beta", "rare"], n_bootstrap=0)
+        low, high = with_rare["alpha"]
+        assert low <= board.elo["alpha"] <= high
+        assert high < board.elo["alpha"] + 400
+
     def test_model_absent_from_replicate_gets_no_arbitrary_rating(self):
         warm_up = [
             ComparisonResult(sample_idx=0, model_a="rare", model_b="alpha", winner="A"),
