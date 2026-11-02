@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,6 +14,8 @@ from ocr_bench.publish import (
     _align_metadata_rows,
     build_leaderboard_rows,
     build_metadata_row,
+    evaluation_provenance_hash,
+    hash_judge_specs,
     load_existing_comparisons,
     load_existing_metadata,
     publish_checkpoint,
@@ -134,6 +137,114 @@ class TestBuildMetadataRow:
             valid_comparisons=28,
         )
         assert build_metadata_row(meta)["source_split"] == "validation"
+
+    def test_source_fingerprints_and_selection_recorded(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            source_split="validation",
+            source_fingerprint="pages123",
+            source_column_fingerprints={"a": "aaa", "b": "bbb"},
+            source_configs=["a", "b"],
+            source_columns={"a": "org/A", "b": "org/B"},
+            source_output_columns={"a": "ocr_v2", "b": "markdown"},
+            judge_models=["judge-a"],
+            judge_spec_hashes=hash_judge_specs(
+                ["https://judge.example/v1/:judge-a"]
+            ),
+            seed=42,
+            max_samples=10,
+            total_comparisons=30,
+            valid_comparisons=28,
+            min_chars=8,
+        )
+        row = build_metadata_row(meta)
+        assert row["source_fingerprint"] == "pages123"
+        assert json.loads(row["source_column_fingerprints"]) == {"a": "aaa", "b": "bbb"}
+        assert json.loads(row["source_configs"]) == ["a", "b"]
+        assert json.loads(row["source_columns"]) == {"a": "org/A", "b": "org/B"}
+        assert json.loads(row["source_output_columns"]) == {"a": "ocr_v2", "b": "markdown"}
+        assert json.loads(row["judge_spec_hashes"]) == hash_judge_specs(
+            ["https://judge.example/v1/:judge-a"]
+        )
+        assert row["min_chars"] == 8
+
+    def test_judge_spec_metadata_does_not_publish_endpoint_secrets(self):
+        secret_spec = "https://user:password@private.example/v1/?api_key=secret"
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=["private-judge"],
+            judge_spec_hashes=hash_judge_specs([secret_spec]),
+            seed=42,
+            max_samples=10,
+            total_comparisons=30,
+            valid_comparisons=28,
+        )
+
+        serialized = json.dumps(build_metadata_row(meta))
+        assert secret_spec not in serialized
+        assert "password" not in serialized
+        assert "api_key" not in serialized
+        assert json.loads(build_metadata_row(meta)["judge_spec_hashes"]) == hash_judge_specs(
+            [secret_spec]
+        )
+
+
+class TestEvaluationProvenanceHash:
+    def _kwargs(self):
+        return {
+            "source_dataset": "repo/data",
+            "source_split": "train",
+            "source_fingerprint": "pages",
+            "source_column_fingerprints": {"a": "aaa", "b": "bbb"},
+            "source_columns": {"a": "A", "b": "B"},
+            "source_output_columns": {"a": "ocr_v2", "b": "markdown"},
+            "judge_specs": ["https://judge.example/v1/:judge"],
+            "seed": 42,
+            "max_samples": 10,
+            "prompt_hash": "prompt",
+            "judge_text_mode": "normalized",
+            "max_ocr_text_len": 2500,
+            "judge_image_dim": 1024,
+            "max_tokens": 4096,
+            "min_chars": 20,
+        }
+
+    def test_is_stable_across_mapping_order(self):
+        kwargs = self._kwargs()
+        first = evaluation_provenance_hash(**kwargs)
+        kwargs["source_columns"] = {"b": "B", "a": "A"}
+        assert evaluation_provenance_hash(**kwargs) == first
+
+    @pytest.mark.parametrize(
+        ("field", "changed"),
+        [
+            ("source_split", "validation"),
+            ("source_fingerprint", "different-pages"),
+            ("source_column_fingerprints", {"a": "changed", "b": "bbb"}),
+            ("source_columns", {"a": "different-model", "b": "B"}),
+            ("source_output_columns", {"a": "ocr_v3", "b": "markdown"}),
+            ("judge_specs", ["https://other.example/v1/:judge"]),
+            ("seed", 7),
+            ("prompt_hash", "other-prompt"),
+            ("min_chars", 0),
+            ("max_samples", 5),
+            ("judge_text_mode", "raw"),
+            ("max_ocr_text_len", 1000),
+            ("judge_image_dim", 512),
+            ("max_tokens", 2048),
+        ],
+    )
+    def test_changes_when_guarded_input_changes(self, field, changed):
+        kwargs = self._kwargs()
+        original = evaluation_provenance_hash(**kwargs)
+        kwargs[field] = changed
+        assert evaluation_provenance_hash(**kwargs) != original
+
+    def test_openai_compatible_endpoint_is_part_of_identity(self):
+        kwargs = self._kwargs()
+        first = evaluation_provenance_hash(**kwargs)
+        kwargs["judge_specs"] = ["https://another.example/v1/:judge"]
+        assert evaluation_provenance_hash(**kwargs) != first
 
     def test_preserved_timestamp(self):
         meta = EvalMetadata(
@@ -432,7 +543,13 @@ class TestPublishCheckpoint:
     @patch("ocr_bench.publish.Dataset")
     def test_pushes_only_comparisons_config(self, mock_ds_cls):
         results = [
-            ComparisonResult(sample_idx=0, model_a="a", model_b="b", winner="A"),
+            ComparisonResult(
+                sample_idx=0,
+                model_a="a",
+                model_b="b",
+                winner="A",
+                provenance_hash="safe123",
+            ),
             ComparisonResult(sample_idx=1, model_a="a", model_b="b", winner="B"),
         ]
         publish_checkpoint("user/results", results, ["a", "b"])
@@ -441,6 +558,8 @@ class TestPublishCheckpoint:
         # Exactly one push — no leaderboard/metadata/README churn.
         mock_ds.push_to_hub.assert_called_once()
         assert mock_ds.push_to_hub.call_args.kwargs["config_name"] == "comparisons"
+        rows = mock_ds_cls.from_list.call_args.args[0]
+        assert rows[0]["provenance_hash"] == "safe123"
 
     @patch("ocr_bench.publish.Dataset")
     def test_no_push_when_no_results(self, mock_ds_cls):
@@ -680,6 +799,23 @@ class TestLoadExistingComparisons:
         results = load_existing_comparisons("user/results")
         assert results[0].truncated_a is True
         assert results[0].truncated_b is False
+
+    @patch("ocr_bench.publish.load_dataset")
+    def test_reads_comparison_provenance_hash(self, mock_load):
+        mock_ds = MagicMock()
+        mock_ds.__iter__ = lambda self: iter(
+            [
+                {
+                    "sample_idx": 0,
+                    "model_a": "ModelA",
+                    "model_b": "ModelB",
+                    "winner": "A",
+                    "provenance_hash": "safe123",
+                }
+            ]
+        )
+        mock_load.return_value = mock_ds
+        assert load_existing_comparisons("user/results")[0].provenance_hash == "safe123"
 
     @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.load_dataset")

@@ -310,10 +310,6 @@ tbody tr:hover {
   margin-top: 2rem;
 }
 
-.stats-panel .calibrated {
-  color: #457b4d;
-}
-
 .stats-panel .warning {
   color: #b04040;
 }

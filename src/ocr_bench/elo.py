@@ -16,6 +16,11 @@ INITIAL_ELO: float = 1500.0
 Winner = Literal["A", "B", "tie"]
 
 
+# A page-level bootstrap has few distinct resamples on a handful of pages, and
+# identical pages give zero-width intervals. Do not call a ranking resolved below this.
+MIN_PAGES_TO_RESOLVE = 10
+
+
 @dataclass
 class ComparisonResult:
     """Result of a single pairwise comparison, ready for ELO computation."""
@@ -33,6 +38,9 @@ class ComparisonResult:
     col_b: str = ""
     truncated_a: bool = False
     truncated_b: bool = False
+    # Hash of the source/judge/sampling provenance for safe incremental resume.
+    # Historical rows lack it and must not be silently reused.
+    provenance_hash: str = ""
 
 
 @dataclass
@@ -45,6 +53,18 @@ class Leaderboard:
     ties: dict[str, int] = field(default_factory=dict)
     comparison_log: list[dict[str, object]] = field(default_factory=list)
     elo_ci: dict[str, tuple[float, float]] = field(default_factory=dict)
+    pages_by_model: dict[str, int] = field(default_factory=dict)
+
+    def has_enough_pages_to_resolve(self, model: str) -> bool:
+        """False when a model's interval rests on too few pages to stop on.
+
+        Counts are per model, because targeted judging can give one model far
+        fewer pages than the rest of the board. Boards with no recorded page
+        counts are not gated.
+        """
+        if not self.pages_by_model:
+            return True
+        return self.pages_by_model.get(model, 0) >= MIN_PAGES_TO_RESOLVE
 
     @property
     def ranked(self) -> list[tuple[str, float]]:
@@ -195,23 +215,38 @@ def _bootstrap_ci(
 ) -> dict[str, tuple[float, float]]:
     """Compute bootstrap confidence intervals for ELO ratings.
 
-    Resamples comparisons with replacement, fits BT-MLE each time,
-    returns percentile-based CIs.
+    Resamples whole pages with replacement, fits BT-MLE each time, and
+    returns percentile-based CIs. Comparisons from one page share that page's
+    image and difficulty, so a page is the independent unit.
     """
     if not results or not model_names:
         return {}
 
     rng = random.Random(seed)
-    n = len(results)
+    results_by_page: dict[int, list[ComparisonResult]] = {}
+    for result in results:
+        results_by_page.setdefault(result.sample_idx, []).append(result)
+    pages = [results_by_page[page_idx] for page_idx in sorted(results_by_page)]
     elo_samples: dict[str, list[float]] = {name: [] for name in model_names}
+    full_win_counts, _ = _build_win_matrix(results)
+    full_elos = _theta_to_elo(_bt_mle(full_win_counts, model_names))
 
     for _ in range(n_bootstrap):
-        boot = rng.choices(results, k=n)
+        boot = [result for page in rng.choices(pages, k=len(pages)) for result in page]
+        # A model absent from every resampled page has no evidence in this
+        # replicate, so it gets no rating rather than an arbitrary one.
+        models_seen = {name for result in boot for name in (result.model_a, result.model_b)}
+        replicate_models = [name for name in model_names if name in models_seen]
         win_counts, _ = _build_win_matrix(boot)
-        theta = _bt_mle(win_counts, model_names)
+        theta = _bt_mle(win_counts, replicate_models)
         elos = _theta_to_elo(theta)
-        for name in model_names:
-            elo_samples[name].append(elos.get(name, 1500.0))
+        # Each fit is centred on its own models. Without this shift, a replicate
+        # that omits a model sits on a different scale from the others.
+        scale_shift = sum(full_elos[name] - elos[name] for name in replicate_models) / len(
+            replicate_models
+        )
+        for name in replicate_models:
+            elo_samples[name].append(elos[name] + scale_shift)
 
     alpha = (1.0 - ci) / 2.0
     lo_pct = alpha * 100
@@ -220,6 +255,8 @@ def _bootstrap_ci(
     cis: dict[str, tuple[float, float]] = {}
     for name in model_names:
         samples = sorted(elo_samples[name])
+        if not samples:
+            continue
         lo_idx = int(len(samples) * lo_pct / 100)
         hi_idx = min(int(len(samples) * hi_pct / 100), len(samples) - 1)
         cis[name] = (samples[lo_idx], samples[hi_idx])
@@ -246,6 +283,11 @@ def rankings_resolved(board: Leaderboard) -> bool:
         model_hi, _ = ranked[i]
         model_lo, _ = ranked[i + 1]
         if model_hi not in board.elo_ci or model_lo not in board.elo_ci:
+            return False
+        if not (
+            board.has_enough_pages_to_resolve(model_hi)
+            and board.has_enough_pages_to_resolve(model_lo)
+        ):
             return False
         lo_of_higher, _ = board.elo_ci[model_hi]
         _, hi_of_lower = board.elo_ci[model_lo]
@@ -314,6 +356,7 @@ def compute_elo(
                 # flip: truncated_a is always about model_a's output.
                 "truncated_a": r.truncated_a,
                 "truncated_b": r.truncated_b,
+                "provenance_hash": r.provenance_hash,
             }
         )
 
@@ -325,5 +368,10 @@ def compute_elo(
     # Bootstrap CIs
     if n_bootstrap > 0 and results:
         board.elo_ci = _bootstrap_ci(results, model_names, n_bootstrap=n_bootstrap)
+        pages_seen: dict[str, set[int]] = {name: set() for name in model_names}
+        for result in results:
+            pages_seen.setdefault(result.model_a, set()).add(result.sample_idx)
+            pages_seen.setdefault(result.model_b, set()).add(result.sample_idx)
+        board.pages_by_model = {name: len(pages) for name, pages in pages_seen.items()}
 
     return board
