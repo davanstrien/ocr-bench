@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import structlog
-from datasets import Dataset, get_dataset_config_names, load_dataset
+from datasets import Dataset, Image, get_dataset_config_names, load_dataset
 from huggingface_hub import HfApi
 
 logger = structlog.get_logger()
@@ -49,7 +49,7 @@ def evaluation_input_fingerprints(
     """Fingerprint evaluated pages and each OCR column over the sampled rows.
 
     The page fingerprint includes stable passthrough identity columns when
-    present and image pixels when available. OCR columns are fingerprinted
+    present and stored image bytes when available. OCR columns are fingerprinted
     independently so adding a new model does not invalidate safe comparisons
     between unchanged existing models.
     """
@@ -68,13 +68,21 @@ def evaluation_input_fingerprints(
         )
 
     selected = dataset.select(indices)
+    # Hash stored image bytes, because decoded pixels can change with decoder versions.
+    identity_rows = selected.select_columns(identity_columns)
+    for column in identity_columns:
+        if isinstance(identity_rows.features.get(column), Image):
+            identity_rows = identity_rows.cast_column(column, Image(decode=False))
     page_digest = hashlib.sha256()
     for local_idx, source_idx in enumerate(indices):
-        row = selected[local_idx]
+        row = identity_rows[local_idx]
         _hash_value(page_digest, source_idx)
         for column in identity_columns:
             _hash_value(page_digest, column)
-            _hash_value(page_digest, row[column])
+            value = row[column]
+            if isinstance(value, dict) and value.get("bytes"):
+                value = value["bytes"]
+            _hash_value(page_digest, value)
 
     column_fingerprints: dict[str, str] = {}
     for column in ocr_columns:

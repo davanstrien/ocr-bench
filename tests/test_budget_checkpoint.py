@@ -39,6 +39,11 @@ class FakeDataset:
     def column_names(self) -> list[str]:
         return [*self._columns, "image"]
 
+    features: dict = {}
+
+    def select_columns(self, _columns: list[str]):
+        return self
+
     def select(self, indices: list[int]):
         return FakeDataset(
             len(indices),

@@ -59,6 +59,13 @@ class TestEvaluationInputFingerprints:
         )
         assert image_page_fp != page_fp
 
+    def test_page_fingerprint_does_not_decode_images(self):
+        dataset = self._dataset()
+        expected, _ = evaluation_input_fingerprints(dataset, {"ocr_a": "A"}, [0, 1])
+        with patch("PIL.Image.open", side_effect=AssertionError("image was decoded")):
+            actual, _ = evaluation_input_fingerprints(dataset, {"ocr_a": "A"}, [0, 1])
+        assert actual == expected
+
     def test_adding_model_does_not_change_existing_fingerprints(self):
         original = self._dataset()
         page_fp, column_fps = evaluation_input_fingerprints(

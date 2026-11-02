@@ -114,7 +114,8 @@ class TestParseJudgeSpec:
     def test_http_url(self):
         backend = parse_judge_spec("http://localhost:8000/v1")
         assert isinstance(backend, OpenAICompatibleJudge)
-        assert "localhost" in backend.name
+        assert backend.name.startswith("openai-endpoint-")
+        assert "localhost" not in backend.name
 
     def test_https_url(self):
         backend = parse_judge_spec("https://api.example.com/v1")
