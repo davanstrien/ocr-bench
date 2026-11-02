@@ -6,6 +6,7 @@ from ocr_bench.elo import (
     INITIAL_ELO,
     ComparisonResult,
     Leaderboard,
+    _bootstrap_ci,
     compute_elo,
     rankings_resolved,
 )
@@ -225,6 +226,92 @@ class TestBootstrapCI:
             lo, hi = board.elo_ci[model]
             assert lo <= board.elo[model] + 5  # small tolerance
             assert hi >= board.elo[model] - 5
+
+    def test_ci_resamples_whole_pages(self):
+        """Comparisons from one page stay together, so page conflict widens the CI."""
+        page_where_alpha_wins = [
+            ComparisonResult(sample_idx=0, model_a="alpha", model_b="beta", winner="A")
+            for _ in range(20)
+        ]
+        page_where_beta_wins = [
+            ComparisonResult(sample_idx=1, model_a="alpha", model_b="beta", winner="B")
+            for _ in range(20)
+        ]
+        board = compute_elo(
+            page_where_alpha_wins + page_where_beta_wins,
+            ["alpha", "beta"],
+            n_bootstrap=200,
+        )
+        low, high = board.elo_ci["alpha"]
+        assert low < 1400
+        assert high > 1600
+
+    def test_too_few_pages_never_resolve(self):
+        identical_pages = [
+            ComparisonResult(sample_idx=page, model_a="alpha", model_b="beta", winner="A")
+            for page in range(5)
+        ]
+        board = compute_elo(identical_pages, ["alpha", "beta"], n_bootstrap=50)
+        assert board.pages_by_model == {"alpha": 5, "beta": 5}
+        assert not rankings_resolved(board)
+
+    def test_enough_consistent_pages_can_resolve(self):
+        pages = [
+            ComparisonResult(sample_idx=page, model_a="alpha", model_b="beta", winner="A")
+            for page in range(9)
+        ] + [ComparisonResult(sample_idx=9, model_a="alpha", model_b="beta", winner="A")]
+        board = compute_elo(pages, ["alpha", "beta"], n_bootstrap=50)
+        board.elo_ci = {"alpha": (1600.0, 1700.0), "beta": (1300.0, 1400.0)}
+        assert rankings_resolved(board)
+
+    def test_model_on_few_pages_never_resolves(self):
+        one_page_for_rare = [
+            ComparisonResult(sample_idx=0, model_a="rare", model_b="alpha", winner="A"),
+            ComparisonResult(sample_idx=0, model_a="rare", model_b="beta", winner="A"),
+        ]
+        many_pages = [
+            ComparisonResult(sample_idx=page, model_a="alpha", model_b="beta", winner="A")
+            for page in range(1, 31)
+        ]
+        board = compute_elo(
+            one_page_for_rare + many_pages, ["alpha", "beta", "rare"], n_bootstrap=50
+        )
+        assert board.pages_by_model["rare"] == 1
+        assert not rankings_resolved(board)
+
+    def test_rare_model_does_not_inflate_other_intervals(self):
+        def close_pair(page_offset: int = 0) -> list[ComparisonResult]:
+            winners = ["A"] * 7 + ["B"] * 5
+            return [
+                ComparisonResult(
+                    sample_idx=page + page_offset, model_a="alpha", model_b="beta", winner=winner
+                )
+                for page, winner in enumerate(winners)
+            ]
+
+        rare_pages = [
+            ComparisonResult(sample_idx=20 + page, model_a="rare", model_b="alpha", winner="A")
+            for page in range(2)
+        ]
+        with_rare = _bootstrap_ci(
+            close_pair() + rare_pages, ["alpha", "beta", "rare"], n_bootstrap=200
+        )
+        board = compute_elo(close_pair() + rare_pages, ["alpha", "beta", "rare"], n_bootstrap=0)
+        low, high = with_rare["alpha"]
+        assert low <= board.elo["alpha"] <= high
+        assert high < board.elo["alpha"] + 400
+
+    def test_model_absent_from_replicate_gets_no_arbitrary_rating(self):
+        warm_up = [
+            ComparisonResult(sample_idx=0, model_a="rare", model_b="alpha", winner="A"),
+        ]
+        targeted = [
+            ComparisonResult(sample_idx=page, model_a="alpha", model_b="beta", winner="A")
+            for page in range(1, 12)
+        ]
+        cis = _bootstrap_ci(warm_up + targeted, ["alpha", "beta", "rare"], n_bootstrap=200)
+        assert set(cis) == {"alpha", "beta", "rare"}
+        assert cis["rare"][0] > 1500
 
     def test_ci_disabled_when_zero(self):
         """n_bootstrap=0 should produce empty elo_ci."""

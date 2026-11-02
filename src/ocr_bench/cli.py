@@ -32,6 +32,7 @@ from ocr_bench.dataset import (
     DatasetError,
     discover_configs,
     discover_pr_configs,
+    evaluation_input_fingerprints,
     load_config_dataset,
     load_flat_dataset,
 )
@@ -58,6 +59,8 @@ from ocr_bench.judge import (
 )
 from ocr_bench.publish import (
     EvalMetadata,
+    evaluation_provenance_hash,
+    hash_judge_specs,
     load_existing_comparisons,
     load_existing_metadata,
     publish_checkpoint,
@@ -590,7 +593,10 @@ def _trim_to_budget(
 
 
 def _convert_results(
-    comparisons: list[Comparison], aggregated: list[dict]
+    comparisons: list[Comparison],
+    aggregated: list[dict],
+    *,
+    provenance_hashes: dict[tuple[str, str], str] | None = None,
 ) -> list[ComparisonResult]:
     """Convert judged comparisons + aggregated outputs into ComparisonResult list."""
     results: list[ComparisonResult] = []
@@ -614,6 +620,9 @@ def _convert_results(
                 col_b=comp.col_b,
                 truncated_a=comp.truncated_a,
                 truncated_b=comp.truncated_b,
+                provenance_hash=(provenance_hashes or {}).get(
+                    tuple(sorted((comp.col_a, comp.col_b))), ""
+                ),
             )
         )
     return results
@@ -872,10 +881,18 @@ def cmd_judge(args: argparse.Namespace) -> None:
         console.print(f"Results will be published to [bold]{results_repo}[/bold]")
 
     # --- Load dataset (cascading auto-detection) ---
+    source_configs: list[str] = []
+    source_output_columns: dict[str, str] = {}
     if args.configs:
         # Explicit configs — use them directly
         config_names = args.configs
-        ds, ocr_columns = load_config_dataset(args.dataset, config_names, split=args.split)
+        source_configs = list(config_names)
+        ds, ocr_columns = load_config_dataset(
+            args.dataset,
+            config_names,
+            split=args.split,
+            source_output_columns=source_output_columns,
+        )
     elif args.columns:
         # Explicit columns — flat loading
         ds, ocr_columns = load_flat_dataset(args.dataset, split=args.split, columns=args.columns)
@@ -885,12 +902,14 @@ def cmd_judge(args: argparse.Namespace) -> None:
         if not config_names:
             raise DatasetError("No configs found in open PRs")
         from_prs = True
+        source_configs = list(config_names)
         console.print(f"Discovered {len(config_names)} configs from PRs: {config_names}")
         ds, ocr_columns = load_config_dataset(
             args.dataset,
             config_names,
             split=args.split,
             pr_revisions=pr_revisions if not merge else None,
+            source_output_columns=source_output_columns,
         )
     else:
         # Auto-detect: PRs + main branch configs combined, fall back to flat
@@ -904,6 +923,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 config_names.append(mc)
 
         if config_names:
+            source_configs = list(config_names)
             if pr_configs:
                 from_prs = True
                 console.print(f"Auto-detected {len(pr_configs)} configs from PRs: {pr_configs}")
@@ -916,10 +936,14 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 config_names,
                 split=args.split,
                 pr_revisions=pr_revisions if pr_configs else None,
+                source_output_columns=source_output_columns,
             )
         else:
             # No configs anywhere — fall back to flat loading
             ds, ocr_columns = load_flat_dataset(args.dataset, split=args.split)
+
+    if not source_configs:
+        source_output_columns = {column: column for column in ocr_columns}
 
     console.print(f"Loaded {len(ds)} samples with {len(ocr_columns)} models:")
     for col, model in ocr_columns.items():
@@ -960,6 +984,49 @@ def cmd_judge(args: argparse.Namespace) -> None:
     # Stable ordering matters when ELOs tie: adjacency drives targeted sampling.
     model_names = sorted(set(ocr_columns.values()) - set(failed_models))
     current_models = set(model_names)
+
+    model_specs = args.models or [DEFAULT_JUDGE]
+    judges = [
+        parse_judge_spec(spec, max_tokens=args.max_tokens, concurrency=args.concurrency)
+        for spec in model_specs
+    ]
+    is_jury = len(judges) > 1
+    judge_names = [judge.name for judge in judges]
+    judge_spec_hashes = hash_judge_specs(model_specs)
+    requested_max_samples = args.max_samples or len(ds)
+    source_fingerprint = ""
+    source_column_fingerprints: dict[str, str] = {}
+    pair_provenance_hashes: dict[tuple[str, str], str] = {}
+    if results_repo:
+        evaluated_indices = sample_indices(len(ds), args.max_samples, args.seed)
+        source_fingerprint, source_column_fingerprints = evaluation_input_fingerprints(
+            ds, ocr_columns, evaluated_indices
+        )
+        from itertools import combinations as _provenance_pairs
+
+        for col_a, col_b in _provenance_pairs(ocr_columns, 2):
+            pair = (min(col_a, col_b), max(col_a, col_b))
+            pair_provenance_hashes[pair] = evaluation_provenance_hash(
+                source_dataset=args.dataset,
+                source_split=args.split,
+                source_fingerprint=source_fingerprint,
+                source_column_fingerprints={
+                    column: source_column_fingerprints[column] for column in pair
+                },
+                source_columns={column: ocr_columns[column] for column in pair},
+                source_output_columns={
+                    column: source_output_columns[column] for column in pair
+                },
+                judge_specs=model_specs,
+                seed=args.seed,
+                max_samples=requested_max_samples,
+                prompt_hash=criteria_prompt_hash,
+                judge_text_mode=args.judge_text_mode,
+                max_ocr_text_len=args.max_ocr_text_len,
+                judge_image_dim=args.judge_image_dim,
+                max_tokens=args.max_tokens,
+                min_chars=args.min_chars,
+            )
 
     # --- Incremental: load existing comparisons ---
     existing_results: list[ComparisonResult] = []
@@ -1030,57 +1097,92 @@ def cmd_judge(args: argparse.Namespace) -> None:
             )
 
         if existing_results or preserved_out_of_grid_results:
-            # Provenance guard: NEVER mix criteria rubrics on one board. The
-            # existing comparisons were judged under the profile recorded in the
-            # last metadata row (pre-#44 rows = the default profile, whose prompt
-            # is byte-identical to the old hardcoded one). Judging the rest — or
-            # even just refitting — under a different --criteria would merge
-            # incompatible verdicts into one ELO board AND republish the metadata
-            # mislabeled with the current run's criteria. Refuse and exit; the
-            # only safe way to change rubric is --full-rejudge (discards existing).
-            # Compare on the prompt HASH (the true rubric identity): this catches
-            # a built-in prompt edited across code versions, matches the same
-            # custom file re-run, and blocks two different custom files even if
-            # they share a basename.
-            prev_criteria, prev_hash = _existing_criteria_provenance(existing_meta_rows)
-            if prev_hash != criteria_prompt_hash:
-                if prev_criteria.startswith("custom:"):
-                    match_hint = (
-                        f"re-supply the same custom prompt file (recorded as "
-                        f"'{prev_criteria}', prompt {prev_hash})"
+            # Provenance-stamped comparison rows are authoritative. This matters
+            # after a changed --full-rejudge checkpoints but dies before it can
+            # append matching metadata: the latest metadata row still describes
+            # the preceding completed run. Apply the narrower metadata diagnostics
+            # only to legacy unstamped comparisons.
+            existing_hashes = {result.provenance_hash for result in existing_results}
+            if "" in existing_hashes and existing_meta_rows:
+                prev_criteria, prev_hash = _existing_criteria_provenance(existing_meta_rows)
+                if prev_hash != criteria_prompt_hash:
+                    if prev_criteria.startswith("custom:"):
+                        match_hint = (
+                            f"re-supply the same custom prompt file (recorded as "
+                            f"'{prev_criteria}', prompt {prev_hash})"
+                        )
+                    else:
+                        match_hint = f"re-run with [bold]--criteria {prev_criteria}[/bold]"
+                    console.print(
+                        f"[red]Error:[/red] criteria mismatch — "
+                        f"[bold]{results_repo}[/bold] was judged under criteria "
+                        f"'[bold]{prev_criteria}[/bold]' (prompt {prev_hash}), but "
+                        f"this run requested '[bold]{criteria}[/bold]' "
+                        f"(prompt {criteria_prompt_hash}). Mixing rubrics on one "
+                        f"leaderboard would produce meaningless rankings and "
+                        f"mislabeled metadata.\nTo match the existing results, "
+                        f"{match_hint}; or use [bold]--full-rejudge[/bold] to "
+                        f"discard them and re-judge everything under '{criteria}'."
                     )
-                else:
-                    match_hint = f"re-run with [bold]--criteria {prev_criteria}[/bold]"
+                    sys.exit(1)
+
+                previous_preprocessing = _existing_preprocessing_provenance(
+                    existing_meta_rows
+                )
+                requested_preprocessing = (
+                    args.judge_text_mode,
+                    args.max_ocr_text_len,
+                    args.judge_image_dim,
+                )
+                if previous_preprocessing != requested_preprocessing:
+                    prev_mode, prev_text_cap, prev_image_cap = previous_preprocessing
+                    console.print(
+                        f"[red]Error:[/red] judge preprocessing mismatch — "
+                        f"[bold]{results_repo}[/bold] was judged with "
+                        f"text_mode={prev_mode}, max_ocr_text_len={prev_text_cap}, "
+                        f"judge_image_dim={prev_image_cap}, but this run requested "
+                        f"text_mode={args.judge_text_mode}, "
+                        f"max_ocr_text_len={args.max_ocr_text_len}, "
+                        f"judge_image_dim={args.judge_image_dim}. Mixing these "
+                        "verdicts would make the leaderboard incomparable. Re-run "
+                        "with matching settings, or use "
+                        "[bold]--full-rejudge[/bold]."
+                    )
+                    sys.exit(1)
+
+            # Every reused row must have been produced under the exact same
+            # source/config/split/fingerprint, judge or jury, sample selection,
+            # prompt, and preprocessing. Checkpoint rows carry this hash too,
+            # so an interrupted first run can resume before final metadata exists.
+            if "" in existing_hashes:
                 console.print(
-                    f"[red]Error:[/red] criteria mismatch — [bold]{results_repo}[/bold] "
-                    f"was judged under criteria '[bold]{prev_criteria}[/bold]' "
-                    f"(prompt {prev_hash}), but this run requested "
-                    f"'[bold]{criteria}[/bold]' (prompt {criteria_prompt_hash}). "
-                    f"Mixing rubrics on one leaderboard would produce meaningless "
-                    f"rankings and mislabeled metadata.\n"
-                    f"To match the existing results, {match_hint}; or use "
-                    f"[bold]--full-rejudge[/bold] to discard them and re-judge "
-                    f"everything under '{criteria}'."
+                    f"[red]Error:[/red] existing comparisons in "
+                    f"[bold]{results_repo}[/bold] lack resume provenance. They were "
+                    "written by an older ocr-bench version (or an incomplete unsafe "
+                    "checkpoint), so their sample indices cannot be verified against "
+                    "the current source. Use [bold]--full-rejudge[/bold] once to "
+                    "replace them with provenance-stamped results."
                 )
                 sys.exit(1)
-
-            previous_preprocessing = _existing_preprocessing_provenance(existing_meta_rows)
-            requested_preprocessing = (
-                args.judge_text_mode,
-                args.max_ocr_text_len,
-                args.judge_image_dim,
-            )
-            if previous_preprocessing != requested_preprocessing:
-                prev_mode, prev_text_cap, prev_image_cap = previous_preprocessing
+            mismatched = []
+            for result in existing_results:
+                pair = (
+                    min(result.col_a, result.col_b),
+                    max(result.col_a, result.col_b),
+                )
+                expected = pair_provenance_hashes.get(pair)
+                if expected is None or result.provenance_hash != expected:
+                    mismatched.append(result)
+            if mismatched:
+                recorded = ", ".join(
+                    sorted({result.provenance_hash[:12] for result in mismatched})
+                )
                 console.print(
-                    f"[red]Error:[/red] judge preprocessing mismatch — "
-                    f"[bold]{results_repo}[/bold] was judged with "
-                    f"text_mode={prev_mode}, max_ocr_text_len={prev_text_cap}, "
-                    f"judge_image_dim={prev_image_cap}, but this run requested "
-                    f"text_mode={args.judge_text_mode}, "
-                    f"max_ocr_text_len={args.max_ocr_text_len}, "
-                    f"judge_image_dim={args.judge_image_dim}. Mixing these verdicts "
-                    "would make the leaderboard incomparable. Re-run with matching "
+                    f"[red]Error:[/red] resume provenance mismatch for "
+                    f"[bold]{results_repo}[/bold] — existing comparison hash(es) "
+                    f"{recorded}. The "
+                    "source repo/config/split/fingerprint, judge or jury, sampling, "
+                    "prompt, or preprocessing changed. Re-run with the original "
                     "settings, or use [bold]--full-rejudge[/bold]."
                 )
                 sys.exit(1)
@@ -1118,14 +1220,6 @@ def cmd_judge(args: argparse.Namespace) -> None:
         }
     )
 
-    # --- Judge setup (shared by both paths) ---
-    model_specs = args.models or [DEFAULT_JUDGE]
-    judges = [
-        parse_judge_spec(spec, max_tokens=args.max_tokens, concurrency=args.concurrency)
-        for spec in model_specs
-    ]
-    is_jury = len(judges) > 1
-
     console.print(f"Judge criteria: [bold]{criteria}[/bold] (prompt {criteria_prompt_hash})")
     logger.info("judge_criteria", criteria=criteria, prompt_hash=criteria_prompt_hash)
 
@@ -1146,7 +1240,11 @@ def cmd_judge(args: argparse.Namespace) -> None:
         else:
             aggregated = []
         merged = _merge_auto_ties(batch_comps, aggregated)
-        return _convert_results(batch_comps, merged)
+        return _convert_results(
+            batch_comps,
+            merged,
+            provenance_hashes=pair_provenance_hashes,
+        )
 
     # Set when the run stops because it hit --max-comparisons (vs converging or
     # running out of samples). Recorded in the metadata row and drives the
@@ -1419,7 +1517,13 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 metadata = EvalMetadata(
                     source_dataset=args.dataset,
                     source_split=args.split,
-                    judge_models=[],
+                    source_fingerprint=source_fingerprint,
+                    source_column_fingerprints=source_column_fingerprints,
+                    source_configs=source_configs,
+                    source_columns=ocr_columns,
+                    source_output_columns=source_output_columns,
+                    judge_models=judge_names,
+                    judge_spec_hashes=judge_spec_hashes,
                     seed=args.seed,
                     max_samples=args.max_samples or len(ds),
                     total_comparisons=0,
@@ -1434,6 +1538,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     max_ocr_text_len=args.max_ocr_text_len,
                     judge_image_dim=args.judge_image_dim,
                     judge_text_mode=args.judge_text_mode,
+                    min_chars=args.min_chars,
                     adaptive_strategy=adaptive_strategy,
                     size_tie_ratio=args.size_tie_ratio,
                     size_tie_min_samples=args.size_tie_min_samples,
@@ -1547,7 +1652,13 @@ def cmd_judge(args: argparse.Namespace) -> None:
         metadata = EvalMetadata(
             source_dataset=args.dataset,
             source_split=args.split,
-            judge_models=[j.name for j in judges],
+            source_fingerprint=source_fingerprint,
+            source_column_fingerprints=source_column_fingerprints,
+            source_configs=source_configs,
+            source_columns=ocr_columns,
+            source_output_columns=source_output_columns,
+            judge_models=judge_names,
+            judge_spec_hashes=judge_spec_hashes,
             seed=args.seed,
             max_samples=args.max_samples or len(ds),
             total_comparisons=total_comparisons,
@@ -1563,6 +1674,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             max_ocr_text_len=args.max_ocr_text_len,
             judge_image_dim=args.judge_image_dim,
             judge_text_mode=args.judge_text_mode,
+            min_chars=args.min_chars,
             adaptive_strategy=adaptive_strategy,
             size_tie_ratio=args.size_tie_ratio,
             size_tie_min_samples=args.size_tie_min_samples,

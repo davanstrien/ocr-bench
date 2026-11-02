@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import abc
+import hashlib
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from itertools import zip_longest
 from typing import Any
+from urllib.parse import urlsplit
 
 import stamina
 import structlog
@@ -115,10 +117,12 @@ class InferenceProviderJudge(JudgeBackend):
 
     def __init__(
         self, model: str, provider: str | None = None, max_tokens: int = DEFAULT_MAX_TOKENS,
+        concurrency: int = 1,
     ):
         self.name = f"{provider + ':' if provider else ''}{model}"
         self.model = model
         self.max_tokens = max_tokens
+        self.concurrency = concurrency
         self.client = InferenceClient(model=model, provider=provider)  # ty: ignore[invalid-argument-type]
 
     @stamina.retry(on=_is_retryable, attempts=_RETRY_ATTEMPTS)
@@ -150,7 +154,9 @@ class OpenAICompatibleJudge(JudgeBackend):
         temperature: float = 0.0,
         concurrency: int = 1,
     ):
-        self.name = model if model != "default" else f"openai@{base_url}"
+        # The name is published in results metadata, and a URL can be private.
+        url_digest = hashlib.sha256(base_url.encode()).hexdigest()[:12]
+        self.name = model if model != "default" else f"openai-endpoint-{url_digest}"
         self.model = model
         self.max_tokens = max_tokens
         self.temperature = temperature
@@ -189,6 +195,8 @@ def parse_judge_spec(
     Formats:
       - ``"https://xxx.endpoints.huggingface.cloud"`` → :class:`OpenAICompatibleJudge`
         (HF Inference Endpoints, OpenAI-compatible with HF token auth)
+      - ``"https://job--8000.hf.jobs/v1/:model"`` → :class:`OpenAICompatibleJudge`
+        (HF Jobs serving, OpenAI-compatible with HF token auth)
       - ``"http://..."`` or ``"https://..."`` (other) → :class:`OpenAICompatibleJudge`
       - ``"provider:org/model"`` (colon before first ``/``) → :class:`InferenceProviderJudge`
       - anything else → :class:`InferenceProviderJudge` (no provider)
@@ -202,8 +210,12 @@ def parse_judge_spec(
             url_part, model_name = spec.split("/v1/:", 1)
             url_part += "/v1"
 
-        # HF Inference Endpoints — OpenAI-compatible, auth via HF token
-        if ".endpoints.huggingface." in url_part:
+        # Authenticate only actual HTTPS HF serving hosts, never substring matches
+        # in a path, query, or lookalike hostname.
+        parsed_url = urlsplit(url_part)
+        hostname = (parsed_url.hostname or "").lower()
+        is_https = parsed_url.scheme == "https"
+        if is_https and hostname.endswith(".endpoints.huggingface.cloud"):
             from huggingface_hub import get_token
 
             base_url = url_part.rstrip("/")
@@ -219,6 +231,20 @@ def parse_judge_spec(
                 extra_body={"chat_template_kwargs": {"enable_thinking": False}},
                 concurrency=concurrency,
             )
+        if is_https and hostname.endswith(".hf.jobs"):
+            # Jobs serving usually runs vLLM, so keep the default guided_json schema.
+            from huggingface_hub import get_token
+
+            base_url = url_part.rstrip("/")
+            if not base_url.endswith("/v1"):
+                base_url += "/v1"
+            return OpenAICompatibleJudge(
+                base_url=base_url,
+                model=model_name,
+                api_key=get_token() or "not-needed",
+                max_tokens=max_tokens,
+                concurrency=concurrency,
+            )
         return OpenAICompatibleJudge(
             base_url=url_part, model=model_name, max_tokens=max_tokens,
             concurrency=concurrency,
@@ -230,9 +256,11 @@ def parse_judge_spec(
         slash_idx = spec.find("/")
         if slash_idx == -1 or colon_idx < slash_idx:
             provider, model = spec.split(":", 1)
-            return InferenceProviderJudge(model=model, provider=provider, max_tokens=max_tokens)
+            return InferenceProviderJudge(
+                model=model, provider=provider, max_tokens=max_tokens, concurrency=concurrency,
+            )
 
-    return InferenceProviderJudge(model=spec, max_tokens=max_tokens)
+    return InferenceProviderJudge(model=spec, max_tokens=max_tokens, concurrency=concurrency)
 
 
 # ---------------------------------------------------------------------------
