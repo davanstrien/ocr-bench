@@ -33,6 +33,9 @@ class ComparisonResult:
     col_b: str = ""
     truncated_a: bool = False
     truncated_b: bool = False
+    # Hash of the source/judge/sampling provenance for safe incremental resume.
+    # Historical rows lack it and must not be silently reused.
+    provenance_hash: str = ""
 
 
 @dataclass
@@ -314,6 +317,7 @@ def compute_elo(
                 # flip: truncated_a is always about model_a's output.
                 "truncated_a": r.truncated_a,
                 "truncated_b": r.truncated_b,
+                "provenance_hash": r.provenance_hash,
             }
         )
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+import hashlib
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from itertools import zip_longest
@@ -150,7 +151,9 @@ class OpenAICompatibleJudge(JudgeBackend):
         temperature: float = 0.0,
         concurrency: int = 1,
     ):
-        self.name = model if model != "default" else f"openai@{base_url}"
+        # The name is published in results metadata, and a URL can be private.
+        url_digest = hashlib.sha256(base_url.encode()).hexdigest()[:12]
+        self.name = model if model != "default" else f"openai-endpoint-{url_digest}"
         self.model = model
         self.max_tokens = max_tokens
         self.temperature = temperature
