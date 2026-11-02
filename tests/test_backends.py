@@ -127,7 +127,7 @@ class TestParseJudgeSpec:
         url = "https://wv8ln6va8cfzxkde.us-east-1.aws.endpoints.huggingface.cloud"
         backend = parse_judge_spec(url)
         assert isinstance(backend, OpenAICompatibleJudge)
-        assert "endpoints.huggingface" in backend.name
+        assert backend.name.startswith("openai-endpoint-")
         assert backend.name.endswith("/v1")
         assert backend.temperature == 0.0
 
