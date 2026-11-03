@@ -184,7 +184,9 @@ class OpenAICompatibleJudge(JudgeBackend):
 # Spec parsing
 # ---------------------------------------------------------------------------
 
-DEFAULT_JUDGE = "novita:Qwen/Qwen3.5-35B-A3B"
+# Pinned to the provider the default was evaluated on: the same model can
+# behave differently across providers (e.g. some reject enable_thinking=False).
+DEFAULT_JUDGE = "novita:Qwen/Qwen3.8-27B"
 
 
 def parse_judge_spec(
