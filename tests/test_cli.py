@@ -200,10 +200,22 @@ class TestBuildParser:
         args = parser.parse_args(["judge", "user/dataset", "--criteria", "table-fidelity"])
         assert args.criteria == "table-fidelity"
 
+    def test_criteria_accepts_body_text(self):
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset", "--criteria", "body-text"])
+        assert _resolve_criteria(args)[0] == "body-text"
+
     def test_criteria_rejects_unknown(self):
         parser = build_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["judge", "user/dataset", "--criteria", "nonsense"])
+
+    def test_concurrency_default_and_minimum(self):
+        parser = build_parser()
+        assert parser.parse_args(["judge", "user/dataset"]).concurrency == 8
+        assert parser.parse_args(["judge", "user/dataset", "--concurrency", "1"]).concurrency == 1
+        with pytest.raises(SystemExit):
+            parser.parse_args(["judge", "user/dataset", "--concurrency", "0"])
 
     def test_criteria_file_default_none(self):
         parser = build_parser()
@@ -862,6 +874,15 @@ class TestCmdBench:
         assert judge_a.size_tie_ratio == 3.0
         assert judge_a.size_tie_min_samples == 5
 
+    def test_threads_concurrency_to_judge(self, monkeypatch):
+        calls = self._patch(monkeypatch)
+        cli.cmd_bench(build_parser().parse_args(["bench", "user/imgs", "user/out"]))
+        assert calls[1][1].concurrency == 8
+        calls = self._patch(monkeypatch)
+        argv = ["bench", "user/imgs", "user/out", "--concurrency", "1"]
+        cli.cmd_bench(build_parser().parse_args(argv))
+        assert calls[1][1].concurrency == 1
+
     def test_threads_criteria_to_judge(self, monkeypatch):
         """bench --criteria reaches the judge phase's namespace."""
         calls = self._patch(monkeypatch)
@@ -1044,14 +1065,23 @@ class TestCmdJudgeEmptyGuard:
 class TestJudgeSelectsPrConfigs:
     """`judge --from-prs --configs ...` loads only the listed configs, newest PR each."""
 
-    def _run(self, monkeypatch, argv, prs):
+    def _run(self, monkeypatch, argv, prs, main_newer=()):
+        """prs: {config: open PR number}; main_newer: configs whose main outputs
+        are newer than their PR."""
         from ocr_bench.dataset import DatasetError
 
         seen: dict = {}
 
-        def discover(dataset, merge=False, only=None, duplicates=None):
+        def discover(
+            dataset, merge=False, only=None, duplicates=None, main_configs=(), superseded=None
+        ):
             seen["only"] = only
+            seen["main_configs"] = list(main_configs)
             found = [c for c in prs if only is None or c in only]
+            stale = [c for c in found if c in main_newer and c in main_configs]
+            found = [c for c in found if c not in stale]
+            if superseded is not None:
+                superseded.update({c: [prs[c]] for c in stale})
             if duplicates is not None and "dots-ocr" in found:
                 duplicates["dots-ocr"] = [2]
             return found, {c: f"refs/pr/{prs[c]}" for c in found}
@@ -1062,6 +1092,7 @@ class TestJudgeSelectsPrConfigs:
             raise DatasetError("stop after load")
 
         monkeypatch.setattr(cli, "discover_pr_configs", discover)
+        monkeypatch.setattr(cli, "discover_configs", lambda dataset: ["dots-ocr", "glm-ocr"])
         monkeypatch.setattr(cli, "load_config_dataset", load)
         with pytest.raises(DatasetError, match="stop after load"):
             cli.cmd_judge(build_parser().parse_args(argv))
@@ -1090,6 +1121,95 @@ class TestJudgeSelectsPrConfigs:
         out = " ".join(capsys.readouterr().out.split())
         assert "0 from PRs" in out
         assert "1 from main ['glm-ocr']" in out
+
+    def test_selected_config_with_newer_main_loads_from_main(self, monkeypatch, capsys):
+        seen = self._run(
+            monkeypatch,
+            ["judge", "u/ds", "--from-prs", "--configs", "dots-ocr", "nuextract3", "--no-publish"],
+            prs={"dots-ocr": 2, "nuextract3": 9},
+            main_newer={"dots-ocr"},
+        )
+        assert seen["main_configs"] == ["dots-ocr", "glm-ocr"]
+        assert seen["configs"] == ["dots-ocr", "nuextract3"]
+        assert seen["revisions"] == {"nuextract3": "refs/pr/9"}
+        out = " ".join(capsys.readouterr().out.split())
+        assert "1 from main ['dots-ocr']" in out
+
+    def test_from_prs_keeps_a_config_whose_main_is_newer(self, monkeypatch, capsys):
+        seen = self._run(
+            monkeypatch,
+            ["judge", "u/ds", "--from-prs", "--no-publish"],
+            prs={"dots-ocr": 2, "nuextract3": 9},
+            main_newer={"dots-ocr"},
+        )
+        assert seen["configs"] == ["nuextract3", "dots-ocr"]
+        assert seen["revisions"] == {"nuextract3": "refs/pr/9"}
+        out = " ".join(capsys.readouterr().out.split())
+        assert "1 from main: ['dots-ocr']" in out
+
+    def test_auto_detect_with_merge_reads_main_configs_again(self, monkeypatch):
+        """A merged PR can add or remove configs on main; load what main has after."""
+        from ocr_bench.dataset import DatasetError
+
+        seen: dict = {}
+        main_before, main_after = ["glm-ocr", "old-config"], ["glm-ocr", "dots-ocr"]
+        reads: list[list[str]] = []
+
+        def configs_on_main(dataset):
+            reads.append(main_before if not reads else main_after)
+            return reads[-1]
+
+        def discover(dataset, merge=False, duplicates=None, main_configs=(), superseded=None):
+            seen["main_configs"] = list(main_configs)
+            return ["dots-ocr"], {}
+
+        def load(dataset, config_names, split="train", pr_revisions=None, **kwargs):
+            seen["configs"] = list(config_names)
+            raise DatasetError("stop after load")
+
+        monkeypatch.setattr(cli, "discover_configs", configs_on_main)
+        monkeypatch.setattr(cli, "discover_pr_configs", discover)
+        monkeypatch.setattr(cli, "load_config_dataset", load)
+        with pytest.raises(DatasetError, match="stop after load"):
+            cli.cmd_judge(build_parser().parse_args(["judge", "u/ds", "--merge", "--no-publish"]))
+        assert seen["main_configs"] == main_before  # the stale check uses main before merging
+        assert seen["configs"] == ["dots-ocr", "glm-ocr"]  # the load uses main after merging
+
+    def test_passed_over_pr_notes(self, capsys):
+        cli._print_passed_over_prs(
+            "u/ds",
+            duplicate_prs={"glm-ocr": [3]},
+            superseded_prs={"dots-ocr": [2, 5]},
+            loaded_pr_revisions={"glm-ocr": "refs/pr/16"},
+            merge=True,
+        )
+        out = " ".join(capsys.readouterr().out.split())
+        assert "glm-ocr has several open PRs; using the newest (#16) and ignoring #3" in out
+        assert "dots-ocr changed on main after its open PR (#2, #5); using main" in out
+        assert "and not merging the PR. To use the PR instead, merge it." in out
+        assert "https://huggingface.co/datasets/u/ds/discussions" in out
+
+    def test_auto_detect_loads_a_superseded_config_from_main(self, monkeypatch, capsys):
+        seen = self._run(
+            monkeypatch,
+            ["judge", "u/ds", "--no-publish"],
+            prs={"dots-ocr": 2, "nuextract3": 9},
+            main_newer={"dots-ocr"},
+        )
+        assert seen["configs"] == ["nuextract3", "dots-ocr", "glm-ocr"]
+        assert seen["revisions"] == {"nuextract3": "refs/pr/9"}
+        out = " ".join(capsys.readouterr().out.split())
+        assert "Auto-detected 2 configs on main: ['dots-ocr', 'glm-ocr']" in out
+
+    def test_from_prs_all_superseded_still_judges_from_main(self, monkeypatch):
+        seen = self._run(
+            monkeypatch,
+            ["judge", "u/ds", "--from-prs", "--no-publish"],
+            prs={"dots-ocr": 2},
+            main_newer={"dots-ocr"},
+        )
+        assert seen["configs"] == ["dots-ocr"]
+        assert seen["revisions"] == {}
 
     def test_configs_without_from_prs_still_load_from_main(self, monkeypatch):
         seen = self._run(

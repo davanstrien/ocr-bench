@@ -169,6 +169,10 @@ class AuditReport:
     judge_text_mode: str = "normalized"
     configs_without_text: list[str] = field(default_factory=list)
     auxiliary_configs: list[str] = field(default_factory=list)
+    # Open PRs that discovery did not use: {config: [PR numbers]}.
+    duplicate_prs: dict[str, list[int]] = field(default_factory=dict)
+    superseded_prs: dict[str, list[int]] = field(default_factory=dict)
+    pr_revisions: dict[str, str] = field(default_factory=dict)
 
     @property
     def unjudgeable_configs(self) -> list[str]:
@@ -240,8 +244,16 @@ def audit_repo(
         raise ValueError("judge_text_mode must be 'normalized' or 'raw'")
     normalize = judge_text_mode == "normalized"
 
-    pr_configs, pr_revisions = discover_pr_configs(repo_id, api=api)
     main_configs = discover_configs(repo_id)
+    duplicate_prs: dict[str, list[int]] = {}
+    superseded_prs: dict[str, list[int]] = {}
+    pr_configs, pr_revisions = discover_pr_configs(
+        repo_id,
+        api=api,
+        duplicates=duplicate_prs,
+        main_configs=main_configs,
+        superseded=superseded_prs,
+    )
     config_names = list(pr_configs)
     for mc in main_configs:
         if mc not in pr_configs:
@@ -289,4 +301,7 @@ def audit_repo(
         judge_text_mode=judge_text_mode,
         configs_without_text=configs_without_text,
         auxiliary_configs=auxiliary_configs,
+        duplicate_prs=duplicate_prs,
+        superseded_prs=superseded_prs,
+        pr_revisions=pr_revisions,
     )

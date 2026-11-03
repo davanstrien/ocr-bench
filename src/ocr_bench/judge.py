@@ -179,9 +179,30 @@ Respond with JSON only (no markdown fences, no extra text):
 {{"winner": "A", "reason": "brief explanation"}}
 Use "A", "B", or "tie" for the winner field."""
 
+# "body-text" is the default prompt with criterion 2 changed: the main text,
+# headings, footnotes and captions must be complete, and page furniture
+# (running headers, page numbers, signature marks, catchwords) is neutral. Use
+# it when the downstream use is reading or searching the text, or when the
+# board is compared with a ground truth that leaves furniture out.
+_DEFAULT_COMPLETENESS = """\
+2. Completeness: ALL visible text must be captured — headers, footers, marginalia, \
+stamps, handwritten notes. Missing any section of text is a significant penalty.
+"""
+_BODY_TEXT_COMPLETENESS = """\
+2. Completeness of the page content: all main text, section headings, footnotes and \
+figure captions must be captured. Missing any of these is a significant penalty. \
+Running headers, page numbers, signature marks and catchwords (page furniture) are \
+optional: do not penalise an output for leaving them out, and do not reward an \
+output for including them.
+"""
+if _DEFAULT_PROMPT.count(_DEFAULT_COMPLETENESS) != 1:
+    raise RuntimeError("body-text profile: criterion 2 not found in the default prompt")
+_BODY_TEXT_PROMPT = _DEFAULT_PROMPT.replace(_DEFAULT_COMPLETENESS, _BODY_TEXT_COMPLETENESS)
+
 CRITERIA_PROFILES: dict[str, str] = {
     "default": _DEFAULT_PROMPT,
     "table-fidelity": _TABLE_FIDELITY_PROMPT,
+    "body-text": _BODY_TEXT_PROMPT,
 }
 # Backward-compatible name for callers that imported the original single prompt.
 PAIRWISE_PROMPT = CRITERIA_PROFILES[DEFAULT_CRITERIA]

@@ -120,14 +120,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Config-per-model: list of config names, loaded from main. With "
             "--from-prs, each is loaded from its newest open PR, or from main if "
-            "it has no open PR."
+            "it has no open PR or it changed on main after its newest open PR."
         ),
     )
     judge.add_argument(
         "--from-prs",
         action="store_true",
         help=(
-            "Force PR-based config discovery (newest open PR per config). "
+            "Force PR-based config discovery (newest open PR per config). A config "
+            "that changed on main after its newest open PR is loaded from main. "
             "Combine with --configs to judge only some of them."
         ),
     )
@@ -157,7 +158,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Judge criteria profile (default: default). 'table-fidelity' adds an "
             "explicit row/column cell-preservation criterion for table-dense corpora. "
-            "Mutually exclusive with --criteria-file."
+            "'body-text' counts only the main text, headings, footnotes and captions "
+            "towards completeness; running headers, page numbers, signature marks and "
+            "catchwords are optional. Mutually exclusive with --criteria-file."
         ),
     )
     judge.add_argument(
@@ -329,9 +332,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     judge.add_argument(
         "--concurrency",
-        type=int,
-        default=1,
-        help="Number of concurrent judge API calls (default: 1)",
+        type=_positive_int,
+        default=8,
+        help=(
+            "Number of concurrent judge API calls (default: 8). Lower it if the "
+            "provider returns 429 errors; 1 makes sequential calls."
+        ),
     )
 
     # --- run subcommand ---
@@ -418,7 +424,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Judge criteria profile (default: default). 'table-fidelity' adds an "
             "explicit row/column cell-preservation criterion for table-dense corpora. "
-            "Mutually exclusive with --criteria-file."
+            "'body-text' counts only the main text, headings, footnotes and captions "
+            "towards completeness; running headers, page numbers, signature marks and "
+            "catchwords are optional. Mutually exclusive with --criteria-file."
         ),
     )
     bench.add_argument(
@@ -456,6 +464,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=10,
         metavar="N",
         help="Minimum direct pair comparisons for the size rule (default: 10).",
+    )
+    bench.add_argument(
+        "--concurrency",
+        type=_positive_int,
+        default=8,
+        help=(
+            "Number of concurrent judge API calls (default: 8). Lower it if the "
+            "provider returns 429 errors; 1 makes sequential calls."
+        ),
     )
     bench.add_argument(
         "--no-publish", action="store_true", help="Don't publish results (skips the viewer)"
@@ -969,6 +986,32 @@ def _existing_preprocessing_provenance(meta_rows: list[dict]) -> tuple[str, int,
     )
 
 
+def _print_passed_over_prs(
+    dataset: str,
+    duplicate_prs: dict[str, list[int]],
+    superseded_prs: dict[str, list[int]],
+    loaded_pr_revisions: dict[str, str],
+    merge: bool,
+) -> None:
+    """Tell the user which open PRs discovery did not use, and why."""
+    discussions = f"https://huggingface.co/datasets/{dataset}/discussions"
+    for config, older in sorted(duplicate_prs.items()):
+        used = loaded_pr_revisions.get(config, "a merged PR").replace("refs/pr/", "#")
+        ignored = ", ".join(f"#{n}" for n in sorted(older))
+        console.print(
+            f"[yellow]Note:[/yellow] {config} has several open PRs; using the newest "
+            f"({used}) and ignoring {ignored}. Close stale ones at {discussions}"
+        )
+    for config, numbers in sorted(superseded_prs.items()):
+        ignored = ", ".join(f"#{n}" for n in numbers)
+        not_merged = " and not merging the PR" if merge else ""
+        console.print(
+            f"[yellow]Note:[/yellow] {config} changed on main after its open PR "
+            f"({ignored}); using main{not_merged}. To use the PR instead, merge it. "
+            f"Close stale PRs at {discussions}"
+        )
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Orchestrate: load → compare → judge → elo → print → publish."""
     # --- Resolve flags ---
@@ -1059,12 +1102,19 @@ def cmd_judge(args: argparse.Namespace) -> None:
     loaded_pr_revisions: dict[str, str] = {}
     # config -> older open PR numbers passed over for the newest one.
     duplicate_prs: dict[str, list[int]] = {}
+    # config -> open PR numbers passed over because main changed after them.
+    superseded_prs: dict[str, list[int]] = {}
     if args.configs and args.from_prs:
         # Explicit configs, taken from open PRs where one exists (newest PR
         # per config) and from main otherwise.
         config_names = list(args.configs)
         found, pr_revisions = discover_pr_configs(
-            args.dataset, merge=merge, only=config_names, duplicates=duplicate_prs
+            args.dataset,
+            merge=merge,
+            only=config_names,
+            duplicates=duplicate_prs,
+            main_configs=discover_configs(args.dataset),
+            superseded=superseded_prs,
         )
         from_prs = bool(found)
         on_main = [c for c in config_names if c not in found]
@@ -1101,17 +1151,27 @@ def cmd_judge(args: argparse.Namespace) -> None:
         # Explicit columns — flat loading
         ds, ocr_columns = load_flat_dataset(args.dataset, split=args.split, columns=args.columns)
     elif args.from_prs:
-        # Forced PR discovery
-        config_names, pr_revisions = discover_pr_configs(
-            args.dataset, merge=merge, duplicates=duplicate_prs
+        # Forced PR discovery. A config that changed on main after its newest
+        # open PR is still judged, from main.
+        pr_configs, pr_revisions = discover_pr_configs(
+            args.dataset,
+            merge=merge,
+            duplicates=duplicate_prs,
+            main_configs=discover_configs(args.dataset),
+            superseded=superseded_prs,
         )
+        config_names = pr_configs + list(superseded_prs)
         if not config_names:
             raise DatasetError("No configs found in open PRs")
-        from_prs = True
+        from_prs = bool(pr_configs)
         if not merge:
             loaded_pr_revisions = dict(pr_revisions)
         source_configs = list(config_names)
-        console.print(f"Discovered {len(config_names)} configs from PRs: {config_names}")
+        from_main = f", {len(superseded_prs)} from main: {list(superseded_prs)}"
+        console.print(
+            f"Discovered {len(pr_configs)} configs from PRs: {pr_configs}"
+            + (from_main if superseded_prs else "")
+        )
         ds, ocr_columns = load_config_dataset(
             args.dataset,
             config_names,
@@ -1121,12 +1181,19 @@ def cmd_judge(args: argparse.Namespace) -> None:
         )
     else:
         # Auto-detect: PRs + main branch configs combined, fall back to flat
-        pr_configs, pr_revisions = discover_pr_configs(
-            args.dataset, merge=merge, duplicates=duplicate_prs
-        )
-        if not merge:
-            loaded_pr_revisions = dict(pr_revisions)
         main_configs = discover_configs(args.dataset)
+        pr_configs, pr_revisions = discover_pr_configs(
+            args.dataset,
+            merge=merge,
+            duplicates=duplicate_prs,
+            main_configs=main_configs,
+            superseded=superseded_prs,
+        )
+        if merge:
+            # The merges can add or remove configs on main: read them again.
+            main_configs = discover_configs(args.dataset)
+        else:
+            loaded_pr_revisions = dict(pr_revisions)
 
         # Combine: PR configs + main configs not already in PRs
         config_names = list(pr_configs)
@@ -1157,14 +1224,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
     if not source_configs:
         source_output_columns = {column: column for column in ocr_columns}
     source_revisions = {c: loaded_pr_revisions.get(c, "main") for c in source_configs}
-    for config, older in sorted(duplicate_prs.items()):
-        used = loaded_pr_revisions.get(config, "a merged PR").replace("refs/pr/", "#")
-        ignored = ", ".join(f"#{n}" for n in sorted(older))
-        console.print(
-            f"[yellow]Note:[/yellow] {config} has several open PRs; using the newest "
-            f"({used}) and ignoring {ignored}. Close stale ones at "
-            f"https://huggingface.co/datasets/{args.dataset}/discussions"
-        )
+    _print_passed_over_prs(
+        args.dataset, duplicate_prs, superseded_prs, loaded_pr_revisions, merge=merge
+    )
 
     console.print(f"Loaded {len(ds)} samples with {len(ocr_columns)} models:")
     for col, model in ocr_columns.items():
@@ -2255,6 +2317,8 @@ def cmd_bench(args: argparse.Namespace) -> None:
         args.adaptive_strategy,
         "--size-tie-min-samples",
         str(args.size_tie_min_samples),
+        "--concurrency",
+        str(args.concurrency),
     ]
     if args.size_tie_ratio is not None:
         judge_argv += ["--size-tie-ratio", str(args.size_tie_ratio)]
@@ -2371,6 +2435,13 @@ def cmd_audit(args: argparse.Namespace) -> None:
         table.add_row(config, "[dim]skipped: not OCR output[/dim]", *["-"] * 8)
 
     console.print(table)
+    _print_passed_over_prs(
+        args.dataset,
+        report.duplicate_prs,
+        report.superseded_prs,
+        report.pr_revisions,
+        merge=False,
+    )
 
     # Overall alignment line
     if align.status == "misaligned":

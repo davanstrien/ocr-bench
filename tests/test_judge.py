@@ -28,6 +28,7 @@ from ocr_bench.judge import (
 # deliberately when its prompt changes.
 DEFAULT_PROMPT_HASH = "8d86832723b5"
 TABLE_FIDELITY_PROMPT_HASH = "fe138e71ecc3"
+BODY_TEXT_PROMPT_HASH = "31eaa3c1506c"
 
 
 class TestImageToBase64:
@@ -268,8 +269,26 @@ class TestCriteriaProfiles:
         tf = CRITERIA_PROFILES["table-fidelity"]
         assert "where tables are present" in tf
 
+    def test_body_text_byte_equal(self):
+        """Pin the body-text prompt bytes; edits must update this hash."""
+        assert prompt_hash(CRITERIA_PROFILES["body-text"]) == BODY_TEXT_PROMPT_HASH
+
+    def test_body_text_changes_only_completeness(self):
+        """body-text is the default prompt with criterion 2 replaced."""
+        default = CRITERIA_PROFILES["default"]
+        body = CRITERIA_PROFILES["body-text"]
+        assert "headers, footers" in default and "headers, footers" not in body
+        assert "2. Completeness of the page content" in body
+        assert "page furniture" in body
+        assert "do not reward an output for including them" in body
+        # Everything except criterion 2 is the default prompt, unchanged.
+        default_rest = default.split("2. Completeness")[0], default.split("3. Accuracy")[1]
+        body_rest = body.split("2. Completeness")[0], body.split("3. Accuracy")[1]
+        assert default_rest == body_rest
+
     def test_profiles_have_distinct_prompts(self):
-        assert CRITERIA_PROFILES["default"] != CRITERIA_PROFILES["table-fidelity"]
+        prompts = list(CRITERIA_PROFILES.values())
+        assert len(set(prompts)) == len(prompts)
 
     def test_all_profiles_have_placeholders(self):
         for tmpl in CRITERIA_PROFILES.values():

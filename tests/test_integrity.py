@@ -130,6 +130,30 @@ class TestAuditRepo:
     @patch("ocr_bench.integrity._load_configs")
     @patch("ocr_bench.integrity.discover_configs")
     @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_reports_passed_over_prs_and_loads_main(self, mock_pr, mock_main, mock_load):
+        def discover(repo_id, api=None, duplicates=None, main_configs=(), superseded=None):
+            assert list(main_configs) == ["cfg_a", "cfg_b"]
+            superseded["cfg_a"] = [2]
+            duplicates["cfg_c"] = [3]
+            return ["cfg_c"], {"cfg_c": "refs/pr/7"}
+
+        mock_pr.side_effect = discover
+        mock_main.return_value = ["cfg_a", "cfg_b"]
+        mock_load.return_value = [
+            _loaded_config(name, f"model-{name}", ["good text here"], {"b_number": [1]})
+            for name in ("cfg_c", "cfg_a", "cfg_b")
+        ]
+        report = audit_repo("user/repo")
+        names, _, revisions = mock_load.call_args.args[1:]
+        assert names == ["cfg_c", "cfg_a", "cfg_b"]
+        assert revisions == {"cfg_c": "refs/pr/7"}  # cfg_a loads from main
+        assert report.superseded_prs == {"cfg_a": [2]}
+        assert report.duplicate_prs == {"cfg_c": [3]}
+        assert report.pr_revisions == {"cfg_c": "refs/pr/7"}
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
     def test_mixed_usable_and_missing_text_is_a_problem(self, mock_pr, mock_main, mock_load):
         mock_pr.return_value = ([], {})
         mock_main.return_value = ["cfg_a", "cfg_b", "cfg_c"]

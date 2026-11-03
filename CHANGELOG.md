@@ -9,6 +9,15 @@ current behaviour.
 
 ## [Unreleased]
 
+### Behaviour changes
+
+- `judge --concurrency` defaults to 8, not 1, so a run makes up to 8 judge calls at once. Pass `--concurrency 1` for sequential calls. A value below 1 is now an error. `bench` has a new `--concurrency` option with the same default.
+- With PR discovery, a config that changed on `main` after its newest open PR is loaded from `main`. Before, an old open PR (for example a failed run left open after a re-run was merged) replaced the newer outputs on `main`. With `--merge`, such a PR is not merged. `judge`, `bench` and `audit` print the PRs they passed over; to use such a PR, merge it. The check compares the dates of the last commit to the `<config>/` folder on each branch. A merge commit has the merge date, so a PR merged later counts as newer even if its run is older. When a date is missing, the PR is used.
+
+### New
+
+- `--criteria body-text`: the default criteria, except for completeness. Completeness covers the main text, headings, footnotes and captions. Running headers, page numbers, signature marks and catchwords are optional, and the prompt tells the judge not to penalise their absence or reward their presence. Only the completeness criterion changes, so the accuracy and tie rules still see all the text. The prompt does not name other text, such as marginalia or stamps, so the judge decides. Use it when the text will be read or searched, or to compare a board with a ground truth that leaves page furniture out.
+
 ### Other
 
 - The README example boards are re-judged with 0.0.5: the default judge, page-level intervals and `--max-ocr-text-len 8000`. dots.ocr's Britannica row comes from a working re-run.
