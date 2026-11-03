@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import structlog
 from datasets import Dataset, load_dataset
 from huggingface_hub import HfApi
-from huggingface_hub.errors import RepositoryNotFoundError
+from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
 
 from ocr_bench.adaptive import (
     AdjacentPairDecision,
@@ -106,66 +106,96 @@ class EvalMetadata:
 class RepoVisibility:
     """Outcome of :func:`ensure_dataset_repo` for one destination repo.
 
-    - ``private``: whether the destination repo is private.
+    - ``private``: whether the destination repo is private, as read back from the Hub.
     - ``created``: whether this call created it.
-    - ``inherited``: whether it was created private only because its source is private.
-    - ``public_with_private_source``: an existing public repo receiving data
-      derived from a private source; callers should warn.
+    - ``inherited``: whether privacy was required only because the source is
+      private or gated (not because ``--private`` was passed).
+    - ``public_with_restricted_source``: the destination is public although its
+      source is private or gated; only possible when ``allow_public`` is set.
     """
 
     private: bool
     created: bool = False
     inherited: bool = False
-    public_with_private_source: bool = False
+    public_with_restricted_source: bool = False
+
+
+def _is_restricted(info) -> bool:
+    """Whether a repo's content is not open to everyone: private or gated."""
+    return bool(getattr(info, "private", False)) or bool(getattr(info, "gated", False))
 
 
 def ensure_dataset_repo(
     repo_id: str,
     *,
     private: bool,
+    allow_public: bool = False,
     source_repo: str | None = None,
     api: HfApi | None = None,
 ) -> RepoVisibility:
     """Create or check a dataset repo before data derived from ``source_repo`` lands in it.
 
     OCR outputs and judge results embed text from the source pages, and
-    ``push_to_hub`` creates a missing repo as public. So this runs before any
-    write:
+    ``push_to_hub`` creates a missing repo with the account's default
+    visibility, which is usually public. So this runs before any write.
 
-    - A missing repo is created private when ``private`` is set or when
-      ``source_repo`` is private, and public otherwise.
-    - An existing repo keeps its visibility; this never changes it.
-    - An existing public repo with ``private`` set raises :class:`DatasetError`,
-      so nothing is written to it.
-    - An existing public repo whose source is private is reported through
-      ``public_with_private_source`` so the caller can warn.
+    The destination must be private when ``private`` is set, or when the
+    source is private or gated and ``allow_public`` is not set. Then:
+
+    - A missing repo is created private.
+    - An existing repo keeps its visibility; this never changes it. If it is
+      public, :class:`DatasetError` is raised and nothing is written.
+    - After creating, the visibility is read back, so a repo created public
+      by another process at the same moment is also refused.
+
+    Otherwise a missing repo is created with ``private=None``, which keeps an
+    organization's default visibility.
     """
     api = api or HfApi()
-    source_private = False
+    source_restricted = False
     if source_repo:
-        source_private = bool(api.repo_info(source_repo, repo_type="dataset").private)
+        source_restricted = _is_restricted(api.repo_info(source_repo, repo_type="dataset"))
+    require_private = private or (source_restricted and not allow_public)
 
+    created = False
     try:
         info = api.repo_info(repo_id, repo_type="dataset")
-    except RepositoryNotFoundError:
-        make_private = private or source_private
-        api.create_repo(repo_id, repo_type="dataset", private=make_private, exist_ok=True)
-        logger.info("created_dataset_repo", repo=repo_id, private=make_private)
-        return RepoVisibility(
-            private=make_private,
-            created=True,
-            inherited=make_private and not private,
-        )
-
-    if info.private:
-        return RepoVisibility(private=True)
-    if private:
+    except GatedRepoError as exc:  # subclass of RepositoryNotFoundError: it exists
         raise DatasetError(
-            f"{repo_id} already exists and is public, but --private was set. Nothing "
-            "was written. Make the repo private on the Hub, or choose a different "
-            "repo id."
+            f"Cannot check the visibility of {repo_id}: it is gated and this token "
+            "has no access. Nothing was written."
+        ) from exc
+    except RepositoryNotFoundError:
+        api.create_repo(
+            repo_id,
+            repo_type="dataset",
+            private=True if require_private else None,
+            exist_ok=True,
         )
-    return RepoVisibility(private=False, public_with_private_source=source_private)
+        created = True
+        info = api.repo_info(repo_id, repo_type="dataset")
+        logger.info("created_dataset_repo", repo=repo_id, private=bool(info.private))
+
+    is_private = bool(info.private)
+    if require_private and not is_private:
+        if private:
+            reason = "--private was set"
+        else:
+            reason = (
+                f"its source {source_repo} is private or gated, so it would publish "
+                "text from those pages (pass --public to allow this)"
+            )
+        state = "was created public by another process" if created else "exists and is public"
+        raise DatasetError(
+            f"{repo_id} {state}, but {reason}. Nothing was written. Make the repo "
+            "private on the Hub, or choose a different repo id."
+        )
+    return RepoVisibility(
+        private=is_private,
+        created=created,
+        inherited=require_private and not private,
+        public_with_restricted_source=source_restricted and not is_private,
+    )
 
 
 def _config_is_absent(repo_id: str, config_name: str) -> bool:

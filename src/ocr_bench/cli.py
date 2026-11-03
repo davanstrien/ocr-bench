@@ -247,9 +247,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--private",
         action="store_true",
         help=(
-            "Create the results repo as private, and stop before judging if it "
-            "already exists as a public repo. Without this flag, a new results repo "
-            "is private when the source dataset is private, and public otherwise."
+            "Require a private results repo: create it private, and stop before "
+            "judging if it already exists as a public repo. This is automatic when "
+            "the source dataset is private or gated."
+        ),
+    )
+    judge.add_argument(
+        "--public",
+        action="store_true",
+        help=(
+            "Allow a public results repo even though the source dataset is private "
+            "or gated. Without it, judging stops before writing to a public repo."
         ),
     )
     judge.add_argument(
@@ -340,9 +348,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--private",
         action="store_true",
         help=(
-            "Create the output repo as private, and stop before launching if it "
-            "already exists as a public repo. Without this flag, a new output repo "
-            "is private when the input dataset is private, and public otherwise."
+            "Require a private output repo: create it private, and stop before "
+            "launching if it already exists as a public repo. This is automatic when "
+            "the input dataset is private or gated."
+        ),
+    )
+    run.add_argument(
+        "--public",
+        action="store_true",
+        help=(
+            "Allow a public output repo even though the input dataset is private or "
+            "gated. Without it, the run stops before writing to a public repo."
         ),
     )
     run.add_argument(
@@ -432,7 +448,16 @@ def build_parser() -> argparse.ArgumentParser:
     bench.add_argument(
         "--private",
         action="store_true",
-        help="Create the output and results repos as private (see `run --help`).",
+        help=(
+            "Require private output and results repos; stop before launching if "
+            "either already exists as a public repo. Automatic for a private or "
+            "gated input dataset."
+        ),
+    )
+    bench.add_argument(
+        "--public",
+        action="store_true",
+        help="Allow public output and results repos even for a private or gated input dataset.",
     )
     bench.add_argument("--port", type=int, default=7860, help="Viewer port (default: 7860)")
     bench.add_argument("--host", default="127.0.0.1", help="Viewer host (default: 127.0.0.1)")
@@ -661,23 +686,36 @@ def _resolve_results_repo(dataset: str, save_results: str | None, no_publish: bo
     return f"{dataset}-results"
 
 
-def _prepare_destination(repo_id: str, *, private: bool, source_repo: str, label: str) -> None:
+def _check_visibility_flags(args: argparse.Namespace) -> None:
+    """Reject --private together with --public before anything runs."""
+    if getattr(args, "private", False) and getattr(args, "public", False):
+        raise DatasetError("--private and --public cannot be used together.")
+
+
+def _prepare_destination(
+    repo_id: str, *, private: bool, allow_public: bool, source_repo: str, label: str
+) -> None:
     """Create or check ``repo_id`` before data derived from ``source_repo`` is written.
 
-    Raises :class:`DatasetError` (via :func:`ensure_dataset_repo`) when
-    ``private`` is set and ``repo_id`` already exists as a public repo.
+    Raises :class:`DatasetError` (via :func:`ensure_dataset_repo`) when the
+    repo must be private and is public.
     """
-    visibility = ensure_dataset_repo(repo_id, private=private, source_repo=source_repo)
+    visibility = ensure_dataset_repo(
+        repo_id, private=private, allow_public=allow_public, source_repo=source_repo
+    )
     if visibility.created:
-        kind = "private" if visibility.private else "public"
-        reason = f" because [bold]{source_repo}[/bold] is private" if visibility.inherited else ""
+        kind = "private" if visibility.private else "new"
+        reason = (
+            f" because [bold]{source_repo}[/bold] is private or gated"
+            if visibility.inherited
+            else ""
+        )
         console.print(f"Created {kind} {label} repo [bold]{repo_id}[/bold]{reason}.")
-    if visibility.public_with_private_source:
+    if visibility.public_with_restricted_source:
         console.print(
             f"[bold yellow]Warning:[/bold yellow] {label} repo [bold]{repo_id}[/bold] is "
-            f"public, but its source [bold]{source_repo}[/bold] is private. The {label} "
-            "will include text from the source pages. Make the repo private on the Hub, "
-            "or pass --private to stop instead of writing to it."
+            f"public although its source [bold]{source_repo}[/bold] is private or gated "
+            f"(--public). The {label} will include text from the source pages."
         )
 
 
@@ -921,15 +959,11 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 "checkpoint_full_rejudge_clobber_risk", checkpoint_every=checkpoint_every
             )
 
+    _check_visibility_flags(args)
     if results_repo:
         console.print(f"Results will be published to [bold]{results_repo}[/bold]")
-        # Before any judge call or checkpoint: push_to_hub would otherwise
-        # create a missing results repo as public.
-        _prepare_destination(
-            results_repo, private=args.private, source_repo=args.dataset, label="results"
-        )
-    elif args.private:
-        console.print("[dim]--private has no effect with --no-publish.[/dim]")
+    elif args.private or args.public:
+        console.print("[dim]--private/--public have no effect with --no-publish.[/dim]")
 
     # --- Load dataset (cascading auto-detection) ---
     source_configs: list[str] = []
@@ -1078,6 +1112,19 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 max_tokens=args.max_tokens,
                 min_chars=args.min_chars,
             )
+
+    # Create or check the results repo after the source has loaded (a bad
+    # dataset id leaves no empty repo) and before any judge call or checkpoint
+    # (push_to_hub would otherwise create a missing repo with the account's
+    # default visibility, usually public).
+    if results_repo:
+        _prepare_destination(
+            results_repo,
+            private=args.private,
+            allow_public=args.public,
+            source_repo=args.dataset,
+            label="results",
+        )
 
     # --- Incremental: load existing comparisons ---
     existing_results: list[ComparisonResult] = []
@@ -1844,9 +1891,15 @@ def cmd_run(args: argparse.Namespace) -> list[JobRun]:
         return []
 
     # The recipes push their outputs with push_to_hub, which would create a
-    # missing output repo as public, so create or check it before launching.
+    # missing output repo with the account's default visibility (usually
+    # public), so create or check it before launching.
+    _check_visibility_flags(args)
     _prepare_destination(
-        args.output_repo, private=args.private, source_repo=args.input_dataset, label="output"
+        args.output_repo,
+        private=args.private,
+        allow_public=args.public,
+        source_repo=args.input_dataset,
+        label="output",
     )
 
     # Launch
@@ -1917,9 +1970,17 @@ def cmd_publish(args: argparse.Namespace) -> None:
     # A viewer for private results defaults to a private Space. An existing
     # Space keeps its visibility (duplicate_space with exist_ok leaves it as is).
     private = args.private
-    if not private and api.repo_info(results, repo_type="dataset").private is True:
+    results_private = api.repo_info(results, repo_type="dataset").private is True
+    if results_private and not private:
         private = True
         console.print(f"[bold]{results}[/bold] is private, so a new Space will be private too.")
+    if results_private:
+        # The template reads REPOS with load_dataset; without a token it cannot
+        # see a private repo. Never copy the user's token into a Space silently.
+        console.print(
+            f"[yellow]The viewer needs read access to {results}:[/yellow] add an "
+            f"HF_TOKEN secret with read access in the Space settings of {space_id}."
+        )
 
     api.duplicate_space(
         from_id=SPACE_TEMPLATE,
@@ -1981,6 +2042,21 @@ def cmd_bench(args: argparse.Namespace) -> None:
     # not after a full (paid) run. Raises DatasetError, caught by main().
     _resolve_criteria(args)
 
+    # Check the results repo too BEFORE launching OCR jobs: a results repo that
+    # must be private but is public should stop the run, not the judge phase
+    # after a full (paid) OCR run. The run phase checks the output repo itself.
+    _check_visibility_flags(args)
+    if not args.no_publish:
+        results_repo = _resolve_results_repo(args.output_repo, None, False)
+        assert results_repo is not None
+        _prepare_destination(
+            results_repo,
+            private=args.private,
+            allow_public=args.public,
+            source_repo=args.input_dataset,
+            label="results",
+        )
+
     # --- Phase 1: run OCR models (waits for jobs to finish by default) ---
     from ocr_bench.run import failed_jobs
 
@@ -1991,6 +2067,8 @@ def cmd_bench(args: argparse.Namespace) -> None:
         run_argv += ["--max-samples", str(args.max_samples)]
     if args.private:
         run_argv.append("--private")
+    if args.public:
+        run_argv.append("--public")
     console.rule("[bold]1/3 Run[/bold]")
     jobs = cmd_run(parser.parse_args(run_argv)) or []
 
@@ -2043,6 +2121,8 @@ def cmd_bench(args: argparse.Namespace) -> None:
         judge_argv.append("--no-publish")
     elif args.private:
         judge_argv.append("--private")
+    elif args.public:
+        judge_argv.append("--public")
     console.rule("[bold]2/3 Judge[/bold]")
     cmd_judge(parser.parse_args(judge_argv))
 
