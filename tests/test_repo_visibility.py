@@ -132,6 +132,20 @@ class TestEnsureDatasetRepo:
             ensure_dataset_repo("u/out", private=False, source_repo="u/src", api=api)
         assert api.created == []
 
+    def test_check_only_leaves_missing_repo_missing(self):
+        api = FakeApi({"u/src": PRIVATE})
+        result = ensure_dataset_repo(
+            "u/out", private=False, source_repo="u/src", create=False, api=api
+        )
+        assert api.created == []
+        assert "u/out" not in api.repos
+        assert result.created is False
+
+    def test_check_only_still_refuses_existing_public_repo(self):
+        api = FakeApi({"u/src": PRIVATE, "u/out": PUBLIC})
+        with pytest.raises(DatasetError, match="exists and is public"):
+            ensure_dataset_repo("u/out", private=False, source_repo="u/src", create=False, api=api)
+
     def test_without_source_only_the_flag_decides(self):
         api = FakeApi({})
         result = ensure_dataset_repo("u/out", private=False, api=api)
@@ -169,6 +183,32 @@ class TestCliWithRealHelper:
         with pytest.raises(DatasetError, match="--private was set"):
             cli.cmd_bench(args)
         assert calls == []
+
+    def test_bench_checks_results_against_output_repo_like_judge(self, monkeypatch, fake_api):
+        # Public input, but the output repo already exists private: judge would
+        # require a private results repo, so bench must refuse a public one up front.
+        fake_api.repos = {"in/ds": PUBLIC, "out/repo": PRIVATE, "out/repo-results": PUBLIC}
+        calls: list[str] = []
+        monkeypatch.setattr(cli, "cmd_run", lambda a: calls.append("run") or [])
+        monkeypatch.setattr(cli, "cmd_judge", lambda a: calls.append("judge"))
+        args = build_parser().parse_args(["bench", "in/ds", "out/repo"])
+        with pytest.raises(DatasetError, match="out/repo is private or gated"):
+            cli.cmd_bench(args)
+        assert calls == []
+
+    def test_judge_merge_is_not_reached_when_results_repo_conflicts(self, monkeypatch, fake_api):
+        fake_api.repos = {"u/ocr": PUBLIC, "u/ocr-results": PUBLIC}
+        discovered: list[bool] = []
+
+        def discover(dataset, merge=False):
+            discovered.append(merge)
+            return [], {}
+
+        monkeypatch.setattr(cli, "discover_pr_configs", discover)
+        args = build_parser().parse_args(["judge", "u/ocr", "--merge", "--private"])
+        with pytest.raises(DatasetError, match="--private was set"):
+            cli.cmd_judge(args)
+        assert discovered == []
 
     def test_bench_no_publish_skips_results_check(self, monkeypatch, fake_api):
         from ocr_bench.run import JobRun
@@ -219,17 +259,22 @@ class TestCliWiring:
         assert _offline_destination_repos == []
 
     def _judge_until_prepare(self, monkeypatch, argv):
-        """Run cmd_judge on a tiny in-memory dataset and stop at the repo check."""
+        """Run cmd_judge on a tiny in-memory dataset; stop at the creating repo check."""
         seen: list[tuple[str, dict]] = []
 
         def record(repo_id, **kw):
             seen.append((repo_id, kw))
-            raise DatasetError("stop here")
+            if kw.get("create", True):
+                raise DatasetError("stop here")
+            return RepoVisibility(private=False)
 
         ds = [{"image": None, "a": "alpha text", "b": "beta text"}]
-        monkeypatch.setattr(
-            cli, "load_flat_dataset", lambda *a, **k: (ds, {"a": "model-a", "b": "model-b"})
-        )
+
+        def load(*args, **kwargs):
+            seen.append(("load", {}))
+            return ds, {"a": "model-a", "b": "model-b"}
+
+        monkeypatch.setattr(cli, "load_flat_dataset", load)
         monkeypatch.setattr(cli, "ensure_dataset_repo", record)
         monkeypatch.setattr(
             cli, "evaluation_input_fingerprints", lambda *a, **k: ("fp", {"a": "x", "b": "y"})
@@ -242,11 +287,12 @@ class TestCliWiring:
         seen = self._judge_until_prepare(
             monkeypatch, ["judge", "u/ocr", "--columns", "a", "b", "--private"]
         )
+        expected = {"private": True, "allow_public": False, "source_repo": "u/ocr"}
+        # A read-only check before loading, then the creating check after it.
         assert seen == [
-            (
-                "u/ocr-results",
-                {"private": True, "allow_public": False, "source_repo": "u/ocr"},
-            )
+            ("u/ocr-results", {**expected, "create": False}),
+            ("load", {}),
+            ("u/ocr-results", {**expected, "create": True}),
         ]
 
     def test_judge_bad_source_creates_no_results_repo(
@@ -259,7 +305,8 @@ class TestCliWiring:
         args = build_parser().parse_args(["judge", "u/ocr", "--columns", "a", "b"])
         with pytest.raises(DatasetError, match="stop at load"):
             cli.cmd_judge(args)
-        assert _offline_destination_repos == []
+        # Only the read-only check ran; nothing was created.
+        assert [kw.get("create", True) for _, kw in _offline_destination_repos] == [False]
 
     def test_judge_no_publish_skips_destination(self, monkeypatch, _offline_destination_repos):
         def stop_loading(*args, **kwargs):

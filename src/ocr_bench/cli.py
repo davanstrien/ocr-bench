@@ -693,16 +693,29 @@ def _check_visibility_flags(args: argparse.Namespace) -> None:
 
 
 def _prepare_destination(
-    repo_id: str, *, private: bool, allow_public: bool, source_repo: str, label: str
+    repo_id: str,
+    *,
+    private: bool,
+    allow_public: bool,
+    source_repo: str,
+    label: str,
+    create: bool = True,
 ) -> None:
     """Create or check ``repo_id`` before data derived from ``source_repo`` is written.
 
     Raises :class:`DatasetError` (via :func:`ensure_dataset_repo`) when the
-    repo must be private and is public.
+    repo must be private and is public. ``create=False`` only checks an
+    existing repo and prints nothing, for an early check before other writes.
     """
     visibility = ensure_dataset_repo(
-        repo_id, private=private, allow_public=allow_public, source_repo=source_repo
+        repo_id,
+        private=private,
+        allow_public=allow_public,
+        source_repo=source_repo,
+        create=create,
     )
+    if not create:
+        return
     if visibility.created:
         kind = "private" if visibility.private else "new"
         reason = (
@@ -962,6 +975,18 @@ def cmd_judge(args: argparse.Namespace) -> None:
     _check_visibility_flags(args)
     if results_repo:
         console.print(f"Results will be published to [bold]{results_repo}[/bold]")
+        # Read-only check first: an existing results repo that must be private
+        # but is public stops the run before anything is written, including
+        # the PR merges that --merge performs during discovery. A missing repo
+        # is created after the source has loaded (see below).
+        _prepare_destination(
+            results_repo,
+            private=args.private,
+            allow_public=args.public,
+            source_repo=args.dataset,
+            label="results",
+            create=False,
+        )
     elif args.private or args.public:
         console.print("[dim]--private/--public have no effect with --no-publish.[/dim]")
 
@@ -2042,10 +2067,18 @@ def cmd_bench(args: argparse.Namespace) -> None:
     # not after a full (paid) run. Raises DatasetError, caught by main().
     _resolve_criteria(args)
 
-    # Check the results repo too BEFORE launching OCR jobs: a results repo that
-    # must be private but is public should stop the run, not the judge phase
-    # after a full (paid) OCR run. The run phase checks the output repo itself.
+    # Prepare both destinations BEFORE launching OCR jobs, in the same chain
+    # the phases use (input -> output repo -> results repo), so a results repo
+    # that judge would refuse stops the run here, not after a full (paid) OCR
+    # run. The run and judge phases repeat these checks; both are idempotent.
     _check_visibility_flags(args)
+    _prepare_destination(
+        args.output_repo,
+        private=args.private,
+        allow_public=args.public,
+        source_repo=args.input_dataset,
+        label="output",
+    )
     if not args.no_publish:
         results_repo = _resolve_results_repo(args.output_repo, None, False)
         assert results_repo is not None
@@ -2053,7 +2086,7 @@ def cmd_bench(args: argparse.Namespace) -> None:
             results_repo,
             private=args.private,
             allow_public=args.public,
-            source_repo=args.input_dataset,
+            source_repo=args.output_repo,
             label="results",
         )
 

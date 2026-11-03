@@ -131,6 +131,7 @@ def ensure_dataset_repo(
     private: bool,
     allow_public: bool = False,
     source_repo: str | None = None,
+    create: bool = True,
     api: HfApi | None = None,
 ) -> RepoVisibility:
     """Create or check a dataset repo before data derived from ``source_repo`` lands in it.
@@ -150,6 +151,11 @@ def ensure_dataset_repo(
 
     Otherwise a missing repo is created with ``private=None``, which keeps an
     organization's default visibility.
+
+    With ``create=False`` this is a read-only check: an existing repo is
+    checked as above, and a missing repo is left missing (returned as not
+    private, not created). Callers use it to fail before any other write,
+    then call again with ``create=True`` just before the first write.
     """
     api = api or HfApi()
     source_restricted = False
@@ -166,6 +172,8 @@ def ensure_dataset_repo(
             "has no access. Nothing was written."
         ) from exc
     except RepositoryNotFoundError:
+        if not create:
+            return RepoVisibility(private=False, inherited=require_private and not private)
         api.create_repo(
             repo_id,
             repo_type="dataset",
