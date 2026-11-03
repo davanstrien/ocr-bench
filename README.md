@@ -12,24 +12,24 @@ Generic OCR benchmarks tell you which model wins _on average_. But if you're dig
 
 ocr-bench lets you run the same set of OCR models on a sample of _your_ collection, then uses a vision-language model to judge which produces the best transcription for each document. The result is a leaderboard specific to your data.
 
-The two published example boards, as ELO with 95% confidence interval. Models whose intervals overlap are not separated by the run:
+The two published example boards, as ELO with page-level bootstrap 95% confidence intervals. Models whose intervals overlap are not separated by the run:
 
-| Model              | Britannica 1771 (50 pages)        | BPL card catalog (41 judged pages of 50) |
-| ------------------ | :-------------------------------: | :--------------------------------------: |
-| GLM-OCR (0.9B)     | 1716 (1673–1769), top group       | 1535 (1471–1591), all four overlap       |
-| LightOnOCR-2 (1B)  | 1697 (1655–1749), top group       | 1559 (1497–1630), all four overlap       |
-| NuExtract3 (4B)    | 1649 (1604–1708), top group       | —                                        |
-| FireRed-OCR (2.1B) | 1506 (1469–1548), below top group | —                                        |
-| DeepSeek-OCR (4B)  | 1421 (1374–1465), below top group | 1452 (1388–1514), all four overlap       |
-| dots.ocr (1.7B)    | failed run\*                      | 1453 (1385–1515), all four overlap       |
+| Model              | Britannica 1771 (50 pages)  | BPL card catalog (33 judged cards of 50) |
+| ------------------ | :-------------------------: | :--------------------------------------: |
+| NuExtract3 (4B)    | 1734 (1669–1820)            | —                                        |
+| GLM-OCR (0.9B)     | 1588 (1523–1655)            | 1434 (1361–1509)                         |
+| LightOnOCR-2 (1B)  | 1588 (1552–1623)            | 1526 (1449–1611)                         |
+| FireRed-OCR (2.1B) | 1426 (1358–1489)            | —                                        |
+| dots.ocr (1.7B)    | 1409 (1345–1469)\*          | 1632 (1571–1702)                         |
+| DeepSeek-OCR (4B)  | 1255 (1190–1309)            | 1408 (1336–1474)                         |
 
-On Britannica, three models share the top group. On BPL, all four intervals overlap, so that run does not separate any model. Neither example establishes a single winner. Judging more pages gathers more evidence, and human votes in the viewer cross-check the judge on the overlapping pairs; neither guarantees separation.
+On Britannica, NuExtract3 is ahead of every other model. GLM-OCR and LightOnOCR-2 share second place, FireRed-OCR and dots.ocr share third, and DeepSeek-OCR is last. On BPL, dots.ocr is ahead of GLM-OCR and DeepSeek-OCR, and LightOnOCR-2 overlaps all three. So dots.ocr is in the lower half on Britannica and has the highest rating on BPL, where only LightOnOCR-2 overlaps it. Two collections cannot show which model suits which document type, but they show that the order can change. Judging more pages gathers more evidence, and human votes in the viewer cross-check the judge on the overlapping pairs; neither guarantees separation.
 
-\* Every dots.ocr output in the Britannica run was an `[OCR ERROR]` placeholder. Current versions exclude such outputs and mark the run as failed.
+Both boards were judged with ocr-bench 0.0.5, the default judge and criteria, and `--max-ocr-text-len 8000`, because most Britannica pages are longer than the 2,500-character default. On BPL, 17 of the 50 cards had no output of 20 or more characters from any model, so they were not judged.
 
-Both boards predate page-level bootstrap intervals, which account for several comparisons coming from the same page. Updated intervals have not been computed yet; a re-run with the current version is pending.
+\* From a re-run of dots.ocr. Its first Britannica run produced only `[OCR ERROR]` placeholders; current versions exclude such outputs and mark the run as failed.
 
-**[Try the live viewer](https://huggingface.co/spaces/davanstrien/ocr-bench-britannica-results-qwen35-viewer)** — browse the Britannica 1771 leaderboard, compare OCR outputs side-by-side, and vote on quality yourself.
+**[Try the live viewer](https://huggingface.co/spaces/davanstrien/ocr-bench-britannica-results-qwen35-viewer)** — browse an earlier Britannica 1771 board (previous default judge), compare OCR outputs side-by-side, and vote on quality yourself.
 
 ## Hub-native by design
 
@@ -118,7 +118,7 @@ ocr-bench ships with 16 registered OCR models. Five form the default set:
 | `deepseek-ocr`  | 4B   | `deepseek-ai/DeepSeek-OCR`    |
 | `dots-ocr`      | 1.7B | `rednote-hilab/dots.ocr`      |
 
-The example boards above do not show which model suits which document type, so run the set on a sample of your own pages.
+The two example boards above put the models in different orders, so run the set on a sample of your own pages.
 
 The opt-in registry also includes compact models at different quality/cost points, including `falcon-ocr` (0.3B) and `ovis-ocr2` (0.9B). List every available model with:
 
@@ -142,9 +142,9 @@ The screenshot shows the viewer layout from an earlier Britannica run. Its numbe
 
 Browse these on the Hub:
 
-- [davanstrien/ocr-bench-britannica-results-qwen35](https://huggingface.co/datasets/davanstrien/ocr-bench-britannica-results-qwen35) — Encyclopaedia Britannica 1771, 6 models, 50 pages (dots.ocr run failed)
-- [davanstrien/bpl-ocr-bench-results](https://huggingface.co/datasets/davanstrien/bpl-ocr-bench-results) — Boston Public Library card catalog, 4 models, 41 judged pages of 50
-- [Live viewer](https://huggingface.co/spaces/davanstrien/ocr-bench-britannica-results-qwen35-viewer) — Britannica leaderboard with ELO chart and comparison browser
+- [davanstrien/ocr-bench-britannica-results-qwen38](https://huggingface.co/datasets/davanstrien/ocr-bench-britannica-results-qwen38) — Encyclopaedia Britannica 1771, 6 models, 50 pages (the board above)
+- [davanstrien/bpl-ocr-bench-results-qwen38](https://huggingface.co/datasets/davanstrien/bpl-ocr-bench-results-qwen38) — Boston Public Library card catalog, 4 models, 33 judged cards of 50 (the board above)
+- [Live viewer](https://huggingface.co/spaces/davanstrien/ocr-bench-britannica-results-qwen35-viewer) — an earlier Britannica board (previous default judge), with ELO chart and comparison browser
 
 ## Install
 
