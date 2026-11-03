@@ -38,6 +38,8 @@ The entire evaluation loop lives on the Hugging Face Hub:
 
 No local GPU required. Everything is shareable via Hub URLs.
 
+OCR outputs and results contain text from your pages, so they follow the source's visibility: a new output or results repo is private when its source dataset is private. Pass `--private` to `run`, `judge` or `bench` to create them private anyway; the command stops before writing if the repo already exists as a public repo. A viewer Space for private results is also created private.
+
 ## Quickstart
 
 ```bash

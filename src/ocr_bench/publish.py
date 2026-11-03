@@ -19,6 +19,7 @@ from ocr_bench.adaptive import (
     model_parameter_counts,
     practical_preferences,
 )
+from ocr_bench.dataset import DatasetError
 from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo
 from ocr_bench.judge import DEFAULT_MIN_CHARS, MAX_IMAGE_DIM, MAX_OCR_TEXT_LENGTH
 from ocr_bench.run import MODEL_REGISTRY
@@ -99,6 +100,72 @@ class EvalMetadata:
     def __post_init__(self):
         if not self.timestamp:
             self.timestamp = datetime.datetime.now(datetime.UTC).isoformat()
+
+
+@dataclass
+class RepoVisibility:
+    """Outcome of :func:`ensure_dataset_repo` for one destination repo.
+
+    - ``private``: whether the destination repo is private.
+    - ``created``: whether this call created it.
+    - ``inherited``: whether it was created private only because its source is private.
+    - ``public_with_private_source``: an existing public repo receiving data
+      derived from a private source; callers should warn.
+    """
+
+    private: bool
+    created: bool = False
+    inherited: bool = False
+    public_with_private_source: bool = False
+
+
+def ensure_dataset_repo(
+    repo_id: str,
+    *,
+    private: bool,
+    source_repo: str | None = None,
+    api: HfApi | None = None,
+) -> RepoVisibility:
+    """Create or check a dataset repo before data derived from ``source_repo`` lands in it.
+
+    OCR outputs and judge results embed text from the source pages, and
+    ``push_to_hub`` creates a missing repo as public. So this runs before any
+    write:
+
+    - A missing repo is created private when ``private`` is set or when
+      ``source_repo`` is private, and public otherwise.
+    - An existing repo keeps its visibility; this never changes it.
+    - An existing public repo with ``private`` set raises :class:`DatasetError`,
+      so nothing is written to it.
+    - An existing public repo whose source is private is reported through
+      ``public_with_private_source`` so the caller can warn.
+    """
+    api = api or HfApi()
+    source_private = False
+    if source_repo:
+        source_private = bool(api.repo_info(source_repo, repo_type="dataset").private)
+
+    try:
+        info = api.repo_info(repo_id, repo_type="dataset")
+    except RepositoryNotFoundError:
+        make_private = private or source_private
+        api.create_repo(repo_id, repo_type="dataset", private=make_private, exist_ok=True)
+        logger.info("created_dataset_repo", repo=repo_id, private=make_private)
+        return RepoVisibility(
+            private=make_private,
+            created=True,
+            inherited=make_private and not private,
+        )
+
+    if info.private:
+        return RepoVisibility(private=True)
+    if private:
+        raise DatasetError(
+            f"{repo_id} already exists and is public, but --private was set. Nothing "
+            "was written. Make the repo private on the Hub, or choose a different "
+            "repo id."
+        )
+    return RepoVisibility(private=False, public_with_private_source=source_private)
 
 
 def _config_is_absent(repo_id: str, config_name: str) -> bool:

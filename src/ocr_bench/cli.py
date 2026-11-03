@@ -59,6 +59,7 @@ from ocr_bench.judge import (
 )
 from ocr_bench.publish import (
     EvalMetadata,
+    ensure_dataset_repo,
     evaluation_provenance_hash,
     hash_judge_specs,
     load_existing_comparisons,
@@ -243,6 +244,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Don't publish results (default: publish to {dataset}-results)",
     )
     judge.add_argument(
+        "--private",
+        action="store_true",
+        help=(
+            "Create the results repo as private, and stop before judging if it "
+            "already exists as a public repo. Without this flag, a new results repo "
+            "is private when the source dataset is private, and public otherwise."
+        ),
+    )
+    judge.add_argument(
         "--license",
         default=None,
         help=(
@@ -327,6 +337,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="Show what would launch without launching"
     )
     run.add_argument(
+        "--private",
+        action="store_true",
+        help=(
+            "Create the output repo as private, and stop before launching if it "
+            "already exists as a public repo. Without this flag, a new output repo "
+            "is private when the input dataset is private, and public otherwise."
+        ),
+    )
+    run.add_argument(
         "--no-wait", action="store_true", help="Launch and exit without polling (default: wait)"
     )
 
@@ -409,6 +428,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     bench.add_argument(
         "--no-publish", action="store_true", help="Don't publish results (skips the viewer)"
+    )
+    bench.add_argument(
+        "--private",
+        action="store_true",
+        help="Create the output and results repos as private (see `run --help`).",
     )
     bench.add_argument("--port", type=int, default=7860, help="Viewer port (default: 7860)")
     bench.add_argument("--host", default="127.0.0.1", help="Viewer host (default: 127.0.0.1)")
@@ -635,6 +659,26 @@ def _resolve_results_repo(dataset: str, save_results: str | None, no_publish: bo
     if save_results:
         return save_results
     return f"{dataset}-results"
+
+
+def _prepare_destination(repo_id: str, *, private: bool, source_repo: str, label: str) -> None:
+    """Create or check ``repo_id`` before data derived from ``source_repo`` is written.
+
+    Raises :class:`DatasetError` (via :func:`ensure_dataset_repo`) when
+    ``private`` is set and ``repo_id`` already exists as a public repo.
+    """
+    visibility = ensure_dataset_repo(repo_id, private=private, source_repo=source_repo)
+    if visibility.created:
+        kind = "private" if visibility.private else "public"
+        reason = f" because [bold]{source_repo}[/bold] is private" if visibility.inherited else ""
+        console.print(f"Created {kind} {label} repo [bold]{repo_id}[/bold]{reason}.")
+    if visibility.public_with_private_source:
+        console.print(
+            f"[bold yellow]Warning:[/bold yellow] {label} repo [bold]{repo_id}[/bold] is "
+            f"public, but its source [bold]{source_repo}[/bold] is private. The {label} "
+            "will include text from the source pages. Make the repo private on the Hub, "
+            "or pass --private to stop instead of writing to it."
+        )
 
 
 def _filter_existing_sentinel_comparisons(
@@ -879,6 +923,13 @@ def cmd_judge(args: argparse.Namespace) -> None:
 
     if results_repo:
         console.print(f"Results will be published to [bold]{results_repo}[/bold]")
+        # Before any judge call or checkpoint: push_to_hub would otherwise
+        # create a missing results repo as public.
+        _prepare_destination(
+            results_repo, private=args.private, source_repo=args.dataset, label="results"
+        )
+    elif args.private:
+        console.print("[dim]--private has no effect with --no-publish.[/dim]")
 
     # --- Load dataset (cascading auto-detection) ---
     source_configs: list[str] = []
@@ -1792,6 +1843,12 @@ def cmd_run(args: argparse.Namespace) -> list[JobRun]:
         console.print("Remove --dry-run to launch these jobs.")
         return []
 
+    # The recipes push their outputs with push_to_hub, which would create a
+    # missing output repo as public, so create or check it before launching.
+    _prepare_destination(
+        args.output_repo, private=args.private, source_repo=args.input_dataset, label="output"
+    )
+
     # Launch
     jobs = launch_ocr_jobs(
         args.input_dataset,
@@ -1857,10 +1914,17 @@ def cmd_publish(args: argparse.Namespace) -> None:
 
     console.print(f"Deploying viewer for [bold]{results}[/bold] to [bold]{space_id}[/bold]...")
 
+    # A viewer for private results defaults to a private Space. An existing
+    # Space keeps its visibility (duplicate_space with exist_ok leaves it as is).
+    private = args.private
+    if not private and api.repo_info(results, repo_type="dataset").private is True:
+        private = True
+        console.print(f"[bold]{results}[/bold] is private, so a new Space will be private too.")
+
     api.duplicate_space(
         from_id=SPACE_TEMPLATE,
         to_id=space_id,
-        private=args.private if args.private else None,
+        private=True if private else None,
         hardware=SpaceHardware.CPU_BASIC,
         exist_ok=True,
         variables=[{"key": "REPOS", "value": results}],
@@ -1925,6 +1989,8 @@ def cmd_bench(args: argparse.Namespace) -> None:
         run_argv += ["--models", *args.models]
     if args.max_samples is not None:
         run_argv += ["--max-samples", str(args.max_samples)]
+    if args.private:
+        run_argv.append("--private")
     console.rule("[bold]1/3 Run[/bold]")
     jobs = cmd_run(parser.parse_args(run_argv)) or []
 
@@ -1975,6 +2041,8 @@ def cmd_bench(args: argparse.Namespace) -> None:
         judge_argv += ["--max-samples", str(args.max_samples)]
     if args.no_publish:
         judge_argv.append("--no-publish")
+    elif args.private:
+        judge_argv.append("--private")
     console.rule("[bold]2/3 Judge[/bold]")
     cmd_judge(parser.parse_args(judge_argv))
 
