@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from ocr_bench.run import (
     DEFAULT_MODELS,
     MODEL_REGISTRY,
@@ -12,9 +14,46 @@ from ocr_bench.run import (
     build_script_args,
     failed_jobs,
     launch_ocr_jobs,
+    launch_settings,
     list_models,
+    parse_hf_jobs_header,
     poll_jobs,
 )
+
+# Shape of the uv-scripts/ocr recipe headers (dots-ocr.py, 2026-11).
+VLLM_HEADER_SCRIPT = '''# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "datasets>=4.0.0",
+#     "huggingface-hub",
+# ]
+#
+# [tool.hf-jobs]
+# image = "vllm/vllm-openai:v0.29.0"
+# python = "/usr/bin/python3"
+# env = { PYTHONPATH = "/usr/local/lib/python3.12/dist-packages" }
+# flavor = "a10g-small"
+# secrets = ["HF_TOKEN"]
+# ///
+
+"""Recipe docstring."""
+import vllm
+'''
+
+VLLM_HEADER = {
+    "image": "vllm/vllm-openai:v0.29.0",
+    "python": "/usr/bin/python3",
+    "env": {"PYTHONPATH": "/usr/local/lib/python3.12/dist-packages"},
+    "flavor": "a10g-small",
+    "secrets": ["HF_TOKEN"],
+}
+
+
+@pytest.fixture(autouse=True)
+def _no_header_fetch():
+    """Keep launch tests offline; tests that need a header patch it themselves."""
+    with patch("ocr_bench.run.fetch_hf_jobs_header", return_value={}) as fetch:
+        yield fetch
 
 
 class TestModelConfig:
@@ -251,13 +290,10 @@ class TestLaunchOcrJobs:
         assert kwargs["env"] == {"PYTHONPATH": "/usr/local/lib/python3.12/dist-packages"}
 
     @patch("ocr_bench.run.get_token", return_value="fake-token")
-    def test_standard_model_omits_image_kwargs(self, mock_token):
-        # Standard models must keep the exact pre-existing call (no image/python/env).
+    def test_script_without_header_image_omits_image_kwargs(self, mock_token):
+        # No registry image and no header image: the plain uv image, as before.
         mock_api = MagicMock()
-        mock_job = MagicMock()
-        mock_job.id = "j1"
-        mock_job.url = "https://example.com"
-        mock_api.run_uv_job.return_value = mock_job
+        mock_api.run_uv_job.return_value = MagicMock(id="j1", url="https://example.com")
 
         launch_ocr_jobs("in", "out", models=["glm-ocr"], api=mock_api)
 
@@ -265,6 +301,95 @@ class TestLaunchOcrJobs:
         assert "image" not in kwargs
         assert "python" not in kwargs
         assert "env" not in kwargs
+
+    @patch("ocr_bench.run.get_token", return_value="fake-token")
+    def test_header_image_is_passed_to_run_uv_job(self, mock_token, _no_header_fetch):
+        # HfApi.run_uv_job ignores [tool.hf-jobs]; ocr-bench must apply it, or
+        # recipes that moved vLLM into their header image start without vLLM.
+        _no_header_fetch.return_value = VLLM_HEADER
+        mock_api = MagicMock()
+        mock_api.run_uv_job.return_value = MagicMock(id="j1", url="https://example.com")
+
+        launch_ocr_jobs("in", "out", models=["dots-ocr"], api=mock_api)
+
+        _no_header_fetch.assert_called_once_with(MODEL_REGISTRY["dots-ocr"].script)
+        kwargs = mock_api.run_uv_job.call_args.kwargs
+        assert kwargs["image"] == "vllm/vllm-openai:v0.29.0"
+        assert kwargs["python"] == "/usr/bin/python3"
+        assert kwargs["env"] == {"PYTHONPATH": "/usr/local/lib/python3.12/dist-packages"}
+        # Hardware stays ocr-bench's choice, not the header's.
+        assert kwargs["flavor"] == MODEL_REGISTRY["dots-ocr"].default_flavor
+
+    @patch("ocr_bench.run.get_token", return_value="fake-token")
+    def test_registry_image_skips_header_fetch(self, mock_token, _no_header_fetch):
+        mock_api = MagicMock()
+        mock_api.run_uv_job.return_value = MagicMock(id="j1", url="https://example.com")
+
+        launch_ocr_jobs("in", "out", models=["nuextract3"], api=mock_api)
+
+        _no_header_fetch.assert_not_called()
+
+    @patch("ocr_bench.run.get_token", return_value="fake-token")
+    def test_unreadable_header_launches_nothing(self, mock_token, _no_header_fetch):
+        def fetch(url):
+            if "dots-ocr" in url:
+                raise RuntimeError("Could not read the [tool.hf-jobs] header")
+            return {}
+
+        _no_header_fetch.side_effect = fetch
+        mock_api = MagicMock()
+
+        with pytest.raises(RuntimeError, match="hf-jobs"):
+            launch_ocr_jobs("in", "out", models=["glm-ocr", "dots-ocr"], api=mock_api)
+
+        mock_api.run_uv_job.assert_not_called()
+
+
+class TestParseHfJobsHeader:
+    def test_reads_recipe_header(self):
+        assert parse_hf_jobs_header(VLLM_HEADER_SCRIPT) == VLLM_HEADER
+
+    def test_script_without_inline_metadata(self):
+        assert parse_hf_jobs_header("import sys\nprint('hi')\n") == {}
+
+    def test_script_block_without_hf_jobs_table(self):
+        script = '# /// script\n# dependencies = ["pillow"]\n# ///\nimport PIL\n'
+        assert parse_hf_jobs_header(script) == {}
+
+    def test_ignores_other_block_types(self):
+        script = (
+            '# /// other\n# [tool.hf-jobs]\n# image = "wrong"\n# ///\n'
+            '# /// script\n# [tool.hf-jobs]\n# image = "right"\n# ///\n'
+        )
+        assert parse_hf_jobs_header(script) == {"image": "right"}
+
+
+class TestLaunchSettings:
+    def test_registry_image_wins_over_header(self):
+        config = MODEL_REGISTRY["nuextract3"]
+        settings = launch_settings(config, header=VLLM_HEADER)
+        assert settings["image"] == config.image
+        assert settings["env"] == config.env
+
+    def test_header_image_python_env_taken_together(self):
+        config = ModelConfig(script="s", model_id="m", size="1B")
+        settings = launch_settings(config, header=VLLM_HEADER)
+        assert settings == {
+            "flavor": "l4x1",
+            "image": VLLM_HEADER["image"],
+            "python": VLLM_HEADER["python"],
+            "env": VLLM_HEADER["env"],
+        }
+
+    def test_header_without_image_ignores_python_and_env(self):
+        config = ModelConfig(script="s", model_id="m", size="1B")
+        header = {"python": "/usr/bin/python3", "env": {"A": "1"}, "flavor": "a10g-small"}
+        assert launch_settings(config, header=header) == {"flavor": "l4x1"}
+
+    def test_flavor_override_wins(self):
+        config = ModelConfig(script="s", model_id="m", size="1B")
+        settings = launch_settings(config, flavor_override="a100-large", header=VLLM_HEADER)
+        assert settings["flavor"] == "a100-large"
 
 
 class TestPollJobs:

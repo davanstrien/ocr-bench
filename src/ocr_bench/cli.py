@@ -1719,7 +1719,9 @@ def cmd_run(args: argparse.Namespace) -> list[JobRun]:
         DEFAULT_MODELS,
         MODEL_REGISTRY,
         build_script_args,
+        fetch_hf_jobs_header,
         launch_ocr_jobs,
+        launch_settings,
         poll_jobs,
     )
 
@@ -1768,7 +1770,8 @@ def cmd_run(args: argparse.Namespace) -> list[JobRun]:
         console.print("[bold yellow]DRY RUN[/bold yellow] — no jobs will be launched\n")
         for slug in selected:
             cfg = MODEL_REGISTRY[slug]
-            flavor = args.flavor or cfg.default_flavor
+            header = {} if cfg.image else fetch_hf_jobs_header(cfg.script)
+            settings = launch_settings(cfg, flavor_override=args.flavor, header=header)
             script_args = build_script_args(
                 args.input_dataset,
                 args.output_repo,
@@ -1780,12 +1783,13 @@ def cmd_run(args: argparse.Namespace) -> list[JobRun]:
                 extra_args=cfg.default_args or None,
             )
             console.print(f"[cyan]{slug}[/cyan] ({cfg.model_id})")
-            console.print(f"  Flavor:  {flavor}")
+            console.print(f"  Flavor:  {settings['flavor']}")
             console.print(f"  Timeout: {args.timeout}")
-            if cfg.image:
-                console.print(f"  Image:   {cfg.image}")
-                console.print(f"  Python:  {cfg.python}")
-                console.print(f"  Env:     {cfg.env}")
+            if "image" in settings:
+                source = "registry" if cfg.image else "script header"
+                console.print(f"  Image:   {settings['image']} ({source})")
+                console.print(f"  Python:  {settings.get('python')}")
+                console.print(f"  Env:     {settings.get('env')}")
             console.print(f"  Script:  {cfg.script}")
             console.print(f"  Args:    {' '.join(script_args)}")
             console.print()
