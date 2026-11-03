@@ -240,8 +240,8 @@ def audit_repo(
         raise ValueError("judge_text_mode must be 'normalized' or 'raw'")
     normalize = judge_text_mode == "normalized"
 
-    pr_configs, pr_revisions = discover_pr_configs(repo_id, api=api)
     main_configs = discover_configs(repo_id)
+    pr_configs, pr_revisions = discover_pr_configs(repo_id, api=api, main_configs=main_configs)
     config_names = list(pr_configs)
     for mc in main_configs:
         if mc not in pr_configs:

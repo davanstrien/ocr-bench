@@ -120,14 +120,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Config-per-model: list of config names, loaded from main. With "
             "--from-prs, each is loaded from its newest open PR, or from main if "
-            "it has no open PR."
+            "it has no open PR or it changed on main after its newest open PR."
         ),
     )
     judge.add_argument(
         "--from-prs",
         action="store_true",
         help=(
-            "Force PR-based config discovery (newest open PR per config). "
+            "Force PR-based config discovery (newest open PR per config). A config "
+            "that changed on main after its newest open PR is loaded from main. "
             "Combine with --configs to judge only some of them."
         ),
     )
@@ -157,7 +158,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Judge criteria profile (default: default). 'table-fidelity' adds an "
             "explicit row/column cell-preservation criterion for table-dense corpora. "
-            "Mutually exclusive with --criteria-file."
+            "'body-text' requires the main text, headings, footnotes and captions, and "
+            "neither rewards nor penalises running headers, page numbers, signature "
+            "marks and catchwords. Mutually exclusive with --criteria-file."
         ),
     )
     judge.add_argument(
@@ -329,9 +332,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     judge.add_argument(
         "--concurrency",
-        type=int,
-        default=1,
-        help="Number of concurrent judge API calls (default: 1)",
+        type=_positive_int,
+        default=8,
+        help="Number of concurrent judge API calls (default: 8). Use 1 for sequential calls.",
     )
 
     # --- run subcommand ---
@@ -418,7 +421,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Judge criteria profile (default: default). 'table-fidelity' adds an "
             "explicit row/column cell-preservation criterion for table-dense corpora. "
-            "Mutually exclusive with --criteria-file."
+            "'body-text' requires the main text, headings, footnotes and captions, and "
+            "neither rewards nor penalises running headers, page numbers, signature "
+            "marks and catchwords. Mutually exclusive with --criteria-file."
         ),
     )
     bench.add_argument(
@@ -1059,12 +1064,19 @@ def cmd_judge(args: argparse.Namespace) -> None:
     loaded_pr_revisions: dict[str, str] = {}
     # config -> older open PR numbers passed over for the newest one.
     duplicate_prs: dict[str, list[int]] = {}
+    # config -> open PR numbers passed over because main changed after them.
+    superseded_prs: dict[str, list[int]] = {}
     if args.configs and args.from_prs:
         # Explicit configs, taken from open PRs where one exists (newest PR
         # per config) and from main otherwise.
         config_names = list(args.configs)
         found, pr_revisions = discover_pr_configs(
-            args.dataset, merge=merge, only=config_names, duplicates=duplicate_prs
+            args.dataset,
+            merge=merge,
+            only=config_names,
+            duplicates=duplicate_prs,
+            main_configs=discover_configs(args.dataset),
+            superseded=superseded_prs,
         )
         from_prs = bool(found)
         on_main = [c for c in config_names if c not in found]
@@ -1101,17 +1113,27 @@ def cmd_judge(args: argparse.Namespace) -> None:
         # Explicit columns — flat loading
         ds, ocr_columns = load_flat_dataset(args.dataset, split=args.split, columns=args.columns)
     elif args.from_prs:
-        # Forced PR discovery
-        config_names, pr_revisions = discover_pr_configs(
-            args.dataset, merge=merge, duplicates=duplicate_prs
+        # Forced PR discovery. A config that changed on main after its newest
+        # open PR is still judged, from main.
+        pr_configs, pr_revisions = discover_pr_configs(
+            args.dataset,
+            merge=merge,
+            duplicates=duplicate_prs,
+            main_configs=discover_configs(args.dataset),
+            superseded=superseded_prs,
         )
+        config_names = pr_configs + list(superseded_prs)
         if not config_names:
             raise DatasetError("No configs found in open PRs")
-        from_prs = True
+        from_prs = bool(pr_configs)
         if not merge:
             loaded_pr_revisions = dict(pr_revisions)
         source_configs = list(config_names)
-        console.print(f"Discovered {len(config_names)} configs from PRs: {config_names}")
+        from_main = f", {len(superseded_prs)} from main: {list(superseded_prs)}"
+        console.print(
+            f"Discovered {len(pr_configs)} configs from PRs: {pr_configs}"
+            + (from_main if superseded_prs else "")
+        )
         ds, ocr_columns = load_config_dataset(
             args.dataset,
             config_names,
@@ -1121,12 +1143,16 @@ def cmd_judge(args: argparse.Namespace) -> None:
         )
     else:
         # Auto-detect: PRs + main branch configs combined, fall back to flat
+        main_configs = discover_configs(args.dataset)
         pr_configs, pr_revisions = discover_pr_configs(
-            args.dataset, merge=merge, duplicates=duplicate_prs
+            args.dataset,
+            merge=merge,
+            duplicates=duplicate_prs,
+            main_configs=main_configs,
+            superseded=superseded_prs,
         )
         if not merge:
             loaded_pr_revisions = dict(pr_revisions)
-        main_configs = discover_configs(args.dataset)
 
         # Combine: PR configs + main configs not already in PRs
         config_names = list(pr_configs)
@@ -1163,6 +1189,14 @@ def cmd_judge(args: argparse.Namespace) -> None:
         console.print(
             f"[yellow]Note:[/yellow] {config} has several open PRs; using the newest "
             f"({used}) and ignoring {ignored}. Close stale ones at "
+            f"https://huggingface.co/datasets/{args.dataset}/discussions"
+        )
+    for config, numbers in sorted(superseded_prs.items()):
+        ignored = ", ".join(f"#{n}" for n in numbers)
+        not_merged = " and not merging the PR" if merge else ""
+        console.print(
+            f"[yellow]Note:[/yellow] {config} changed on main after its open PR "
+            f"({ignored}); using main{not_merged}. Close stale PRs at "
             f"https://huggingface.co/datasets/{args.dataset}/discussions"
         )
 

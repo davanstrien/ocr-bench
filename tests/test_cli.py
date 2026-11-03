@@ -200,10 +200,22 @@ class TestBuildParser:
         args = parser.parse_args(["judge", "user/dataset", "--criteria", "table-fidelity"])
         assert args.criteria == "table-fidelity"
 
+    def test_criteria_accepts_body_text(self):
+        parser = build_parser()
+        args = parser.parse_args(["judge", "user/dataset", "--criteria", "body-text"])
+        assert _resolve_criteria(args)[0] == "body-text"
+
     def test_criteria_rejects_unknown(self):
         parser = build_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["judge", "user/dataset", "--criteria", "nonsense"])
+
+    def test_concurrency_default_and_minimum(self):
+        parser = build_parser()
+        assert parser.parse_args(["judge", "user/dataset"]).concurrency == 8
+        assert parser.parse_args(["judge", "user/dataset", "--concurrency", "1"]).concurrency == 1
+        with pytest.raises(SystemExit):
+            parser.parse_args(["judge", "user/dataset", "--concurrency", "0"])
 
     def test_criteria_file_default_none(self):
         parser = build_parser()
@@ -1044,14 +1056,23 @@ class TestCmdJudgeEmptyGuard:
 class TestJudgeSelectsPrConfigs:
     """`judge --from-prs --configs ...` loads only the listed configs, newest PR each."""
 
-    def _run(self, monkeypatch, argv, prs):
+    def _run(self, monkeypatch, argv, prs, main_newer=()):
+        """prs: {config: open PR number}; main_newer: configs whose main outputs
+        are newer than their PR."""
         from ocr_bench.dataset import DatasetError
 
         seen: dict = {}
 
-        def discover(dataset, merge=False, only=None, duplicates=None):
+        def discover(
+            dataset, merge=False, only=None, duplicates=None, main_configs=(), superseded=None
+        ):
             seen["only"] = only
+            seen["main_configs"] = list(main_configs)
             found = [c for c in prs if only is None or c in only]
+            stale = [c for c in found if c in main_newer and c in main_configs]
+            found = [c for c in found if c not in stale]
+            if superseded is not None:
+                superseded.update({c: [prs[c]] for c in stale})
             if duplicates is not None and "dots-ocr" in found:
                 duplicates["dots-ocr"] = [2]
             return found, {c: f"refs/pr/{prs[c]}" for c in found}
@@ -1062,6 +1083,7 @@ class TestJudgeSelectsPrConfigs:
             raise DatasetError("stop after load")
 
         monkeypatch.setattr(cli, "discover_pr_configs", discover)
+        monkeypatch.setattr(cli, "discover_configs", lambda dataset: ["dots-ocr", "glm-ocr"])
         monkeypatch.setattr(cli, "load_config_dataset", load)
         with pytest.raises(DatasetError, match="stop after load"):
             cli.cmd_judge(build_parser().parse_args(argv))
@@ -1090,6 +1112,41 @@ class TestJudgeSelectsPrConfigs:
         out = " ".join(capsys.readouterr().out.split())
         assert "0 from PRs" in out
         assert "1 from main ['glm-ocr']" in out
+
+    def test_selected_config_with_newer_main_loads_from_main(self, monkeypatch, capsys):
+        seen = self._run(
+            monkeypatch,
+            ["judge", "u/ds", "--from-prs", "--configs", "dots-ocr", "nuextract3", "--no-publish"],
+            prs={"dots-ocr": 2, "nuextract3": 9},
+            main_newer={"dots-ocr"},
+        )
+        assert seen["main_configs"] == ["dots-ocr", "glm-ocr"]
+        assert seen["configs"] == ["dots-ocr", "nuextract3"]
+        assert seen["revisions"] == {"nuextract3": "refs/pr/9"}
+        out = " ".join(capsys.readouterr().out.split())
+        assert "1 from main ['dots-ocr']" in out
+
+    def test_from_prs_keeps_a_config_whose_main_is_newer(self, monkeypatch, capsys):
+        seen = self._run(
+            monkeypatch,
+            ["judge", "u/ds", "--from-prs", "--no-publish"],
+            prs={"dots-ocr": 2, "nuextract3": 9},
+            main_newer={"dots-ocr"},
+        )
+        assert seen["configs"] == ["nuextract3", "dots-ocr"]
+        assert seen["revisions"] == {"nuextract3": "refs/pr/9"}
+        out = " ".join(capsys.readouterr().out.split())
+        assert "1 from main: ['dots-ocr']" in out
+
+    def test_from_prs_all_superseded_still_judges_from_main(self, monkeypatch):
+        seen = self._run(
+            monkeypatch,
+            ["judge", "u/ds", "--from-prs", "--no-publish"],
+            prs={"dots-ocr": 2},
+            main_newer={"dots-ocr"},
+        )
+        assert seen["configs"] == ["dots-ocr"]
+        assert seen["revisions"] == {}
 
     def test_configs_without_from_prs_still_load_from_main(self, monkeypatch):
         seen = self._run(

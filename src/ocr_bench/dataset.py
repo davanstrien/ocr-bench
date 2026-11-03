@@ -6,7 +6,9 @@ import hashlib
 import json
 import math
 import os
+from collections.abc import Collection
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Literal
 
 import structlog
@@ -332,18 +334,63 @@ def discover_ocr_columns(dataset: Dataset) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
+def _last_change(api: HfApi, repo_id: str, path: str, revision: str) -> datetime | None:
+    """Date of the last commit that changed ``path`` at ``revision``.
+
+    Returns None when the path does not exist at that revision or the date
+    cannot be read.
+    """
+    try:
+        infos = api.get_paths_info(
+            repo_id, [path], revision=revision, repo_type="dataset", expand=True
+        )
+    except Exception as exc:
+        logger.warning("last_change_unavailable", path=path, revision=revision, error=str(exc))
+        return None
+    for info in infos:
+        last_commit = getattr(info, "last_commit", None)
+        if last_commit is not None and last_commit.date is not None:
+            return last_commit.date
+    return None
+
+
+def _main_is_newer(api: HfApi, repo_id: str, config: str, pr_num: int) -> bool:
+    """True when main changed ``config``'s data folder after the PR did.
+
+    Model outputs are pushed one config per folder (``<config>/train-*``), so
+    the folder's last commit dates the last change on each branch. A merge
+    takes the merge time, so this compares when each branch last changed,
+    not when each run was made. If either date is missing, the PR is kept.
+    """
+    main_date = _last_change(api, repo_id, config, "main")
+    if main_date is None:
+        return False
+    pr_date = _last_change(api, repo_id, config, f"refs/pr/{pr_num}")
+    if pr_date is None:
+        return False
+    return main_date > pr_date
+
+
 def discover_pr_configs(
     repo_id: str,
     merge: bool = False,
     api: HfApi | None = None,
     only: list[str] | None = None,
     duplicates: dict[str, list[int]] | None = None,
+    main_configs: Collection[str] = (),
+    superseded: dict[str, list[int]] | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     """Discover dataset configs from open PRs on a Hub dataset repo.
 
     PR titles must end with ``[config_name]`` to be detected. When several open
     PRs carry the same config (for example a re-run of a failed model), the
     newest PR (highest number) is used and the others are reported.
+
+    A config in ``main_configs`` is also on main. If main changed that
+    config's data after its newest open PR did (for example, a later re-run was
+    merged and the failed PR was left open), the config is not taken from a PR
+    and is not merged: it is left out of the result, so callers load it from
+    main.
 
     Args:
         repo_id: HF dataset repo id.
@@ -352,6 +399,10 @@ def discover_pr_configs(
         only: If given, keep only these config names, before any merge.
         duplicates: If given, filled with {config: [ignored older PR numbers]}
             so callers can tell the user which PRs were passed over.
+        main_configs: Configs declared on main, to check against their PRs.
+        superseded: If given, filled with {config: [open PR numbers]} for each
+            config that changed on main after its newest open PR. Such a
+            config has no ``duplicates`` entry.
 
     Returns:
         Tuple of (config_names, {config_name: pr_revision}), one entry per
@@ -362,6 +413,7 @@ def discover_pr_configs(
 
     wanted = set(only) if only is not None else None
     newest: dict[str, int] = {}  # config -> highest open PR number
+    older_prs: dict[str, list[int]] = {}  # config -> other open PR numbers
     order: list[str] = []
 
     for disc in api.get_repo_discussions(repo_id, repo_type="dataset"):
@@ -382,8 +434,19 @@ def discover_pr_configs(
                 "duplicate_pr_config", config=config, using_pr=newer, ignoring_pr=older
             )
             newest[config] = newer
-            if duplicates is not None:
-                duplicates.setdefault(config, []).append(older)
+            older_prs.setdefault(config, []).append(older)
+
+    on_main = set(main_configs)
+    stale = [c for c in order if c in on_main and _main_is_newer(api, repo_id, c, newest[c])]
+    for config in stale:
+        pr_numbers = sorted([newest[config], *older_prs.pop(config, [])])
+        logger.warning("main_newer_than_pr", config=config, ignoring_prs=pr_numbers)
+        if superseded is not None:
+            superseded[config] = pr_numbers
+    order = [c for c in order if c not in stale]
+    if duplicates is not None:
+        for config, numbers in older_prs.items():
+            duplicates.setdefault(config, []).extend(numbers)
 
     revisions: dict[str, str] = {}
     for config in order:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -940,3 +941,106 @@ def test_discover_pr_configs_reports_ignored_duplicates():
     duplicates: dict[str, list[int]] = {}
     discover_pr_configs("repo/id", api=api, duplicates=duplicates)
     assert duplicates == {"dots-ocr": [2]}
+
+
+class TestDiscoverPrConfigsAgainstMain:
+    """An open PR older than main's outputs for the same config is passed over."""
+
+    @staticmethod
+    def _disc(num, title):
+        d = MagicMock()
+        d.num, d.title, d.is_pull_request, d.status = num, title, True, "open"
+        return d
+
+    @staticmethod
+    def _api(discussions, dates):
+        """dates: {(path, revision): datetime}; a missing key means no such path."""
+        from types import SimpleNamespace
+
+        api = MagicMock()
+        api.get_repo_discussions.return_value = discussions
+
+        def paths_info(repo_id, paths, revision, repo_type, expand):
+            date = dates.get((paths[0], revision))
+            if date is None:
+                return []
+            return [SimpleNamespace(path=paths[0], last_commit=SimpleNamespace(date=date))]
+
+        api.get_paths_info.side_effect = paths_info
+        return api
+
+    FEB = datetime(2026, 2, 24, tzinfo=UTC)
+    JUL = datetime(2026, 7, 8, tzinfo=UTC)
+    NOV = datetime(2026, 11, 3, tzinfo=UTC)
+
+    def test_main_newer_than_pr_drops_the_pr(self):
+        # A failed run's PR #2 was left open; the re-run was merged to main.
+        api = self._api(
+            [self._disc(9, "Add [nuextract3]"), self._disc(2, "Add [dots-ocr]")],
+            {("dots-ocr", "main"): self.NOV, ("dots-ocr", "refs/pr/2"): self.FEB},
+        )
+        superseded: dict[str, list[int]] = {}
+        names, revisions = discover_pr_configs(
+            "repo/id", api=api, main_configs=["dots-ocr"], superseded=superseded
+        )
+        assert names == ["nuextract3"]
+        assert revisions == {"nuextract3": "refs/pr/9"}
+        assert superseded == {"dots-ocr": [2]}
+
+    def test_pr_newer_than_main_is_kept(self):
+        # A newer re-run in PR #16 than the glm-ocr outputs merged to main.
+        api = self._api(
+            [self._disc(16, "Add [glm-ocr]")],
+            {("glm-ocr", "main"): self.FEB, ("glm-ocr", "refs/pr/16"): self.JUL},
+        )
+        superseded: dict[str, list[int]] = {}
+        names, revisions = discover_pr_configs(
+            "repo/id", api=api, main_configs=["glm-ocr"], superseded=superseded
+        )
+        assert names == ["glm-ocr"]
+        assert revisions == {"glm-ocr": "refs/pr/16"}
+        assert superseded == {}
+
+    def test_config_not_on_main_is_not_checked(self):
+        api = self._api([self._disc(9, "Add [nuextract3]")], {})
+        names, _ = discover_pr_configs("repo/id", api=api, main_configs=["dots-ocr"])
+        assert names == ["nuextract3"]
+        api.get_paths_info.assert_not_called()
+
+    def test_missing_dates_keep_the_pr(self):
+        # Main declares the config but has no <config>/ folder to date.
+        api = self._api([self._disc(2, "Add [dots-ocr]")], {("dots-ocr", "refs/pr/2"): self.FEB})
+        names, revisions = discover_pr_configs("repo/id", api=api, main_configs=["dots-ocr"])
+        assert names == ["dots-ocr"]
+        assert revisions == {"dots-ocr": "refs/pr/2"}
+
+    def test_lookup_error_keeps_the_pr(self):
+        api = self._api([self._disc(2, "Add [dots-ocr]")], {})
+        api.get_paths_info.side_effect = RuntimeError("Hub unavailable")
+        names, _ = discover_pr_configs("repo/id", api=api, main_configs=["dots-ocr"])
+        assert names == ["dots-ocr"]
+
+    def test_superseded_pr_is_not_merged_and_has_no_duplicate_entry(self):
+        api = self._api(
+            [
+                self._disc(5, "Rerun [dots-ocr]"),
+                self._disc(3, "Add [glm-ocr]"),
+                self._disc(2, "Add [dots-ocr]"),
+            ],
+            {("dots-ocr", "main"): self.NOV, ("dots-ocr", "refs/pr/5"): self.JUL},
+        )
+        duplicates: dict[str, list[int]] = {}
+        superseded: dict[str, list[int]] = {}
+        names, revisions = discover_pr_configs(
+            "repo/id",
+            merge=True,
+            api=api,
+            duplicates=duplicates,
+            main_configs=["dots-ocr"],
+            superseded=superseded,
+        )
+        assert names == ["glm-ocr"]
+        assert revisions == {}
+        api.merge_pull_request.assert_called_once_with("repo/id", 3, repo_type="dataset")
+        assert superseded == {"dots-ocr": [2, 5]}
+        assert duplicates == {}
