@@ -240,6 +240,9 @@ def launch_settings(
     """Return the ``run_uv_job`` keyword arguments that pick hardware and runtime.
 
     - ``flavor``: ``flavor_override``, else the registry's ``default_flavor``.
+      The header's ``flavor``, ``timeout``, ``secrets`` and ``labels`` are
+      deliberately ignored: ocr-bench picks hardware and timeout per run and
+      always passes ``HF_TOKEN``.
     - When the registry sets ``image``, its ``image``/``python``/``env`` are
       used as a set and the script header is ignored (a deliberate override).
     - Otherwise each runtime key comes from the script header, as with
@@ -266,6 +269,18 @@ def launch_settings(
     if env:
         settings["env"] = env
     return settings
+
+
+def resolve_launch_settings(
+    config: ModelConfig, *, flavor_override: str | None = None
+) -> dict[str, Any]:
+    """Fetch the recipe header when needed and return its ``run_uv_job`` settings.
+
+    Used by both ``run --dry-run`` and :func:`launch_ocr_jobs`, so the plan
+    shown is the plan launched. A registry ``image`` skips the fetch.
+    """
+    header = {} if config.image else fetch_hf_jobs_header(config.script)
+    return launch_settings(config, flavor_override=flavor_override, header=header)
 
 
 def build_script_args(
@@ -332,10 +347,8 @@ def launch_ocr_jobs(
     # unreadable script header stops the whole run instead of leaving it partial.
     settings_by_slug: dict[str, dict[str, Any]] = {}
     for slug in selected:
-        config = MODEL_REGISTRY[slug]
-        header = {} if config.image else fetch_hf_jobs_header(config.script)
-        settings_by_slug[slug] = launch_settings(
-            config, flavor_override=flavor_override, header=header
+        settings_by_slug[slug] = resolve_launch_settings(
+            MODEL_REGISTRY[slug], flavor_override=flavor_override
         )
 
     jobs: list[JobRun] = []

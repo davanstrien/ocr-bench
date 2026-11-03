@@ -1719,10 +1719,9 @@ def cmd_run(args: argparse.Namespace) -> list[JobRun]:
         DEFAULT_MODELS,
         MODEL_REGISTRY,
         build_script_args,
-        fetch_hf_jobs_header,
         launch_ocr_jobs,
-        launch_settings,
         poll_jobs,
+        resolve_launch_settings,
     )
 
     # --list-models
@@ -1770,8 +1769,7 @@ def cmd_run(args: argparse.Namespace) -> list[JobRun]:
         console.print("[bold yellow]DRY RUN[/bold yellow] — no jobs will be launched\n")
         for slug in selected:
             cfg = MODEL_REGISTRY[slug]
-            header = {} if cfg.image else fetch_hf_jobs_header(cfg.script)
-            settings = launch_settings(cfg, flavor_override=args.flavor, header=header)
+            settings = resolve_launch_settings(cfg, flavor_override=args.flavor)
             script_args = build_script_args(
                 args.input_dataset,
                 args.output_repo,
