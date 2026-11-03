@@ -9,6 +9,10 @@ current behaviour.
 
 ## [Unreleased]
 
+### Other
+
+- The README example boards are re-judged with 0.0.5: the default judge, page-level intervals and `--max-ocr-text-len 8000`. dots.ocr's Britannica row comes from a working re-run.
+
 ## [0.0.5] - 2026-11-03
 
 ### Upgrading from 0.0.4
