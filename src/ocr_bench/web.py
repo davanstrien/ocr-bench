@@ -158,6 +158,8 @@ def create_app(
             source_configs = json.loads(source_configs)
         except json.JSONDecodeError:
             source_configs = []
+    if not isinstance(source_configs, list):
+        source_configs = []
 
     source_revisions = metadata.get("source_revisions") or {}
     if isinstance(source_revisions, str):  # published as a JSON string

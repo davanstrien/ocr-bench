@@ -109,9 +109,10 @@ class ImageLoader:
         self._init_done = True
 
         try:
-            if self._from_prs and self._source_revisions:
-                # Use the revisions the run recorded: PRs may since have been
-                # merged, closed or superseded.
+            if self._source_revisions:
+                # Use the revisions the run recorded, whatever from_prs says:
+                # PRs may since have been merged, closed or superseded, and a
+                # selection read entirely from main records from_prs=False.
                 configs = self._source_configs or list(self._source_revisions)
                 for config in configs:
                     revision = self._source_revisions.get(config, "main")
@@ -134,6 +135,10 @@ class ImageLoader:
                     self._pr_revision = revisions.get(config)
                     if self._pr_revision:
                         break
+            elif self._source_configs:
+                # Config-per-model run read from main: use one of its configs,
+                # not the repo's default config.
+                self._config_name = self._source_configs[0]
 
             # Probe for image column by loading 1 row
             probe = load_dataset(**self._load_kwargs(f"{self._source_split}[:1]"))

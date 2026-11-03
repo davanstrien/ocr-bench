@@ -264,3 +264,32 @@ class TestImageLoaderUsesJudgedConfigs:
         mock_discover.assert_not_called()
         assert mock_load.call_args_list[1].kwargs["name"] == "dots-ocr"
         assert mock_load.call_args_list[1].kwargs["revision"] == "refs/pr/22"
+
+    @patch("ocr_bench.dataset.discover_pr_configs")
+    @patch("ocr_bench.viewer.load_dataset")
+    def test_all_main_selection_with_from_prs_false_uses_selected_config(
+        self, mock_load, mock_discover
+    ):
+        # `--from-prs --configs` that found nothing in PRs records from_prs=False.
+        mock_load.side_effect = [self._probe(), [{"image": "page"}]]
+
+        loader = ImageLoader(
+            "user/source",
+            from_prs=False,
+            source_configs=["glm-ocr"],
+            source_revisions={"glm-ocr": "main"},
+        )
+        assert loader.get(0) == "page"
+
+        mock_discover.assert_not_called()
+        assert mock_load.call_args_list[1].kwargs["name"] == "glm-ocr"
+        assert "revision" not in mock_load.call_args_list[1].kwargs
+
+    @patch("ocr_bench.viewer.load_dataset")
+    def test_configs_on_main_without_revisions_use_first_config(self, mock_load):
+        mock_load.side_effect = [self._probe(), [{"image": "page"}]]
+
+        loader = ImageLoader("user/source", source_configs=["a", "b"])
+        assert loader.get(0) == "page"
+
+        assert mock_load.call_args_list[1].kwargs["name"] == "a"
