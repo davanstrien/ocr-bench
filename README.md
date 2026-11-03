@@ -23,13 +23,13 @@ The two published example boards, as ELO with page-level bootstrap 95% confidenc
 | dots.ocr (1.7B)    | 1409 (1345–1469)\*          | 1632 (1571–1702)                         |
 | DeepSeek-OCR (4B)  | 1255 (1190–1309)            | 1408 (1336–1474)                         |
 
-On Britannica, NuExtract3 is ahead of every other model. GLM-OCR and LightOnOCR-2 share second place, FireRed-OCR and dots.ocr share third, and DeepSeek-OCR is last. On BPL, dots.ocr is ahead of GLM-OCR and DeepSeek-OCR, and LightOnOCR-2 overlaps all three. So dots.ocr is in the lower half on Britannica and has the highest rating on BPL, where only LightOnOCR-2 overlaps it. Two collections cannot show which model suits which document type, but they show that the order can change. Judging more pages gathers more evidence, and human votes in the viewer cross-check the judge on the overlapping pairs; neither guarantees separation.
+On Britannica, NuExtract3 is ahead of every other model. Below it, GLM-OCR and LightOnOCR-2 overlap each other and are ahead of the rest. FireRed-OCR and dots.ocr overlap each other and are ahead of DeepSeek-OCR. On BPL, dots.ocr is ahead of GLM-OCR and DeepSeek-OCR, and LightOnOCR-2 overlaps all three. So dots.ocr is in the lower half on Britannica and has the highest rating on BPL, where only LightOnOCR-2 overlaps it. Two collections cannot show which model suits which document type, but they show that the order can change. For your own boards, judging more pages gathers more evidence, and human votes in the viewer cross-check the judge on the overlapping pairs; neither guarantees separation.
 
-Both boards were judged with ocr-bench 0.0.5, the default judge and criteria, and `--max-ocr-text-len 8000`, because most Britannica pages are longer than the 2,500-character default. On BPL, 17 of the 50 cards had no output of 20 or more characters from any model, so they were not judged.
+Both boards were judged with ocr-bench 0.0.5, the default judge and criteria, and `--max-ocr-text-len 8000`, because most Britannica pages are longer than the 2,500-character default. 21 of the 300 Britannica outputs are still longer than 8,000 characters; 20 of them are repetition loops, and the judge sees their first 8,000 characters. On BPL, 17 of the 50 cards had no output of 20 or more characters from any model, and the source dataset has no text for them, so they look blank. They were not judged.
 
 \* From a re-run of dots.ocr. Its first Britannica run produced only `[OCR ERROR]` placeholders; current versions exclude such outputs and mark the run as failed.
 
-**[Try the live viewer](https://huggingface.co/spaces/davanstrien/ocr-bench-britannica-results-qwen35-viewer)** — browse an earlier Britannica 1771 board (previous default judge), compare OCR outputs side-by-side, and vote on quality yourself.
+**[Try the live viewer](https://huggingface.co/spaces/davanstrien/ocr-bench-britannica-results-qwen35-viewer)** — a demo on an earlier Britannica 1771 board. It uses the previous default judge and more models, so its rankings and votes cover different comparisons from the tables above, and its dots.ocr row is the failed run. Compare OCR outputs side-by-side and vote on quality yourself.
 
 ## Hub-native by design
 
@@ -144,7 +144,7 @@ Browse these on the Hub:
 
 - [davanstrien/ocr-bench-britannica-results-qwen38](https://huggingface.co/datasets/davanstrien/ocr-bench-britannica-results-qwen38) — Encyclopaedia Britannica 1771, 6 models, 50 pages (the board above)
 - [davanstrien/bpl-ocr-bench-results-qwen38](https://huggingface.co/datasets/davanstrien/bpl-ocr-bench-results-qwen38) — Boston Public Library card catalog, 4 models, 33 judged cards of 50 (the board above)
-- [Live viewer](https://huggingface.co/spaces/davanstrien/ocr-bench-britannica-results-qwen35-viewer) — an earlier Britannica board (previous default judge), with ELO chart and comparison browser
+- [Live viewer](https://huggingface.co/spaces/davanstrien/ocr-bench-britannica-results-qwen35-viewer) — a demo on an earlier, larger Britannica board (previous default judge; its dots.ocr row is the failed run), with ELO chart and comparison browser
 
 ## Install
 
