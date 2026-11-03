@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import sys
 from collections.abc import Iterable
@@ -732,6 +733,53 @@ def _prepare_destination(
         )
 
 
+def _string_list(value: object) -> list[str] | None:
+    """Decode a metadata list stored as a list or a JSON string; None if malformed."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(value, list):
+        return None
+    strings = [v for v in value if isinstance(v, str) and v]
+    if len(strings) != len(value):
+        return None
+    return strings
+
+
+def _previous_judge_hint(existing_meta_rows: list[dict], requested_models: list[str] | None) -> str:
+    """Name the earlier judge when a resume may have failed because the default judge changed.
+
+    Returns an empty string unless the user relied on the default judge and the
+    repo's latest metadata row (its last completed run) records a different
+    judge or jury. Exact flags are suggested only when the recorded names hash
+    to the recorded judge specs, i.e. the names are the specs that were passed;
+    endpoint judges are recorded under a model name or URL digest instead.
+    """
+    if requested_models or not existing_meta_rows:
+        return ""
+    row = existing_meta_rows[-1]
+    names = _string_list(row.get("judge_models"))
+    if not names or names == [DEFAULT_JUDGE]:
+        return ""
+    hint = (
+        f"\nThe last completed run in this repo used {', '.join(names)}; the default "
+        f"judge is now {DEFAULT_JUDGE}. If the other settings match, "
+    )
+    if _string_list(row.get("judge_spec_hashes")) == hash_judge_specs(names):
+        flags = " ".join(f"--model {name}" for name in names)
+        bench_flags = " ".join(f"--judge-model {name}" for name in names)
+        return hint + (
+            f"passing [bold]{flags}[/bold] (with `ocr-bench bench`: "
+            f"[bold]{bench_flags}[/bold]) may let you continue that board."
+        )
+    return hint + (
+        "passing the same judge spec(s) as that run (`--model`, or `--judge-model` "
+        "with `ocr-bench bench`) may let you continue that board."
+    )
+
+
 def _filter_existing_sentinel_comparisons(
     results: list[ComparisonResult],
 ) -> tuple[list[ComparisonResult], int]:
@@ -1307,6 +1355,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     "source repo/config/split/fingerprint, judge or jury, sampling, "
                     "prompt, or preprocessing changed. Re-run with the original "
                     "settings, or use [bold]--full-rejudge[/bold]."
+                    + _previous_judge_hint(existing_meta_rows, args.models)
                 )
                 sys.exit(1)
 
