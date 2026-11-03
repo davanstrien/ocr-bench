@@ -1049,9 +1049,11 @@ class TestJudgeSelectsPrConfigs:
 
         seen: dict = {}
 
-        def discover(dataset, merge=False, only=None):
+        def discover(dataset, merge=False, only=None, duplicates=None):
             seen["only"] = only
             found = [c for c in prs if only is None or c in only]
+            if duplicates is not None and "dots-ocr" in found:
+                duplicates["dots-ocr"] = [2]
             return found, {c: f"refs/pr/{prs[c]}" for c in found}
 
         def load(dataset, config_names, split="train", pr_revisions=None, **kwargs):
@@ -1075,7 +1077,18 @@ class TestJudgeSelectsPrConfigs:
         assert seen["configs"] == ["dots-ocr", "glm-ocr"]
         assert seen["revisions"] == {"dots-ocr": "refs/pr/22"}  # glm-ocr from main
         out = " ".join(capsys.readouterr().out.split())
-        assert "1 from PRs ['dots-ocr']" in out
+        assert "1 from PRs (dots-ocr (#22))" in out
+        assert "1 from main ['glm-ocr']" in out
+
+    def test_all_selected_configs_on_main(self, monkeypatch, capsys):
+        seen = self._run(
+            monkeypatch,
+            ["judge", "u/ds", "--from-prs", "--configs", "glm-ocr", "--no-publish"],
+            prs={},
+        )
+        assert seen["revisions"] == {}
+        out = " ".join(capsys.readouterr().out.split())
+        assert "0 from PRs" in out
         assert "1 from main ['glm-ocr']" in out
 
     def test_configs_without_from_prs_still_load_from_main(self, monkeypatch):

@@ -59,6 +59,8 @@ class EvalMetadata:
     source_fingerprint: str = ""
     source_column_fingerprints: dict[str, str] = field(default_factory=dict)
     source_configs: list[str] = field(default_factory=list)
+    # Where each source config was read from: "refs/pr/N" or "main".
+    source_revisions: dict[str, str] = field(default_factory=dict)
     source_columns: dict[str, str] = field(default_factory=dict)
     # Unified column -> original output column selected from the source config.
     source_output_columns: dict[str, str] = field(default_factory=dict)
@@ -411,6 +413,7 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
             metadata.source_column_fingerprints, sort_keys=True
         ),
         "source_configs": json.dumps(metadata.source_configs),
+        "source_revisions": json.dumps(metadata.source_revisions, sort_keys=True),
         "source_columns": json.dumps(metadata.source_columns, sort_keys=True),
         "source_output_columns": json.dumps(metadata.source_output_columns, sort_keys=True),
         "judge_models": json.dumps(metadata.judge_models),

@@ -337,6 +337,7 @@ def discover_pr_configs(
     merge: bool = False,
     api: HfApi | None = None,
     only: list[str] | None = None,
+    duplicates: dict[str, list[int]] | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     """Discover dataset configs from open PRs on a Hub dataset repo.
 
@@ -349,6 +350,8 @@ def discover_pr_configs(
         merge: If True, merge each selected PR before loading.
         api: Optional pre-configured HfApi instance.
         only: If given, keep only these config names, before any merge.
+        duplicates: If given, filled with {config: [ignored older PR numbers]}
+            so callers can tell the user which PRs were passed over.
 
     Returns:
         Tuple of (config_names, {config_name: pr_revision}), one entry per
@@ -379,6 +382,8 @@ def discover_pr_configs(
                 "duplicate_pr_config", config=config, using_pr=newer, ignoring_pr=older
             )
             newest[config] = newer
+            if duplicates is not None:
+                duplicates.setdefault(config, []).append(older)
 
     revisions: dict[str, str] = {}
     for config in order:

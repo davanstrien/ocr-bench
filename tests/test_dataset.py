@@ -921,3 +921,22 @@ class TestLoadFlatDataset:
 
         with pytest.raises(DatasetError, match="Column 'missing' not found"):
             load_flat_dataset("repo/id", columns=["missing"])
+
+
+def test_discover_pr_configs_reports_ignored_duplicates():
+    from unittest.mock import MagicMock
+
+    def disc(num, title):
+        d = MagicMock()
+        d.num, d.title, d.is_pull_request, d.status = num, title, True, "open"
+        return d
+
+    api = MagicMock()
+    api.get_repo_discussions.return_value = [
+        disc(22, "New [dots-ocr]"),
+        disc(9, "Add [nuextract3]"),
+        disc(2, "Old [dots-ocr]"),
+    ]
+    duplicates: dict[str, list[int]] = {}
+    discover_pr_configs("repo/id", api=api, duplicates=duplicates)
+    assert duplicates == {"dots-ocr": [2]}

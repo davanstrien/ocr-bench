@@ -196,3 +196,71 @@ class TestWinnerBadge:
 
     def test_tie(self):
         assert _winner_badge("tie") == "Tie"
+
+
+class TestImageLoaderUsesJudgedConfigs:
+    """Images must come from a config the run judged, not any open PR."""
+
+    def _probe(self):
+        probe = MagicMock()
+        probe.column_names = ["image"]
+        return probe
+
+    @patch("ocr_bench.dataset.discover_pr_configs")
+    @patch("ocr_bench.viewer.load_dataset")
+    def test_excluded_pr_config_is_not_used(self, mock_load, mock_discover):
+        mock_discover.return_value = (["dots-ocr"], {"dots-ocr": "refs/pr/22"})
+        mock_load.side_effect = [self._probe(), [{"image": "page"}]]
+
+        loader = ImageLoader(
+            "user/source", from_prs=True, source_configs=["glm-ocr", "dots-ocr"]
+        )
+        assert loader.get(4) == "page"
+
+        assert mock_discover.call_args.kwargs["only"] == ["glm-ocr", "dots-ocr"]
+        for call in mock_load.call_args_list:
+            assert call.kwargs["name"] == "dots-ocr"
+            assert call.kwargs["revision"] == "refs/pr/22"
+        assert mock_discover.call_count == 1  # resolved once, not per image
+
+    @patch("ocr_bench.dataset.discover_pr_configs")
+    @patch("ocr_bench.viewer.load_dataset")
+    def test_selected_configs_on_main_load_without_revision(self, mock_load, mock_discover):
+        mock_discover.return_value = ([], {})
+        mock_load.side_effect = [self._probe(), [{"image": "page"}]]
+
+        loader = ImageLoader("user/source", from_prs=True, source_configs=["glm-ocr"])
+        assert loader.get(0) == "page"
+
+        assert mock_load.call_args_list[1].kwargs["name"] == "glm-ocr"
+        assert "revision" not in mock_load.call_args_list[1].kwargs
+
+    @patch("ocr_bench.dataset.discover_pr_configs")
+    @patch("ocr_bench.viewer.load_dataset")
+    def test_old_metadata_without_configs_uses_first_pr(self, mock_load, mock_discover):
+        mock_discover.return_value = (["a", "b"], {"a": "refs/pr/1", "b": "refs/pr/2"})
+        mock_load.side_effect = [self._probe(), [{"image": "page"}]]
+
+        loader = ImageLoader("user/source", from_prs=True)
+        assert loader.get(0) == "page"
+
+        assert mock_discover.call_args.kwargs["only"] is None
+        assert mock_load.call_args_list[1].kwargs["name"] == "a"
+        assert mock_load.call_args_list[1].kwargs["revision"] == "refs/pr/1"
+
+    @patch("ocr_bench.dataset.discover_pr_configs")
+    @patch("ocr_bench.viewer.load_dataset")
+    def test_recorded_revisions_skip_discovery(self, mock_load, mock_discover):
+        mock_load.side_effect = [self._probe(), [{"image": "page"}]]
+
+        loader = ImageLoader(
+            "user/source",
+            from_prs=True,
+            source_configs=["glm-ocr", "dots-ocr"],
+            source_revisions={"glm-ocr": "main", "dots-ocr": "refs/pr/22"},
+        )
+        assert loader.get(1) == "page"
+
+        mock_discover.assert_not_called()
+        assert mock_load.call_args_list[1].kwargs["name"] == "dots-ocr"
+        assert mock_load.call_args_list[1].kwargs["revision"] == "refs/pr/22"
