@@ -13,6 +13,7 @@ from ocr_bench.run import (
     ModelConfig,
     build_script_args,
     failed_jobs,
+    fetch_hf_jobs_header,
     launch_ocr_jobs,
     launch_settings,
     list_models,
@@ -358,10 +359,67 @@ class TestParseHfJobsHeader:
 
     def test_ignores_other_block_types(self):
         script = (
-            '# /// other\n# [tool.hf-jobs]\n# image = "wrong"\n# ///\n'
+            '# /// other\n# [tool.hf-jobs]\n# image = "wrong"\n# ///\n\n'
             '# /// script\n# [tool.hf-jobs]\n# image = "right"\n# ///\n'
         )
         assert parse_hf_jobs_header(script) == {"image": "right"}
+
+    def test_crlf_and_cr_line_endings(self):
+        assert parse_hf_jobs_header(VLLM_HEADER_SCRIPT.replace("\n", "\r\n")) == VLLM_HEADER
+        assert parse_hf_jobs_header(VLLM_HEADER_SCRIPT.replace("\n", "\r")) == VLLM_HEADER
+
+    def test_closing_line_inside_multiline_string(self):
+        # PEP 723: the block ends at the last `# ///` line of the comment run.
+        script = (
+            "# /// script\n"
+            '# note = """\n'
+            "# ///\n"
+            '# """\n'
+            "# [tool.hf-jobs]\n"
+            '# image = "right"\n'
+            "# ///\n"
+            "import sys\n"
+        )
+        assert parse_hf_jobs_header(script) == {"image": "right"}
+
+    def test_duplicate_script_blocks_are_an_error(self):
+        script = (
+            '# /// script\n# [tool.hf-jobs]\n# image = "a"\n# ///\n\n'
+            '# /// script\n# [tool.hf-jobs]\n# image = "b"\n# ///\n'
+        )
+        with pytest.raises(ValueError, match="multiple"):
+            parse_hf_jobs_header(script)
+
+
+class TestFetchHfJobsHeader:
+    def _session(self, handler):
+        import httpx
+
+        return httpx.Client(transport=httpx.MockTransport(handler))
+
+    def test_reads_header_from_response(self):
+        import httpx
+
+        session = self._session(lambda request: httpx.Response(200, text=VLLM_HEADER_SCRIPT))
+        with patch("ocr_bench.run.get_session", return_value=session):
+            assert fetch_hf_jobs_header("https://example.com/r.py") == VLLM_HEADER
+
+    def test_http_error_is_wrapped(self):
+        import httpx
+
+        session = self._session(lambda request: httpx.Response(404, text="missing"))
+        with patch("ocr_bench.run.get_session", return_value=session):
+            with pytest.raises(RuntimeError, match="hf-jobs.*r.py"):
+                fetch_hf_jobs_header("https://example.com/r.py")
+
+    def test_invalid_toml_is_wrapped(self):
+        import httpx
+
+        bad = "# /// script\n# [tool.hf-jobs\n# ///\n"
+        session = self._session(lambda request: httpx.Response(200, text=bad))
+        with patch("ocr_bench.run.get_session", return_value=session):
+            with pytest.raises(RuntimeError, match="hf-jobs"):
+                fetch_hf_jobs_header("https://example.com/r.py")
 
 
 class TestLaunchSettings:
@@ -381,10 +439,27 @@ class TestLaunchSettings:
             "env": VLLM_HEADER["env"],
         }
 
-    def test_header_without_image_ignores_python_and_env(self):
+    def test_header_python_and_env_apply_without_image(self):
+        # As with `hf jobs uv run`, each header key applies on its own.
         config = ModelConfig(script="s", model_id="m", size="1B")
         header = {"python": "/usr/bin/python3", "env": {"A": "1"}, "flavor": "a10g-small"}
-        assert launch_settings(config, header=header) == {"flavor": "l4x1"}
+        assert launch_settings(config, header=header) == {
+            "flavor": "l4x1",
+            "python": "/usr/bin/python3",
+            "env": {"A": "1"},
+        }
+
+    def test_registry_python_and_env_without_image_are_kept(self):
+        config = ModelConfig(
+            script="s", model_id="m", size="1B", python="/opt/py", env={"A": "reg", "B": "2"}
+        )
+        settings = launch_settings(config, header={"image": "img", "env": {"A": "hdr", "C": "3"}})
+        assert settings == {
+            "flavor": "l4x1",
+            "image": "img",
+            "python": "/opt/py",
+            "env": {"A": "reg", "B": "2", "C": "3"},
+        }
 
     def test_flavor_override_wins(self):
         config = ModelConfig(script="s", model_id="m", size="1B")

@@ -187,10 +187,11 @@ def list_models() -> list[str]:
     return sorted(MODEL_REGISTRY.keys())
 
 
-# PEP 723 inline-metadata block. The specification's regex with a lazy body,
-# so each block ends at its own closing ``# ///`` line.
+# PEP 723 inline-metadata block: the specification's reference regex. The body
+# is greedy, so a block ends at the last ``# ///`` line of its comment run, which
+# lets a TOML multi-line string contain a ``# ///`` line.
 _PEP723_BLOCK = re.compile(
-    r"(?m)^# /// (?P<type>[a-zA-Z0-9-]+)$\s(?P<content>(^#(| .*)$\s)+?)^# ///$"
+    r"(?m)^# /// (?P<type>[a-zA-Z0-9-]+)$\s(?P<content>(^#(| .*)$\s)+)^# ///$"
 )
 
 
@@ -199,16 +200,19 @@ def parse_hf_jobs_header(script_text: str) -> dict[str, Any]:
 
     The table sits in the script's PEP 723 ``script`` block. ``hf jobs uv run``
     reads it for launch settings such as the Docker image; ``HfApi.run_uv_job``
-    does not, so :func:`launch_settings` applies it for ocr-bench.
+    does not, so :func:`launch_settings` applies it for ocr-bench. Raises
+    ``ValueError`` for more than one ``script`` block, as PEP 723 requires.
     """
-    for match in _PEP723_BLOCK.finditer(script_text):
-        if match.group("type") != "script":
-            continue
-        lines = match.group("content").splitlines(keepends=True)
-        toml_text = "".join(line[2:] if line.startswith("# ") else line[1:] for line in lines)
-        table = tomllib.loads(toml_text).get("tool", {}).get("hf-jobs", {})
-        return table if isinstance(table, dict) else {}
-    return {}
+    text = script_text.replace("\r\n", "\n").replace("\r", "\n")
+    blocks = [m for m in _PEP723_BLOCK.finditer(text) if m.group("type") == "script"]
+    if len(blocks) > 1:
+        raise ValueError("multiple PEP 723 `script` blocks")
+    if not blocks:
+        return {}
+    lines = blocks[0].group("content").splitlines(keepends=True)
+    toml_text = "".join(line[2:] if line.startswith("# ") else line[1:] for line in lines)
+    table = tomllib.loads(toml_text).get("tool", {}).get("hf-jobs", {})
+    return table if isinstance(table, dict) else {}
 
 
 def fetch_hf_jobs_header(script_url: str) -> dict[str, Any]:
@@ -236,10 +240,13 @@ def launch_settings(
     """Return the ``run_uv_job`` keyword arguments that pick hardware and runtime.
 
     - ``flavor``: ``flavor_override``, else the registry's ``default_flavor``.
-    - ``image``/``python``/``env``: the registry's values when it sets
-      ``image``; otherwise the script header's ``image``, ``python`` and ``env``,
-      taken together because they are tested as a set. Recipes that moved vLLM
-      out of their dependencies into a header image need this to start at all.
+    - When the registry sets ``image``, its ``image``/``python``/``env`` are
+      used as a set and the script header is ignored (a deliberate override).
+    - Otherwise each runtime key comes from the script header, as with
+      ``hf jobs uv run``: ``image`` and ``python`` from the header unless the
+      registry sets ``python``; ``env`` is the header's merged with the
+      registry's, the registry winning. Recipes that moved vLLM out of their
+      dependencies into a header image need this to start at all.
     """
     settings: dict[str, Any] = {"flavor": flavor_override or config.default_flavor}
     if config.image:
@@ -247,15 +254,17 @@ def launch_settings(
         if config.python:
             settings["python"] = config.python
         if config.env:
-            settings["env"] = config.env
+            settings["env"] = dict(config.env)
         return settings
     header = header or {}
     if header.get("image"):
         settings["image"] = header["image"]
-        if header.get("python"):
-            settings["python"] = header["python"]
-        if header.get("env"):
-            settings["env"] = dict(header["env"])
+    python = config.python or header.get("python")
+    if python:
+        settings["python"] = python
+    env = {**dict(header.get("env") or {}), **(config.env or {})}
+    if env:
+        settings["env"] = env
     return settings
 
 

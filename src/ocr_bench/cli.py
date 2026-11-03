@@ -1788,8 +1788,10 @@ def cmd_run(args: argparse.Namespace) -> list[JobRun]:
             if "image" in settings:
                 source = "registry" if cfg.image else "script header"
                 console.print(f"  Image:   {settings['image']} ({source})")
-                console.print(f"  Python:  {settings.get('python')}")
-                console.print(f"  Env:     {settings.get('env')}")
+            if "python" in settings:
+                console.print(f"  Python:  {settings['python']}")
+            if "env" in settings:
+                console.print(f"  Env:     {settings['env']}")
             console.print(f"  Script:  {cfg.script}")
             console.print(f"  Args:    {' '.join(script_args)}")
             console.print()

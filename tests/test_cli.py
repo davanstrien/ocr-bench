@@ -956,7 +956,9 @@ class TestCmdRun:
         assert exc.value.code == 2
         assert "requires INPUT_DATASET and OUTPUT_REPO" in capsys.readouterr().out
 
-    def test_dry_run_includes_split_in_job_args(self, capsys):
+    def test_dry_run_includes_split_in_job_args(self, capsys, monkeypatch):
+        header = {"image": "vllm/vllm-openai:vX", "python": "/usr/bin/python3"}
+        monkeypatch.setattr("ocr_bench.run.fetch_hf_jobs_header", lambda url: header)
         args = build_parser().parse_args(
             [
                 "run",
@@ -971,7 +973,9 @@ class TestCmdRun:
         )
 
         assert cli.cmd_run(args) == []
-        assert "--split validation" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "--split validation" in out
+        assert "vllm/vllm-openai:vX (script header)" in out
 
     def _run(self, monkeypatch, statuses):
         from ocr_bench.run import JobRun
