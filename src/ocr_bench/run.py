@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import re
 import time
+import tomllib
 from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
 from huggingface_hub import HfApi, get_token
+from huggingface_hub.utils import get_session
 
 logger = structlog.get_logger()
 
@@ -16,11 +19,10 @@ logger = structlog.get_logger()
 class ModelConfig:
     """Configuration for a single OCR model.
 
-    ``image`` / ``python`` / ``env`` are only needed by "image-mode" models —
-    ones whose CUDA kernels (e.g. flashinfer for Qwen3.5) must come from a
-    prebuilt Docker image because the default uv-script image lacks ``nvcc``.
-    They are passed straight through to ``run_uv_job`` and left ``None`` for
-    every standard model, which keeps the launch call identical to before.
+    ``image`` / ``python`` / ``env`` override the recipe's own launch settings.
+    Leave them ``None`` to use the image, interpreter and environment named in
+    the recipe's ``[tool.hf-jobs]`` header (see :func:`launch_settings`); set
+    them only where ocr-bench must run a model differently from its recipe.
     """
 
     script: str
@@ -185,6 +187,102 @@ def list_models() -> list[str]:
     return sorted(MODEL_REGISTRY.keys())
 
 
+# PEP 723 inline-metadata block: the specification's reference regex. The body
+# is greedy, so a block ends at the last ``# ///`` line of its comment run, which
+# lets a TOML multi-line string contain a ``# ///`` line.
+_PEP723_BLOCK = re.compile(
+    r"(?m)^# /// (?P<type>[a-zA-Z0-9-]+)$\s(?P<content>(^#(| .*)$\s)+)^# ///$"
+)
+
+
+def parse_hf_jobs_header(script_text: str) -> dict[str, Any]:
+    """Return a UV script's ``[tool.hf-jobs]`` table, or ``{}`` when it has none.
+
+    The table sits in the script's PEP 723 ``script`` block. ``hf jobs uv run``
+    reads it for launch settings such as the Docker image; ``HfApi.run_uv_job``
+    does not, so :func:`launch_settings` applies it for ocr-bench. Raises
+    ``ValueError`` for more than one ``script`` block, as PEP 723 requires.
+    """
+    text = script_text.replace("\r\n", "\n").replace("\r", "\n")
+    blocks = [m for m in _PEP723_BLOCK.finditer(text) if m.group("type") == "script"]
+    if len(blocks) > 1:
+        raise ValueError("multiple PEP 723 `script` blocks")
+    if not blocks:
+        return {}
+    lines = blocks[0].group("content").splitlines(keepends=True)
+    toml_text = "".join(line[2:] if line.startswith("# ") else line[1:] for line in lines)
+    table = tomllib.loads(toml_text).get("tool", {}).get("hf-jobs", {})
+    return table if isinstance(table, dict) else {}
+
+
+def fetch_hf_jobs_header(script_url: str) -> dict[str, Any]:
+    """Download a recipe and return its ``[tool.hf-jobs]`` table (``{}`` if absent).
+
+    Raises ``RuntimeError`` when the script cannot be fetched or parsed, so a
+    launch stops before any job starts rather than running on the wrong image.
+    """
+    try:
+        response = get_session().get(script_url, follow_redirects=True, timeout=30)
+        response.raise_for_status()
+        return parse_hf_jobs_header(response.text)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not read the [tool.hf-jobs] header of {script_url}: {exc}"
+        ) from exc
+
+
+def launch_settings(
+    config: ModelConfig,
+    *,
+    flavor_override: str | None = None,
+    header: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the ``run_uv_job`` keyword arguments that pick hardware and runtime.
+
+    - ``flavor``: ``flavor_override``, else the registry's ``default_flavor``.
+      The header's ``flavor``, ``timeout``, ``secrets`` and ``labels`` are
+      deliberately ignored: ocr-bench picks hardware and timeout per run and
+      always passes ``HF_TOKEN``.
+    - When the registry sets ``image``, its ``image``/``python``/``env`` are
+      used as a set and the script header is ignored (a deliberate override).
+    - Otherwise each runtime key comes from the script header, as with
+      ``hf jobs uv run``: ``image`` and ``python`` from the header unless the
+      registry sets ``python``; ``env`` is the header's merged with the
+      registry's, the registry winning. Recipes that moved vLLM out of their
+      dependencies into a header image need this to start at all.
+    """
+    settings: dict[str, Any] = {"flavor": flavor_override or config.default_flavor}
+    if config.image:
+        settings["image"] = config.image
+        if config.python:
+            settings["python"] = config.python
+        if config.env:
+            settings["env"] = dict(config.env)
+        return settings
+    header = header or {}
+    if header.get("image"):
+        settings["image"] = header["image"]
+    python = config.python or header.get("python")
+    if python:
+        settings["python"] = python
+    env = {**dict(header.get("env") or {}), **(config.env or {})}
+    if env:
+        settings["env"] = env
+    return settings
+
+
+def resolve_launch_settings(
+    config: ModelConfig, *, flavor_override: str | None = None
+) -> dict[str, Any]:
+    """Fetch the recipe header when needed and return its ``run_uv_job`` settings.
+
+    Used by both ``run --dry-run`` and :func:`launch_ocr_jobs`, so the plan
+    shown is the plan launched. A registry ``image`` skips the fetch.
+    """
+    header = {} if config.image else fetch_hf_jobs_header(config.script)
+    return launch_settings(config, flavor_override=flavor_override, header=header)
+
+
 def build_script_args(
     input_dataset: str,
     output_repo: str,
@@ -245,10 +343,18 @@ def launch_ocr_jobs(
                 f"Unknown model: {slug}. Available: {', '.join(MODEL_REGISTRY.keys())}"
             )
 
+    # Resolve every model's launch settings before starting any job, so an
+    # unreadable script header stops the whole run instead of leaving it partial.
+    settings_by_slug: dict[str, dict[str, Any]] = {}
+    for slug in selected:
+        settings_by_slug[slug] = resolve_launch_settings(
+            MODEL_REGISTRY[slug], flavor_override=flavor_override
+        )
+
     jobs: list[JobRun] = []
     for slug in selected:
         config = MODEL_REGISTRY[slug]
-        flavor = flavor_override or config.default_flavor
+        settings = settings_by_slug[slug]
         script_args = build_script_args(
             input_dataset,
             output_repo,
@@ -260,30 +366,19 @@ def launch_ocr_jobs(
             extra_args=config.default_args or None,
         )
 
-        # Only image-mode models set image/python/env; standard models keep the
-        # exact same run_uv_job call as before (no extra kwargs).
-        extra_kwargs: dict[str, Any] = {}
-        if config.image:
-            extra_kwargs["image"] = config.image
-        if config.python:
-            extra_kwargs["python"] = config.python
-        if config.env:
-            extra_kwargs["env"] = config.env
-
         logger.info(
             "launching_job",
             model=slug,
-            flavor=flavor,
+            flavor=settings["flavor"],
             script=config.script,
-            image=config.image,
+            image=settings.get("image"),
         )
         job = api.run_uv_job(
             script=config.script,
             script_args=script_args,
-            flavor=flavor,
             secrets={"HF_TOKEN": token},
             timeout=timeout,
-            **extra_kwargs,
+            **settings,
         )
         jobs.append(JobRun(model_slug=slug, job_id=job.id, job_url=job.url))
         logger.info("job_launched", model=slug, job_id=job.id, url=job.url)

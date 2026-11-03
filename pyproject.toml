@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 dependencies = [
     "datasets>=4.0.0",
-    "huggingface-hub",
+    "huggingface-hub>=1.0",
     "numpy",
     "openai",
     "pillow",
