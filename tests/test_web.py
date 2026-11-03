@@ -314,6 +314,8 @@ class TestImage:
                 "user/source",
                 from_prs=False,
                 source_split="validation",
+                source_configs=[],
+                source_revisions={},
             )
 
     def test_old_metadata_defaults_source_split_to_train(self, tmp_path):
@@ -341,6 +343,8 @@ class TestImage:
                 "user/source",
                 from_prs=False,
                 source_split="train",
+                source_configs=[],
+                source_revisions={},
             )
 
     def test_image_not_found(self, tmp_path):

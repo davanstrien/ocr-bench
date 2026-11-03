@@ -336,41 +336,64 @@ def discover_pr_configs(
     repo_id: str,
     merge: bool = False,
     api: HfApi | None = None,
+    only: list[str] | None = None,
+    duplicates: dict[str, list[int]] | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     """Discover dataset configs from open PRs on a Hub dataset repo.
 
-    PR titles must end with ``[config_name]`` to be detected.
+    PR titles must end with ``[config_name]`` to be detected. When several open
+    PRs carry the same config (for example a re-run of a failed model), the
+    newest PR (highest number) is used and the others are reported.
 
     Args:
         repo_id: HF dataset repo id.
-        merge: If True, merge each discovered PR before loading.
+        merge: If True, merge each selected PR before loading.
         api: Optional pre-configured HfApi instance.
+        only: If given, keep only these config names, before any merge.
+        duplicates: If given, filled with {config: [ignored older PR numbers]}
+            so callers can tell the user which PRs were passed over.
 
     Returns:
-        Tuple of (config_names, {config_name: pr_revision}).
+        Tuple of (config_names, {config_name: pr_revision}), one entry per
+        config, in the order the PRs were listed.
     """
     if api is None:
         api = HfApi()
 
-    config_names: list[str] = []
-    revisions: dict[str, str] = {}
+    wanted = set(only) if only is not None else None
+    newest: dict[str, int] = {}  # config -> highest open PR number
+    order: list[str] = []
 
-    discussions = api.get_repo_discussions(repo_id, repo_type="dataset")
-    for disc in discussions:
+    for disc in api.get_repo_discussions(repo_id, repo_type="dataset"):
         if not disc.is_pull_request or disc.status != "open":
             continue
         title = disc.title
-        if "[" in title and title.endswith("]"):
-            config = title[title.rindex("[") + 1 : -1].strip()
-            if config:
-                if merge:
-                    api.merge_pull_request(repo_id, disc.num, repo_type="dataset")
-                    logger.info("merged_pr", pr=disc.num, config=config)
-                else:
-                    revisions[config] = f"refs/pr/{disc.num}"
-                config_names.append(config)
+        if not ("[" in title and title.endswith("]")):
+            continue
+        config = title[title.rindex("[") + 1 : -1].strip()
+        if not config or (wanted is not None and config not in wanted):
+            continue
+        if config not in newest:
+            order.append(config)
+            newest[config] = disc.num
+        else:
+            older, newer = sorted((newest[config], disc.num))
+            logger.warning(
+                "duplicate_pr_config", config=config, using_pr=newer, ignoring_pr=older
+            )
+            newest[config] = newer
+            if duplicates is not None:
+                duplicates.setdefault(config, []).append(older)
 
-    return config_names, revisions
+    revisions: dict[str, str] = {}
+    for config in order:
+        if merge:
+            api.merge_pull_request(repo_id, newest[config], repo_type="dataset")
+            logger.info("merged_pr", pr=newest[config], config=config)
+        else:
+            revisions[config] = f"refs/pr/{newest[config]}"
+
+    return order, revisions
 
 
 def discover_configs(repo_id: str) -> list[str]:
