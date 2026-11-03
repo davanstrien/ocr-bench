@@ -1186,8 +1186,20 @@ class TestJudgeSelectsPrConfigs:
         out = " ".join(capsys.readouterr().out.split())
         assert "glm-ocr has several open PRs; using the newest (#16) and ignoring #3" in out
         assert "dots-ocr changed on main after its open PR (#2, #5); using main" in out
-        assert "and not merging the PR" in out
+        assert "and not merging the PR. To use the PR instead, merge it." in out
         assert "https://huggingface.co/datasets/u/ds/discussions" in out
+
+    def test_auto_detect_loads_a_superseded_config_from_main(self, monkeypatch, capsys):
+        seen = self._run(
+            monkeypatch,
+            ["judge", "u/ds", "--no-publish"],
+            prs={"dots-ocr": 2, "nuextract3": 9},
+            main_newer={"dots-ocr"},
+        )
+        assert seen["configs"] == ["nuextract3", "dots-ocr", "glm-ocr"]
+        assert seen["revisions"] == {"nuextract3": "refs/pr/9"}
+        out = " ".join(capsys.readouterr().out.split())
+        assert "Auto-detected 2 configs on main: ['dots-ocr', 'glm-ocr']" in out
 
     def test_from_prs_all_superseded_still_judges_from_main(self, monkeypatch):
         seen = self._run(

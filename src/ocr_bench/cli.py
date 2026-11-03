@@ -158,9 +158,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Judge criteria profile (default: default). 'table-fidelity' adds an "
             "explicit row/column cell-preservation criterion for table-dense corpora. "
-            "'body-text' requires the main text, headings, footnotes and captions, and "
-            "neither rewards nor penalises running headers, page numbers, signature "
-            "marks and catchwords. Mutually exclusive with --criteria-file."
+            "'body-text' counts only the main text, headings, footnotes and captions "
+            "towards completeness; running headers, page numbers, signature marks and "
+            "catchwords are optional. Mutually exclusive with --criteria-file."
         ),
     )
     judge.add_argument(
@@ -334,7 +334,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--concurrency",
         type=_positive_int,
         default=8,
-        help="Number of concurrent judge API calls (default: 8). Use 1 for sequential calls.",
+        help=(
+            "Number of concurrent judge API calls (default: 8). Lower it if the "
+            "provider returns 429 errors; 1 makes sequential calls."
+        ),
     )
 
     # --- run subcommand ---
@@ -421,9 +424,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Judge criteria profile (default: default). 'table-fidelity' adds an "
             "explicit row/column cell-preservation criterion for table-dense corpora. "
-            "'body-text' requires the main text, headings, footnotes and captions, and "
-            "neither rewards nor penalises running headers, page numbers, signature "
-            "marks and catchwords. Mutually exclusive with --criteria-file."
+            "'body-text' counts only the main text, headings, footnotes and captions "
+            "towards completeness; running headers, page numbers, signature marks and "
+            "catchwords are optional. Mutually exclusive with --criteria-file."
         ),
     )
     bench.add_argument(
@@ -466,7 +469,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--concurrency",
         type=_positive_int,
         default=8,
-        help="Number of concurrent judge API calls (default: 8). Use 1 for sequential calls.",
+        help=(
+            "Number of concurrent judge API calls (default: 8). Lower it if the "
+            "provider returns 429 errors; 1 makes sequential calls."
+        ),
     )
     bench.add_argument(
         "--no-publish", action="store_true", help="Don't publish results (skips the viewer)"
@@ -1001,7 +1007,8 @@ def _print_passed_over_prs(
         not_merged = " and not merging the PR" if merge else ""
         console.print(
             f"[yellow]Note:[/yellow] {config} changed on main after its open PR "
-            f"({ignored}); using main{not_merged}. Close stale PRs at {discussions}"
+            f"({ignored}); using main{not_merged}. To use the PR instead, merge it. "
+            f"Close stale PRs at {discussions}"
         )
 
 
@@ -2428,6 +2435,13 @@ def cmd_audit(args: argparse.Namespace) -> None:
         table.add_row(config, "[dim]skipped: not OCR output[/dim]", *["-"] * 8)
 
     console.print(table)
+    _print_passed_over_prs(
+        args.dataset,
+        report.duplicate_prs,
+        report.superseded_prs,
+        report.pr_revisions,
+        merge=False,
+    )
 
     # Overall alignment line
     if align.status == "misaligned":
