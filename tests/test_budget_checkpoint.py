@@ -669,6 +669,36 @@ class TestResume:
         assert judge.judged == 0
         assert "resume provenance mismatch" in capsys.readouterr().out
 
+    def test_default_judge_change_names_previous_judge(self, capsys):
+        """A board judged with an earlier default fails closed and names that judge."""
+        import json
+
+        from ocr_bench.publish import hash_judge_specs
+
+        old = "novita:org/old-default"
+        ds, ocr = make_ds(n=2, models=("a", "b"))
+        flags = ["--no-adaptive", "--checkpoint-every", "0"]
+        _, published, _ = _run_judge(
+            [*flags, "--model", old], ds, ocr, stamp_existing_provenance=False
+        )
+        judge = FakeJudge()
+        with pytest.raises(SystemExit):
+            _run_judge(
+                flags, ds, ocr, existing=self._saved_results(published), judge=judge,
+                stamp_existing_provenance=False, checkpoint_resume=True,
+                existing_meta_override=[
+                    {
+                        "judge_models": json.dumps([old]),
+                        "judge_spec_hashes": json.dumps(hash_judge_specs([old])),
+                    }
+                ],
+            )
+        assert judge.judged == 0
+        out = " ".join(capsys.readouterr().out.split())  # undo console line wrapping
+        assert "resume provenance mismatch" in out
+        assert f"--model {old}" in out
+        assert f"--judge-model {old}" in out
+
     def test_comparisons_only_checkpoint_resumes_from_row_provenance(self):
         ds, ocr = make_ds(n=4, models=("a", "b"))
         _, first_publish, _ = _run_judge(
