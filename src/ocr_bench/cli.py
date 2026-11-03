@@ -114,9 +114,23 @@ def build_parser() -> argparse.ArgumentParser:
     judge.add_argument("--split", default="train", help="Dataset split (default: train)")
     judge.add_argument("--columns", nargs="+", default=None, help="Explicit OCR column names")
     judge.add_argument(
-        "--configs", nargs="+", default=None, help="Config-per-model: list of config names"
+        "--configs",
+        nargs="+",
+        default=None,
+        help=(
+            "Config-per-model: list of config names, loaded from main. With "
+            "--from-prs, each is loaded from its newest open PR, or from main if "
+            "it has no open PR."
+        ),
     )
-    judge.add_argument("--from-prs", action="store_true", help="Force PR-based config discovery")
+    judge.add_argument(
+        "--from-prs",
+        action="store_true",
+        help=(
+            "Force PR-based config discovery (newest open PR per config). "
+            "Combine with --configs to judge only some of them."
+        ),
+    )
     judge.add_argument(
         "--merge",
         action="store_true",
@@ -1041,7 +1055,28 @@ def cmd_judge(args: argparse.Namespace) -> None:
     # --- Load dataset (cascading auto-detection) ---
     source_configs: list[str] = []
     source_output_columns: dict[str, str] = {}
-    if args.configs:
+    if args.configs and args.from_prs:
+        # Explicit configs, taken from open PRs where one exists (newest PR
+        # per config) and from main otherwise.
+        config_names = list(args.configs)
+        found, pr_revisions = discover_pr_configs(
+            args.dataset, merge=merge, only=config_names
+        )
+        from_prs = bool(found)
+        on_main = [c for c in config_names if c not in found]
+        console.print(
+            f"Selected {len(config_names)} configs: {len(found)} from PRs {found}"
+            + (f", {len(on_main)} from main {on_main}" if on_main else "")
+        )
+        source_configs = list(config_names)
+        ds, ocr_columns = load_config_dataset(
+            args.dataset,
+            config_names,
+            split=args.split,
+            pr_revisions=pr_revisions if not merge else None,
+            source_output_columns=source_output_columns,
+        )
+    elif args.configs:
         # Explicit configs — use them directly
         config_names = args.configs
         source_configs = list(config_names)

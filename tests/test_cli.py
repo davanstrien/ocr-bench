@@ -1039,3 +1039,50 @@ class TestCmdJudgeEmptyGuard:
         out = capsys.readouterr().out
         assert "No valid comparisons" in out
         assert "OCR Model Leaderboard" not in out
+
+
+class TestJudgeSelectsPrConfigs:
+    """`judge --from-prs --configs ...` loads only the listed configs, newest PR each."""
+
+    def _run(self, monkeypatch, argv, prs):
+        from ocr_bench.dataset import DatasetError
+
+        seen: dict = {}
+
+        def discover(dataset, merge=False, only=None):
+            seen["only"] = only
+            found = [c for c in prs if only is None or c in only]
+            return found, {c: f"refs/pr/{prs[c]}" for c in found}
+
+        def load(dataset, config_names, split="train", pr_revisions=None, **kwargs):
+            seen["configs"] = list(config_names)
+            seen["revisions"] = dict(pr_revisions or {})
+            raise DatasetError("stop after load")
+
+        monkeypatch.setattr(cli, "discover_pr_configs", discover)
+        monkeypatch.setattr(cli, "load_config_dataset", load)
+        with pytest.raises(DatasetError, match="stop after load"):
+            cli.cmd_judge(build_parser().parse_args(argv))
+        return seen
+
+    def test_selected_configs_use_their_pr_and_main_otherwise(self, monkeypatch, capsys):
+        seen = self._run(
+            monkeypatch,
+            ["judge", "u/ds", "--from-prs", "--configs", "dots-ocr", "glm-ocr", "--no-publish"],
+            prs={"dots-ocr": 22, "nuextract3": 9},
+        )
+        assert seen["only"] == ["dots-ocr", "glm-ocr"]
+        assert seen["configs"] == ["dots-ocr", "glm-ocr"]
+        assert seen["revisions"] == {"dots-ocr": "refs/pr/22"}  # glm-ocr from main
+        out = " ".join(capsys.readouterr().out.split())
+        assert "1 from PRs ['dots-ocr']" in out
+        assert "1 from main ['glm-ocr']" in out
+
+    def test_configs_without_from_prs_still_load_from_main(self, monkeypatch):
+        seen = self._run(
+            monkeypatch,
+            ["judge", "u/ds", "--configs", "dots-ocr", "--no-publish"],
+            prs={"dots-ocr": 22},
+        )
+        assert "only" not in seen  # no PR discovery
+        assert seen["revisions"] == {}
