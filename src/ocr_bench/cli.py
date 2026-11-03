@@ -638,33 +638,48 @@ def _resolve_results_repo(dataset: str, save_results: str | None, no_publish: bo
     return f"{dataset}-results"
 
 
+def _string_list(value: object) -> list[str] | None:
+    """Decode a metadata list stored as a list or a JSON string; None if malformed."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+        return None
+    return value
+
+
 def _previous_judge_hint(existing_meta_rows: list[dict], requested_models: list[str] | None) -> str:
-    """Name the earlier judge when a resume fails only because the default judge changed.
+    """Name the earlier judge when a resume may have failed because the default judge changed.
 
     Returns an empty string unless the user relied on the default judge and the
-    repo's latest metadata row records a different judge or jury.
+    repo's latest metadata row (its last completed run) records a different
+    judge or jury. Exact flags are suggested only when the recorded names hash
+    to the recorded judge specs, i.e. the names are the specs that were passed;
+    endpoint judges are recorded under a model name or URL digest instead.
     """
     if requested_models or not existing_meta_rows:
         return ""
-    recorded = existing_meta_rows[-1].get("judge_models")
-    if isinstance(recorded, str):
-        try:
-            recorded = json.loads(recorded)
-        except json.JSONDecodeError:
-            return ""
-    if not isinstance(recorded, list) or not recorded or recorded == [DEFAULT_JUDGE]:
+    row = existing_meta_rows[-1]
+    names = _string_list(row.get("judge_models"))
+    if not names or names == [DEFAULT_JUDGE]:
         return ""
-    names = [str(name) for name in recorded]
     hint = (
-        f"\nThis repo was last judged with {', '.join(names)}; the default judge is "
-        f"now {DEFAULT_JUDGE}."
+        f"\nThe last completed run in this repo used {', '.join(names)}; the default "
+        f"judge is now {DEFAULT_JUDGE}. If the other settings match, "
     )
-    # "provider:org/model" names are exact provider specs. Endpoint judges are
-    # recorded by model name or URL digest, which are not reusable as specs.
-    if all(":" in name.split("/", 1)[0] for name in names):
+    if _string_list(row.get("judge_spec_hashes")) == hash_judge_specs(names):
         flags = " ".join(f"--model {name}" for name in names)
-        return hint + f" To continue that board, pass [bold]{flags}[/bold]."
-    return hint + " To continue that board, pass the same --model spec(s) as that run."
+        bench_flags = " ".join(f"--judge-model {name}" for name in names)
+        return hint + (
+            f"passing [bold]{flags}[/bold] (with `ocr-bench bench`: "
+            f"[bold]{bench_flags}[/bold]) may let you continue that board."
+        )
+    return hint + (
+        "passing the same judge spec(s) as that run (`--model`, or `--judge-model` "
+        "with `ocr-bench bench`) may let you continue that board."
+    )
 
 
 def _filter_existing_sentinel_comparisons(
