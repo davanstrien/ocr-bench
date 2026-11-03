@@ -1,6 +1,6 @@
 # ocr-bench
 
-**There is currently no single best OCR model.** Rankings change depending on your documents. Manuscript cards, printed books, historical texts all produce different winners.
+**The best OCR model can depend on your documents.** Manuscript cards, printed books and historical texts can favour different models, so ocr-bench measures each collection separately.
 
 `ocr-bench` allows you to create **per-collection leaderboards** using a VLM-as-judge approach, so you can find what works best for _your_ documents rather than relying on generic benchmarks. You can validate the VLM's judgement with human votes, and share results via the Hugging Face Hub.
 
@@ -12,17 +12,22 @@ Generic OCR benchmarks tell you which model wins _on average_. But if you're dig
 
 ocr-bench lets you run the same set of OCR models on a sample of _your_ collection, then uses a vision-language model to judge which produces the best transcription for each document. The result is a leaderboard specific to your data.
 
-| Model              | BPL card catalog | Britannica 1771 |
-| ------------------ | :--------------: | :-------------: |
-| GLM-OCR (0.9B)     |    #2 (1535)     |  **#1** (1787)  |
-| LightOnOCR-2 (1B)  |  **#1** (1559)   |    #2 (1780)    |
-| FireRed-OCR (2.1B) |        —         |    #3 (1551)    |
-| DeepSeek-OCR (4B)  |    #4 (1452)     |    #4 (1437)    |
-| dots.ocr (1.7B)    |    #3 (1453)     |    #5 (945)     |
+The two published example boards, as ELO with 95% confidence interval. Models whose intervals overlap are not separated by the run:
 
-Rankings can flip completely between collections.
+| Model              | Britannica 1771 (50 pages)        | BPL card catalog (41 judged pages of 50) |
+| ------------------ | :-------------------------------: | :--------------------------------------: |
+| GLM-OCR (0.9B)     | 1716 (1673–1769), top group       | 1535 (1471–1591), all four overlap       |
+| LightOnOCR-2 (1B)  | 1697 (1655–1749), top group       | 1559 (1497–1630), all four overlap       |
+| NuExtract3 (4B)    | 1649 (1604–1708), top group       | —                                        |
+| FireRed-OCR (2.1B) | 1506 (1469–1548), below top group | —                                        |
+| DeepSeek-OCR (4B)  | 1421 (1374–1465), below top group | 1452 (1388–1514), all four overlap       |
+| dots.ocr (1.7B)    | failed run\*                      | 1453 (1385–1515), all four overlap       |
 
-![ELO vs Parameter Count — smaller models can win on the right documents](assets/elo-scatter.png)
+On Britannica, three models share the top group. On BPL, all four intervals overlap, so that run does not separate any model. Neither example establishes a single winner. Judging more pages gathers more evidence, and human votes in the viewer cross-check the judge on the overlapping pairs; neither guarantees separation.
+
+\* Every dots.ocr output in the Britannica run was an `[OCR ERROR]` placeholder. Current versions exclude such outputs and mark the run as failed.
+
+Both boards predate page-level bootstrap intervals, which account for several comparisons coming from the same page. Updated intervals have not been computed yet; a re-run with the current version is pending.
 
 **[Try the live viewer](https://huggingface.co/spaces/davanstrien/ocr-bench-britannica-results-qwen35-viewer)** — browse the Britannica 1771 leaderboard, compare OCR outputs side-by-side, and vote on quality yourself.
 
@@ -105,13 +110,15 @@ To avoid wasting judge calls on uninformative pairs, the judge skips comparisons
 
 ocr-bench ships with 16 registered OCR models. Five form the default set:
 
-| Model           | Size | Best for                   | Notes                        |
-| --------------- | ---- | -------------------------- | ---------------------------- |
-| `glm-ocr`       | 0.9B | Historical printed text    | Top performer on Britannica  |
-| `lighton-ocr-2` | 1B   | Card catalogs, manuscripts | Top performer on BPL         |
-| `firered-ocr`   | 2.1B | Clean printed text         | Mid-pack on degraded docs    |
-| `deepseek-ocr`  | 4B   | Diverse documents          | Most consistent across types |
-| `dots-ocr`      | 1.7B | General                    | Struggles on historical text |
+| Model           | Size | Hub model                     |
+| --------------- | ---- | ----------------------------- |
+| `glm-ocr`       | 0.9B | `zai-org/GLM-OCR`             |
+| `lighton-ocr-2` | 1B   | `lightonai/LightOnOCR-2-1B`   |
+| `firered-ocr`   | 2.1B | `FireRedTeam/FireRed-OCR`     |
+| `deepseek-ocr`  | 4B   | `deepseek-ai/DeepSeek-OCR`    |
+| `dots-ocr`      | 1.7B | `rednote-hilab/dots.ocr`      |
+
+The example boards above do not show which model suits which document type, so run the set on a sample of your own pages.
 
 The opt-in registry also includes compact models at different quality/cost points, including `falcon-ocr` (0.3B) and `ovis-ocr2` (0.9B). List every available model with:
 
@@ -131,10 +138,12 @@ ocr-bench run <dataset> <output> --models tesseract falcon-ocr ovis-ocr2
 
 ![Leaderboard viewer with ELO ratings, confidence intervals, and human validation](assets/leaderboard.png)
 
+The screenshot shows the viewer layout from an earlier Britannica run. Its numbers are out of date, and its dots.ocr row came from failed OCR outputs.
+
 Browse these on the Hub:
 
-- [davanstrien/ocr-bench-britannica-results-qwen35](https://huggingface.co/datasets/davanstrien/ocr-bench-britannica-results-qwen35) — Encyclopaedia Britannica 1771, 5 models, 50 samples
-- [davanstrien/bpl-ocr-bench-results](https://huggingface.co/datasets/davanstrien/bpl-ocr-bench-results) — Boston Public Library card catalog, 4 models, 150 samples
+- [davanstrien/ocr-bench-britannica-results-qwen35](https://huggingface.co/datasets/davanstrien/ocr-bench-britannica-results-qwen35) — Encyclopaedia Britannica 1771, 6 models, 50 pages (dots.ocr run failed)
+- [davanstrien/bpl-ocr-bench-results](https://huggingface.co/datasets/davanstrien/bpl-ocr-bench-results) — Boston Public Library card catalog, 4 models, 41 judged pages of 50
 - [Live viewer](https://huggingface.co/spaces/davanstrien/ocr-bench-britannica-results-qwen35-viewer) — Britannica leaderboard with ELO chart and comparison browser
 
 ## Install
