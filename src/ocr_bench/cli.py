@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import sys
 from collections.abc import Iterable
@@ -637,6 +638,35 @@ def _resolve_results_repo(dataset: str, save_results: str | None, no_publish: bo
     return f"{dataset}-results"
 
 
+def _previous_judge_hint(existing_meta_rows: list[dict], requested_models: list[str] | None) -> str:
+    """Name the earlier judge when a resume fails only because the default judge changed.
+
+    Returns an empty string unless the user relied on the default judge and the
+    repo's latest metadata row records a different judge or jury.
+    """
+    if requested_models or not existing_meta_rows:
+        return ""
+    recorded = existing_meta_rows[-1].get("judge_models")
+    if isinstance(recorded, str):
+        try:
+            recorded = json.loads(recorded)
+        except json.JSONDecodeError:
+            return ""
+    if not isinstance(recorded, list) or not recorded or recorded == [DEFAULT_JUDGE]:
+        return ""
+    names = [str(name) for name in recorded]
+    hint = (
+        f"\nThis repo was last judged with {', '.join(names)}; the default judge is "
+        f"now {DEFAULT_JUDGE}."
+    )
+    # "provider:org/model" names are exact provider specs. Endpoint judges are
+    # recorded by model name or URL digest, which are not reusable as specs.
+    if all(":" in name.split("/", 1)[0] for name in names):
+        flags = " ".join(f"--model {name}" for name in names)
+        return hint + f" To continue that board, pass [bold]{flags}[/bold]."
+    return hint + " To continue that board, pass the same --model spec(s) as that run."
+
+
 def _filter_existing_sentinel_comparisons(
     results: list[ComparisonResult],
 ) -> tuple[list[ComparisonResult], int]:
@@ -1184,6 +1214,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     "source repo/config/split/fingerprint, judge or jury, sampling, "
                     "prompt, or preprocessing changed. Re-run with the original "
                     "settings, or use [bold]--full-rejudge[/bold]."
+                    + _previous_judge_hint(existing_meta_rows, args.models)
                 )
                 sys.exit(1)
 

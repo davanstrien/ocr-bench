@@ -45,7 +45,7 @@ Branch protection is on — all changes go through PRs with CI checks.
 - **Smart defaults**: `ocr-bench judge <repo>` needs zero flags (auto-detect configs, auto-derive results repo, adaptive stopping on)
 - **Arrow-level merges**: dataset loading uses Arrow column ops to avoid per-row image decode
 - **Don't merge PRs**: load OCR outputs via `revision=` to avoid README merge conflicts on Hub datasets
-- **Default judge**: Qwen3.5-35B-A3B via HF Inference Providers (zero parse failures, fastest, only needs HF token)
+- **Default judge**: Qwen3.8-27B on Novita via HF Inference Providers (only needs an HF token). Pinned to the provider it was evaluated on; the previous default was `novita:Qwen/Qwen3.5-35B-A3B`, and boards judged with it resume only with that `--model`.
 - **Judge provenance is immutable within a results repo**: criteria/prompt hash, normalized-vs-raw text mode, text cap, and image cap are recorded; changing any requires `--full-rejudge`.
 - **Normalize before truncating**: default judge text mode flattens known HTML while preserving table-cell boundaries and GLAM transcription tokens, then applies the character cap. Raw mode is opt-in.
 
