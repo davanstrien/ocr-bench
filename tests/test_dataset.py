@@ -386,6 +386,52 @@ class TestDiscoverPrConfigs:
         assert names == ["config_a", "config_b"]
         assert len(revisions) == 2
 
+    def test_duplicate_config_uses_newest_pr(self):
+        # Hub lists newest first; a re-run of a failed model opens a second PR.
+        api = MagicMock()
+        api.get_repo_discussions.return_value = [
+            self._make_disc(22, "Add dots.ocr results [dots-ocr]"),
+            self._make_disc(5, "Add [config_b]"),
+            self._make_disc(2, "Add dots.ocr results [dots-ocr]"),
+        ]
+        names, revisions = discover_pr_configs("repo/id", api=api)
+        assert names == ["dots-ocr", "config_b"]
+        assert revisions == {"dots-ocr": "refs/pr/22", "config_b": "refs/pr/5"}
+
+    def test_duplicate_config_newest_wins_in_any_order(self):
+        api = MagicMock()
+        api.get_repo_discussions.return_value = [
+            self._make_disc(2, "Old [dots-ocr]"),
+            self._make_disc(22, "New [dots-ocr]"),
+        ]
+        names, revisions = discover_pr_configs("repo/id", api=api)
+        assert names == ["dots-ocr"]
+        assert revisions == {"dots-ocr": "refs/pr/22"}
+
+    def test_only_filters_before_merging(self):
+        api = MagicMock()
+        api.get_repo_discussions.return_value = [
+            self._make_disc(1, "Add [config_a]"),
+            self._make_disc(2, "Add [config_b]"),
+            self._make_disc(3, "Add [config_c]"),
+        ]
+        names, revisions = discover_pr_configs(
+            "repo/id", merge=True, api=api, only=["config_c", "config_a"]
+        )
+        assert names == ["config_a", "config_c"]
+        assert revisions == {}
+        merged = [c.args[1] for c in api.merge_pull_request.call_args_list]
+        assert merged == [1, 3]
+
+    def test_duplicate_merge_merges_only_newest(self):
+        api = MagicMock()
+        api.get_repo_discussions.return_value = [
+            self._make_disc(22, "New [dots-ocr]"),
+            self._make_disc(2, "Old [dots-ocr]"),
+        ]
+        discover_pr_configs("repo/id", merge=True, api=api)
+        api.merge_pull_request.assert_called_once_with("repo/id", 22, repo_type="dataset")
+
 
 # ---------------------------------------------------------------------------
 # discover_configs (main branch)
@@ -875,3 +921,22 @@ class TestLoadFlatDataset:
 
         with pytest.raises(DatasetError, match="Column 'missing' not found"):
             load_flat_dataset("repo/id", columns=["missing"])
+
+
+def test_discover_pr_configs_reports_ignored_duplicates():
+    from unittest.mock import MagicMock
+
+    def disc(num, title):
+        d = MagicMock()
+        d.num, d.title, d.is_pull_request, d.status = num, title, True, "open"
+        return d
+
+    api = MagicMock()
+    api.get_repo_discussions.return_value = [
+        disc(22, "New [dots-ocr]"),
+        disc(9, "Add [nuextract3]"),
+        disc(2, "Old [dots-ocr]"),
+    ]
+    duplicates: dict[str, list[int]] = {}
+    discover_pr_configs("repo/id", api=api, duplicates=duplicates)
+    assert duplicates == {"dots-ocr": [2]}

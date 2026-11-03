@@ -114,9 +114,23 @@ def build_parser() -> argparse.ArgumentParser:
     judge.add_argument("--split", default="train", help="Dataset split (default: train)")
     judge.add_argument("--columns", nargs="+", default=None, help="Explicit OCR column names")
     judge.add_argument(
-        "--configs", nargs="+", default=None, help="Config-per-model: list of config names"
+        "--configs",
+        nargs="+",
+        default=None,
+        help=(
+            "Config-per-model: list of config names, loaded from main. With "
+            "--from-prs, each is loaded from its newest open PR, or from main if "
+            "it has no open PR."
+        ),
     )
-    judge.add_argument("--from-prs", action="store_true", help="Force PR-based config discovery")
+    judge.add_argument(
+        "--from-prs",
+        action="store_true",
+        help=(
+            "Force PR-based config discovery (newest open PR per config). "
+            "Combine with --configs to judge only some of them."
+        ),
+    )
     judge.add_argument(
         "--merge",
         action="store_true",
@@ -1041,7 +1055,39 @@ def cmd_judge(args: argparse.Namespace) -> None:
     # --- Load dataset (cascading auto-detection) ---
     source_configs: list[str] = []
     source_output_columns: dict[str, str] = {}
-    if args.configs:
+    # config -> PR revision actually loaded (absent = main), for metadata.
+    loaded_pr_revisions: dict[str, str] = {}
+    # config -> older open PR numbers passed over for the newest one.
+    duplicate_prs: dict[str, list[int]] = {}
+    if args.configs and args.from_prs:
+        # Explicit configs, taken from open PRs where one exists (newest PR
+        # per config) and from main otherwise.
+        config_names = list(args.configs)
+        found, pr_revisions = discover_pr_configs(
+            args.dataset, merge=merge, only=config_names, duplicates=duplicate_prs
+        )
+        from_prs = bool(found)
+        on_main = [c for c in config_names if c not in found]
+        from_pr_text = ", ".join(
+            f"{c} ({pr_revisions[c].replace('refs/pr/', '#')})" if c in pr_revisions else c
+            for c in found
+        )
+        console.print(
+            f"Selected {len(config_names)} configs: [bold]{len(found)} from PRs[/bold]"
+            + (f" ({from_pr_text})" if found else "")
+            + (f", [bold]{len(on_main)} from main[/bold] {on_main}" if on_main else "")
+        )
+        if not merge:
+            loaded_pr_revisions = dict(pr_revisions)
+        source_configs = list(config_names)
+        ds, ocr_columns = load_config_dataset(
+            args.dataset,
+            config_names,
+            split=args.split,
+            pr_revisions=pr_revisions if not merge else None,
+            source_output_columns=source_output_columns,
+        )
+    elif args.configs:
         # Explicit configs — use them directly
         config_names = args.configs
         source_configs = list(config_names)
@@ -1056,10 +1102,14 @@ def cmd_judge(args: argparse.Namespace) -> None:
         ds, ocr_columns = load_flat_dataset(args.dataset, split=args.split, columns=args.columns)
     elif args.from_prs:
         # Forced PR discovery
-        config_names, pr_revisions = discover_pr_configs(args.dataset, merge=merge)
+        config_names, pr_revisions = discover_pr_configs(
+            args.dataset, merge=merge, duplicates=duplicate_prs
+        )
         if not config_names:
             raise DatasetError("No configs found in open PRs")
         from_prs = True
+        if not merge:
+            loaded_pr_revisions = dict(pr_revisions)
         source_configs = list(config_names)
         console.print(f"Discovered {len(config_names)} configs from PRs: {config_names}")
         ds, ocr_columns = load_config_dataset(
@@ -1071,7 +1121,11 @@ def cmd_judge(args: argparse.Namespace) -> None:
         )
     else:
         # Auto-detect: PRs + main branch configs combined, fall back to flat
-        pr_configs, pr_revisions = discover_pr_configs(args.dataset, merge=merge)
+        pr_configs, pr_revisions = discover_pr_configs(
+            args.dataset, merge=merge, duplicates=duplicate_prs
+        )
+        if not merge:
+            loaded_pr_revisions = dict(pr_revisions)
         main_configs = discover_configs(args.dataset)
 
         # Combine: PR configs + main configs not already in PRs
@@ -1102,6 +1156,15 @@ def cmd_judge(args: argparse.Namespace) -> None:
 
     if not source_configs:
         source_output_columns = {column: column for column in ocr_columns}
+    source_revisions = {c: loaded_pr_revisions.get(c, "main") for c in source_configs}
+    for config, older in sorted(duplicate_prs.items()):
+        used = loaded_pr_revisions.get(config, "a merged PR").replace("refs/pr/", "#")
+        ignored = ", ".join(f"#{n}" for n in sorted(older))
+        console.print(
+            f"[yellow]Note:[/yellow] {config} has several open PRs; using the newest "
+            f"({used}) and ignoring {ignored}. Close stale ones at "
+            f"https://huggingface.co/datasets/{args.dataset}/discussions"
+        )
 
     console.print(f"Loaded {len(ds)} samples with {len(ocr_columns)} models:")
     for col, model in ocr_columns.items():
@@ -1692,6 +1755,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     source_fingerprint=source_fingerprint,
                     source_column_fingerprints=source_column_fingerprints,
                     source_configs=source_configs,
+                    source_revisions=source_revisions,
                     source_columns=ocr_columns,
                     source_output_columns=source_output_columns,
                     judge_models=judge_names,
@@ -1827,6 +1891,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             source_fingerprint=source_fingerprint,
             source_column_fingerprints=source_column_fingerprints,
             source_configs=source_configs,
+            source_revisions=source_revisions,
             source_columns=ocr_columns,
             source_output_columns=source_output_columns,
             judge_models=judge_names,

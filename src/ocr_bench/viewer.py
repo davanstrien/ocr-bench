@@ -84,12 +84,20 @@ class ImageLoader:
         source_dataset: str,
         from_prs: bool = False,
         source_split: str = "train",
+        source_configs: list[str] | None = None,
+        source_revisions: dict[str, str] | None = None,
     ):
         self._source = source_dataset
         self._from_prs = from_prs
         self._source_split = source_split
+        # The configs the run judged, from its metadata. Images must come from
+        # one of these: another open PR may cover different pages.
+        self._source_configs = list(source_configs or [])
+        # Where the run read each config ("refs/pr/N" or "main"), if recorded.
+        self._source_revisions = dict(source_revisions or {})
         self._cache: dict[int, Any] = {}
         self._image_col: str | None = None
+        self._config_name: str | None = None
         self._pr_revision: str | None = None
         self._available = True
         self._init_done = False
@@ -101,26 +109,39 @@ class ImageLoader:
         self._init_done = True
 
         try:
-            if self._from_prs:
+            if self._source_revisions:
+                # Use the revisions the run recorded, whatever from_prs says:
+                # PRs may since have been merged, closed or superseded, and a
+                # selection read entirely from main records from_prs=False.
+                configs = self._source_configs or list(self._source_revisions)
+                for config in configs:
+                    revision = self._source_revisions.get(config, "main")
+                    if revision != "main":
+                        self._config_name, self._pr_revision = config, revision
+                        break
+                else:
+                    self._config_name = configs[0] if configs else None
+            elif self._from_prs:
+                # Older metadata without revisions: rediscover open PRs.
                 from ocr_bench.dataset import discover_pr_configs
 
-                _, revisions = discover_pr_configs(self._source)
-                if revisions:
-                    # Use the first PR revision to get images
-                    first_config = next(iter(revisions))
-                    self._pr_revision = revisions[first_config]
+                _, revisions = discover_pr_configs(
+                    self._source, only=self._source_configs or None
+                )
+                # Prefer the run's own configs, in its order; a selected config
+                # without an open PR was loaded from main.
+                for config in self._source_configs or list(revisions):
+                    self._config_name = config
+                    self._pr_revision = revisions.get(config)
+                    if self._pr_revision:
+                        break
+            elif self._source_configs:
+                # Config-per-model run read from main: use one of its configs,
+                # not the repo's default config.
+                self._config_name = self._source_configs[0]
 
             # Probe for image column by loading 1 row
-            kwargs: dict[str, Any] = {
-                "path": self._source,
-                "split": f"{self._source_split}[:1]",
-            }
-            if self._pr_revision:
-                # Load from the first PR config
-                first_config = next(iter(revisions))
-                kwargs["name"] = first_config
-                kwargs["revision"] = self._pr_revision
-            probe = load_dataset(**kwargs)
+            probe = load_dataset(**self._load_kwargs(f"{self._source_split}[:1]"))
             for col in probe.column_names:
                 if col == "image" or "image" in col.lower():
                     self._image_col = col
@@ -132,6 +153,15 @@ class ImageLoader:
             logger.warning("image_loader_init_failed", source=self._source, error=str(exc))
             self._available = False
 
+    def _load_kwargs(self, split: str) -> dict[str, Any]:
+        """load_dataset arguments for the resolved config and revision."""
+        kwargs: dict[str, Any] = {"path": self._source, "split": split}
+        if self._config_name:
+            kwargs["name"] = self._config_name
+        if self._pr_revision:
+            kwargs["revision"] = self._pr_revision
+        return kwargs
+
     def get(self, sample_idx: int) -> Image.Image | None:
         """Fetch image for a sample index. Returns None on failure."""
         self._init_source()
@@ -140,19 +170,9 @@ class ImageLoader:
         if sample_idx in self._cache:
             return self._cache[sample_idx]
         try:
-            kwargs: dict[str, Any] = {
-                "path": self._source,
-                "split": f"{self._source_split}[{sample_idx}:{sample_idx + 1}]",
-            }
-            if self._pr_revision:
-                from ocr_bench.dataset import discover_pr_configs
-
-                _, revisions = discover_pr_configs(self._source)
-                if revisions:
-                    first_config = next(iter(revisions))
-                    kwargs["name"] = first_config
-                    kwargs["revision"] = revisions[first_config]
-            row = load_dataset(**kwargs)
+            row = load_dataset(
+                **self._load_kwargs(f"{self._source_split}[{sample_idx}:{sample_idx + 1}]")
+            )
             img = row[0][self._image_col]
             self._cache[sample_idx] = img
             return img

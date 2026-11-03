@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import io
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -151,12 +152,34 @@ def create_app(
     # Results written before source_split was recorded always came from train.
     source_split = metadata.get("source_split") or "train"
 
+    source_configs = metadata.get("source_configs") or []
+    if isinstance(source_configs, str):  # published as a JSON string
+        try:
+            source_configs = json.loads(source_configs)
+        except json.JSONDecodeError:
+            source_configs = []
+    if not isinstance(source_configs, list):
+        source_configs = []
+
+    source_revisions = metadata.get("source_revisions") or {}
+    if isinstance(source_revisions, str):  # published as a JSON string
+        try:
+            source_revisions = json.loads(source_revisions)
+        except json.JSONDecodeError:
+            source_revisions = {}
+    if not isinstance(source_revisions, dict):
+        source_revisions = {}
+
     img_loader: ImageLoader | None = None
     if source_dataset:
         img_loader = ImageLoader(
             source_dataset,
             from_prs=from_prs,
             source_split=source_split,
+            source_configs=[c for c in source_configs if isinstance(c, str)],
+            source_revisions={
+                k: v for k, v in source_revisions.items() if isinstance(v, str)
+            },
         )
 
     validation_comps = build_validation_comparisons(
