@@ -645,9 +645,12 @@ def _string_list(value: object) -> list[str] | None:
             value = json.loads(value)
         except json.JSONDecodeError:
             return None
-    if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+    if not isinstance(value, list):
         return None
-    return value
+    strings = [v for v in value if isinstance(v, str) and v]
+    if len(strings) != len(value):
+        return None
+    return strings
 
 
 def _previous_judge_hint(existing_meta_rows: list[dict], requested_models: list[str] | None) -> str:
