@@ -463,6 +463,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum direct pair comparisons for the size rule (default: 10).",
     )
     bench.add_argument(
+        "--concurrency",
+        type=_positive_int,
+        default=8,
+        help="Number of concurrent judge API calls (default: 8). Use 1 for sequential calls.",
+    )
+    bench.add_argument(
         "--no-publish", action="store_true", help="Don't publish results (skips the viewer)"
     )
     bench.add_argument(
@@ -974,6 +980,31 @@ def _existing_preprocessing_provenance(meta_rows: list[dict]) -> tuple[str, int,
     )
 
 
+def _print_passed_over_prs(
+    dataset: str,
+    duplicate_prs: dict[str, list[int]],
+    superseded_prs: dict[str, list[int]],
+    loaded_pr_revisions: dict[str, str],
+    merge: bool,
+) -> None:
+    """Tell the user which open PRs discovery did not use, and why."""
+    discussions = f"https://huggingface.co/datasets/{dataset}/discussions"
+    for config, older in sorted(duplicate_prs.items()):
+        used = loaded_pr_revisions.get(config, "a merged PR").replace("refs/pr/", "#")
+        ignored = ", ".join(f"#{n}" for n in sorted(older))
+        console.print(
+            f"[yellow]Note:[/yellow] {config} has several open PRs; using the newest "
+            f"({used}) and ignoring {ignored}. Close stale ones at {discussions}"
+        )
+    for config, numbers in sorted(superseded_prs.items()):
+        ignored = ", ".join(f"#{n}" for n in numbers)
+        not_merged = " and not merging the PR" if merge else ""
+        console.print(
+            f"[yellow]Note:[/yellow] {config} changed on main after its open PR "
+            f"({ignored}); using main{not_merged}. Close stale PRs at {discussions}"
+        )
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Orchestrate: load → compare → judge → elo → print → publish."""
     # --- Resolve flags ---
@@ -1151,7 +1182,10 @@ def cmd_judge(args: argparse.Namespace) -> None:
             main_configs=main_configs,
             superseded=superseded_prs,
         )
-        if not merge:
+        if merge:
+            # The merges can add or remove configs on main: read them again.
+            main_configs = discover_configs(args.dataset)
+        else:
             loaded_pr_revisions = dict(pr_revisions)
 
         # Combine: PR configs + main configs not already in PRs
@@ -1183,22 +1217,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
     if not source_configs:
         source_output_columns = {column: column for column in ocr_columns}
     source_revisions = {c: loaded_pr_revisions.get(c, "main") for c in source_configs}
-    for config, older in sorted(duplicate_prs.items()):
-        used = loaded_pr_revisions.get(config, "a merged PR").replace("refs/pr/", "#")
-        ignored = ", ".join(f"#{n}" for n in sorted(older))
-        console.print(
-            f"[yellow]Note:[/yellow] {config} has several open PRs; using the newest "
-            f"({used}) and ignoring {ignored}. Close stale ones at "
-            f"https://huggingface.co/datasets/{args.dataset}/discussions"
-        )
-    for config, numbers in sorted(superseded_prs.items()):
-        ignored = ", ".join(f"#{n}" for n in numbers)
-        not_merged = " and not merging the PR" if merge else ""
-        console.print(
-            f"[yellow]Note:[/yellow] {config} changed on main after its open PR "
-            f"({ignored}); using main{not_merged}. Close stale PRs at "
-            f"https://huggingface.co/datasets/{args.dataset}/discussions"
-        )
+    _print_passed_over_prs(
+        args.dataset, duplicate_prs, superseded_prs, loaded_pr_revisions, merge=merge
+    )
 
     console.print(f"Loaded {len(ds)} samples with {len(ocr_columns)} models:")
     for col, model in ocr_columns.items():
@@ -2289,6 +2310,8 @@ def cmd_bench(args: argparse.Namespace) -> None:
         args.adaptive_strategy,
         "--size-tie-min-samples",
         str(args.size_tie_min_samples),
+        "--concurrency",
+        str(args.concurrency),
     ]
     if args.size_tie_ratio is not None:
         judge_argv += ["--size-tie-ratio", str(args.size_tie_ratio)]

@@ -11,7 +11,7 @@ current behaviour.
 
 ### Behaviour changes
 
-- `judge --concurrency` defaults to 8, not 1, so a run makes up to 8 judge calls at once. `bench` uses the same default. Pass `--concurrency 1` for sequential calls.
+- `judge --concurrency` defaults to 8, not 1, so a run makes up to 8 judge calls at once. Pass `--concurrency 1` for sequential calls. `bench` has a new `--concurrency` option with the same default.
 - With PR discovery, a config that changed on `main` after its newest open PR is loaded from `main`. Before, an old open PR (for example a failed run left open after a re-run was merged) replaced the newer outputs on `main`. With `--merge`, such a PR is not merged. The run prints the PRs it passed over. The check compares the dates of the last commit to the `<config>/` folder on each branch. A merge commit has the merge date, so a PR merged later counts as newer even if its run is older. When a date is missing, the PR is used.
 
 ### New

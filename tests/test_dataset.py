@@ -1014,6 +1014,46 @@ class TestDiscoverPrConfigsAgainstMain:
         assert names == ["dots-ocr"]
         assert revisions == {"dots-ocr": "refs/pr/2"}
 
+    def test_pr_without_config_folder_is_kept(self):
+        api = self._api([self._disc(2, "Add [dots-ocr]")], {("dots-ocr", "main"): self.NOV})
+        names, _ = discover_pr_configs("repo/id", api=api, main_configs=["dots-ocr"])
+        assert names == ["dots-ocr"]
+
+    def test_equal_dates_keep_the_pr(self):
+        api = self._api(
+            [self._disc(2, "Add [dots-ocr]")],
+            {("dots-ocr", "main"): self.JUL, ("dots-ocr", "refs/pr/2"): self.JUL},
+        )
+        names, _ = discover_pr_configs("repo/id", api=api, main_configs=["dots-ocr"])
+        assert names == ["dots-ocr"]
+
+    def test_reads_dates_from_hub_folder_objects(self):
+        """get_paths_info(expand=True) returns RepoFolder objects with last_commit."""
+        from huggingface_hub.hf_api import RepoFolder
+
+        def folder(date):
+            return RepoFolder(
+                path="dots-ocr",
+                oid="0" * 40,
+                lastCommit={"id": "1" * 40, "title": "Add", "date": date},
+            )
+
+        api = MagicMock()
+        api.get_repo_discussions.return_value = [self._disc(2, "Add [dots-ocr]")]
+        by_revision = {
+            "main": folder("2026-11-03T14:10:00.000Z"),
+            "refs/pr/2": folder("2026-02-24T17:54:53.000Z"),
+        }
+        api.get_paths_info.side_effect = lambda repo_id, paths, revision, **kw: [
+            by_revision[revision]
+        ]
+        superseded: dict[str, list[int]] = {}
+        names, _ = discover_pr_configs(
+            "repo/id", api=api, main_configs=["dots-ocr"], superseded=superseded
+        )
+        assert names == []
+        assert superseded == {"dots-ocr": [2]}
+
     def test_lookup_error_keeps_the_pr(self):
         api = self._api([self._disc(2, "Add [dots-ocr]")], {})
         api.get_paths_info.side_effect = RuntimeError("Hub unavailable")
