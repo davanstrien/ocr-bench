@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call: # release.yml runs this suite before it publishes
 
 jobs:
   test:

@@ -161,6 +161,16 @@ uv pip install ocr-bench[viewer]
 
 Requires Python >= 3.11 and an [HF token](https://huggingface.co/settings/tokens).
 
+### Upgrading from 0.0.4
+
+```bash
+uv pip install -U ocr-bench    # needs huggingface-hub >= 1.0
+```
+
+- **Results repos from 0.0.4 cannot be resumed.** Their comparisons carry no resume provenance, and the new default judge and text normalisation change it anyway. Re-judge with `ocr-bench judge <dataset> --full-rejudge` (this costs a full judge run again), or write to a new results repo with `--save-results`. `--full-rejudge` is a `judge` option; `bench` has none.
+- **The default judge is now `novita:Qwen/Qwen3.8-27B`.** Boards judged with the old and new defaults are not comparable. To continue a provenance-stamped board judged with the old default, pass `--model novita:Qwen/Qwen3.5-35B-A3B` (`--judge-model` with `bench`).
+- **Private or gated sources stay private.** New output and results repos are created private, and `run`/`judge`/`bench` stop before writing to an existing public repo unless you pass `--public`. A viewer Space for private results is created private and needs an `HF_TOKEN` secret with read access to the results.
+
 ## Status
 
 Working proof of concept. The core pipeline (run → judge → view) is functional. Not polished production software — expect rough edges. This is an early-stage project to explore the idea of VLM-judged OCR leaderboards, and gather feedback on the concept and implementation!
