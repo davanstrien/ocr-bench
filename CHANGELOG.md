@@ -9,6 +9,13 @@ current behaviour.
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-11-04
+
+### Upgrading from 0.0.5
+
+- `uv pip install -U ocr-bench`. Results repos from 0.0.5 can resume.
+- A resume stops with a provenance mismatch if `judge` now loads a config from `main` instead of the old open PR it used before (see below). Those outputs changed, so the earlier verdicts do not apply. Use `--full-rejudge`.
+
 ### Behaviour changes
 
 - `judge --concurrency` defaults to 8, not 1, so a run makes up to 8 judge calls at once. Pass `--concurrency 1` for sequential calls. A value below 1 is now an error. `bench` has a new `--concurrency` option with the same default.
