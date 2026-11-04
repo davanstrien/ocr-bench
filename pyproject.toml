@@ -1,6 +1,6 @@
 [project]
 name = "ocr-bench"
-version = "0.0.5"
+version = "0.0.6"
 description = "OCR model evaluation toolkit — VLM-as-judge with per-dataset leaderboards"
 readme = "README.md"
 authors = [
