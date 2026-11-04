@@ -620,6 +620,12 @@ class TestIsSentinel:
         assert not is_sentinel(float("nan"))
         assert not is_sentinel(["[OCR ERROR]"])
 
+    def test_array_is_not_tested_for_truth(self):
+        # `not array` raises for an array of more than one element.
+        import numpy as np
+
+        assert not is_sentinel(np.array(["[OCR ERROR]", "x"]))
+
 
 class TestOcrText:
     def test_string_is_unchanged(self):

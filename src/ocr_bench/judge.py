@@ -60,7 +60,7 @@ def ocr_text(value: object) -> str:
     return value if isinstance(value, str) else ""
 
 
-def is_sentinel(text: str | None) -> bool:
+def is_sentinel(text: object) -> bool:
     """True if ``text`` is an OCR error sentinel rather than a transcription.
 
     Matches the known literals (case-insensitively) plus any short (≤40 char,
@@ -69,7 +69,7 @@ def is_sentinel(text: str | None) -> bool:
     handled as missing output on their own). Nor is any other value that is not
     a string (see :func:`ocr_text`).
     """
-    if not text or not isinstance(text, str):
+    if not isinstance(text, str) or not text:
         return False
     stripped = text.strip()
     if not stripped:
