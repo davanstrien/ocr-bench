@@ -26,6 +26,14 @@ def _prose(n_chars: int, seed: int = 0) -> str:
     return "".join(rng.choice(alphabet) for _ in range(n_chars))
 
 
+_SURNAMES = [
+    "Abbott", "Baker", "Carter", "Dawson", "Ellis", "Foster", "Graham", "Hughes", "Irving",
+    "Jarvis", "Knight", "Lawson", "Mason", "Norris", "Owen", "Parker", "Quinn", "Reeves",
+    "Stone", "Turner", "Upton", "Vance", "Walker", "Young", "Zeal",
+]
+_COINS = ["Æ. Head r.", "AR. Bust l.", "Æ. Wreath.", "AR. Eagle.", "Æ. Galley.", "AV. Victory."]
+
+
 def _screen(texts: dict[str, list], cap: int = 2500) -> ScreenReport:
     return screen_outputs(texts, {name: f"model-{name}" for name in texts}, cap)
 
@@ -76,10 +84,56 @@ class TestLoopKind:
         text = _prose(400) + " ".join(f"{n}." for n in range(800, 1200))
         assert loop_kind(text) == "counting"
 
-    def test_short_numbered_list_is_not_a_loop(self):
-        entries = "".join(f"{n}. {_prose(30, n)}\n" for n in range(1, COUNTING_RUN))
-        assert len(entries) >= LOOP_MIN_CHARS
-        assert loop_kind(entries) is None
+    def test_counting_run_threshold(self):
+        # The same text in every entry, so only the count decides.
+        below = _prose(300) + "".join(f"{n} Ditto\n" for n in range(1, COUNTING_RUN))
+        at = below + f"{COUNTING_RUN} Ditto\n"
+        assert len(below) >= LOOP_MIN_CHARS
+        assert loop_kind(below) is None
+        assert loop_kind(at) == "counting"
+
+    def test_padded_table_counting_is_a_loop(self):
+        # Cell padding changes with the digit count; whitespace in the gap is collapsed.
+        text = _prose(300) + "| " + " | ".join(f"{n:<5}" for n in range(950, 1100)) + " |"
+        assert loop_kind(text) == "counting"
+
+    # Real numbered lists, from a review probe. Each entry has its own text, so
+    # the gaps between the numbers differ.
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "LIST OF MEMBERS.\n"
+            + "".join(f"{i}. {_SURNAMES[i % 25]}, {'ABCDEFGHJ'[i % 9]}.\n" for i in range(1, 71)),
+            "CATALOGUE OF COINS.\n"
+            + "".join(f"{i}. {_COINS[(i * 7) % 6]}\n" for i in range(213, 281)),
+            "".join(f"{i} {_prose(25, i)}\n" for i in range(1, 80)),
+            "".join(f"{i} {_prose(50, i)}\n" for i in range(1, 80)),
+            "LIST OF PLATES.\n"
+            + "".join(f"Plate {i}. {_SURNAMES[i % 25]} Hall.\n" for i in range(1, 60)),
+            _prose(600)
+            + "\n"
+            + "".join(f"{i}. {_SURNAMES[(i * 3) % 25]}.\n" for i in range(1, 56)),
+        ],
+        ids=["membership roll", "coin catalogue", "numbered verse", "numbered long verse",
+             "list of plates", "prose then 55 names"],
+    )
+    def test_numbered_list_with_distinct_entries_is_not_a_loop(self, text):
+        assert len(text) >= LOOP_MIN_CHARS
+        assert loop_kind(text) is None
+
+    # The known false positive: 50 or more numbered entries with the same text.
+    # (Longer repeated text, such as "S. 1. Repealed." on every line, already
+    # compresses enough to be flagged as a repeat.)
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "".join(f"{i} Ditto\n" for i in range(200, 261)),
+            "".join(f"{i}\nfol.\n" for i in range(100, 170)),
+        ],
+        ids=["ditto lots", "folio numbers"],
+    )
+    def test_numbered_list_with_the_same_entry_is_flagged(self, text):
+        assert loop_kind(text) == "counting"
 
     def test_numeric_table_is_not_a_loop(self):
         # Digits differ on every row, but the numbers do not count up. Replacing
@@ -98,6 +152,14 @@ class TestLongestCountingRun:
 
     def test_a_gap_starts_a_new_run(self):
         assert longest_counting_run("1 2 3 5 6") == 3
+
+    def test_different_text_between_numbers_ends_the_run(self):
+        assert longest_counting_run("7. Abbott\n8. Baker\n9. Carter\n") == 2
+        # A new gap starts a run at the number before it.
+        assert longest_counting_run("1, 2, 3; 4; 5; 6") == 4
+
+    def test_whitespace_in_the_gap_is_collapsed(self):
+        assert longest_counting_run("| 998  | 999  | 1000 | 1001 |") == 4
 
     def test_decimal_is_two_numbers(self):
         assert longest_counting_run("1.10") == 1

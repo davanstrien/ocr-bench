@@ -11,7 +11,8 @@ current behaviour.
 
 ### Behaviour changes
 
-- `audit --screen` also counts a counting list (`- 1`, `- 2`, `- 3`, …) as a loop: the last 2,000 characters of an output of 500 or more characters hold 50 or more numbers in a row that each count up by one. Such a list does not compress, because each line has a new number, so the compression test missed it. In `--json`, these rows are listed under `loop.counting_rows`, and the thresholds include `counting_run`. Peer agreement leaves out these loops, as it does the others.
+- `audit --screen` also counts a counting list (`- 1`, `- 2`, `- 3`, …) as a loop: the last 2,000 characters of an output of 500 or more characters hold 50 or more numbers in a row that each count up by one, with the same text between each number and the next. Such a list does not compress, because each line has a new number, so the compression test missed it. In `--json`, these rows are listed under `loop.counting_rows`, and the thresholds include `counting_run`. Peer agreement leaves out these loops, as it does the others.
+  - The same-text condition keeps real numbered lists with different entries (a membership roll, a coin catalogue, numbered verse, a list of plates) from being flagged. A real list of 50 or more numbered entries with the same text in each (`1 Ditto`, `2 Ditto`, …, or folio numbers with the same word between them) is still flagged; check such rows in `loop.counting_rows`.
   - On the public Britannica board (6 models, 50 pages), the screen now finds 21 loops: the 20 it found before, and DeepSeek-OCR's 10,490-character list on row 0, which only `>5x length` flagged before.
   - On 2,230 outputs from seven public ocr-bench collections, the test flags 15 more outputs. All 15 are counting lists. No real transcription had a run longer than 23 numbers.
   - Replacing every digit with 0 before the compression test also finds these lists, but it flagged 16 numeric tables on the same outputs, so it is not used.

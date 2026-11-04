@@ -22,8 +22,12 @@ These are signals, not verdicts. A model can transcribe faint text that the othe
 models leave out, and a page can have one correct model and several wrong ones.
 The loop check measures how well the tail compresses. A counting list changes on
 every line, so its tail does not compress; a second test finds a long run of
-numbers that each count up by one. A loop whose text changes in other ways can
-still pass both tests.
+numbers that each count up by one, with the same text between them. A loop whose
+text changes in other ways can still pass both tests. A real list of 50 or more
+numbered items with the same text in each (``1 Ditto``, ``2 Ditto``, …, or folio
+numbers with the same word between them) is also flagged as a counting loop; the
+``--json`` report lists these rows under ``loop.counting_rows`` so that they can
+be checked.
 """
 
 from __future__ import annotations
@@ -49,9 +53,12 @@ CHAR_RUN_LENGTH = 200
 CHAR_RUN = re.compile(r"(\S)\1{" + str(CHAR_RUN_LENGTH - 1) + ",}")
 # A counting list (``- 1``, ``- 2``, …) does not compress, because each line has
 # a new number. The tail is a counting loop if it has COUNTING_RUN or more
-# numbers in a row that each count up by one. In 2,230 outputs from seven public
-# ocr-bench collections, two of them full of numeric tables, the longest such run
-# in a real transcription was 23 numbers. Counting loops had runs of 100 or more.
+# numbers in a row that each count up by one, with the same text between each
+# number and the next. The same-text condition leaves out real numbered lists
+# whose entries differ (a membership roll, a catalogue, numbered verse). In 2,230
+# outputs from seven public ocr-bench collections, two of them full of numeric
+# tables, the longest such run in a real transcription was 23 numbers. Counting
+# loops had runs of 100 or more.
 COUNTING_RUN = 50
 NUMBER = re.compile(r"\d+")
 # A digit string longer than this is not read as a number. It ends a counting
@@ -105,29 +112,48 @@ def _compression_ratio(text: str) -> float:
     return len(zlib.compress(data, 9)) / len(data)
 
 
-def longest_counting_run(text: str) -> int:
-    """Return the length of the longest run of numbers that each count up by one.
+def _gap_text(text: str) -> str:
+    """The text between two numbers, with runs of whitespace collapsed and the ends stripped."""
+    return " ".join(text.split())
 
-    The numbers are the digit strings in ``text``, read from left to right. So
-    the lines ``- 7``, ``- 8``, ``- 9`` and the text ``7. 8. 9.`` are runs of 3,
-    and ``1.10`` is the number 1 then the number 10. A digit string longer than
-    MAX_NUMBER_DIGITS ends the run.
+
+def longest_counting_run(text: str) -> int:
+    """Return the length of the longest run of numbers that count up by one with the same gap.
+
+    The numbers are the digit strings in ``text``, read from left to right, so
+    ``1.10`` is the number 1 then the number 10. In a run, each number is one
+    more than the number before it, and the text between each number and the
+    next (the gap) is the same, after whitespace is collapsed. So the lines
+    ``- 7``, ``- 8``, ``- 9`` and the text ``7. 8. 9.`` are runs of 3, but
+    ``7. Abbott``, ``8. Baker``, ``9. Carter`` is not: its gaps differ. A
+    digit string longer than MAX_NUMBER_DIGITS ends the run.
     """
     longest = 0
     run = 0
+    gap: str | None = None  # the gap of the current run, once it has two numbers
     previous: int | None = None
+    previous_end = 0
     for match in NUMBER.finditer(text):
         digits = match.group()
         if len(digits) > MAX_NUMBER_DIGITS:
             run = 0
+            gap = None
             previous = None
             continue
         number = int(digits)
+        this_gap = _gap_text(text[previous_end : match.start()])
         if previous is not None and number == previous + 1:
-            run += 1
+            if run >= 2 and this_gap == gap:
+                run += 1
+            else:
+                # Counts up, but the gap is new: a run starts at the number before.
+                run = 2
+                gap = this_gap
         else:
             run = 1
+            gap = None
         previous = number
+        previous_end = match.end()
         longest = max(longest, run)
     return longest
 
@@ -140,7 +166,8 @@ def loop_kind(text: str) -> str | None:
 
     - ``repeat``: the tail compresses to less than LOOP_TAIL_COMPRESSION of its size;
     - ``counting``: the tail has COUNTING_RUN or more numbers in a row that each
-      count up by one (see :func:`longest_counting_run`).
+      count up by one, with the same text between them (see
+      :func:`longest_counting_run`).
 
     ``char run``: one non-space character repeats CHAR_RUN_LENGTH times or more.
     """
