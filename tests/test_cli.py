@@ -526,10 +526,14 @@ class TestCmdAuditJsonAndScreen:
         report = _audit_report()
         report.screen = _screen_report()
         _, out = self._run(monkeypatch, capsys, report)
-        screen = json.loads(out)["screen"]
+        data = json.loads(out)
+        screen = data["screen"]
         assert screen["suggested_max_ocr_text_len"] == 3500
-        assert [m["name"] for m in screen["models"]] == ["cfg2", "cfg"]  # by peer agreement
-        assert screen["models"][1]["loop"]["rows"] == [3]
+        # Same order as the configs, not sorted by peer agreement.
+        assert [m["name"] for m in screen["models"]] == ["cfg", "cfg2"]
+        assert screen["models"][0]["loop"]["rows"] == [3]
+        assert "thresholds" in screen
+        assert data["ocr_bench_version"]
 
     def test_screen_table_and_cap_line(self, monkeypatch, capsys):
         report = _audit_report()
@@ -539,6 +543,9 @@ class TestCmdAuditJsonAndScreen:
         assert "Screen" in out
         assert "1/10" in out  # cfg's loops
         assert "--max-ocr-text-len 3500" in out
+        # The screen table keeps the configs' order.
+        screen_part = out[out.index("Screen"):]
+        assert screen_part.index("cfg2") > screen_part.index("1/10")
 
     def test_screen_skip_reason_is_printed(self, monkeypatch, capsys):
         report = _audit_report()
@@ -546,6 +553,30 @@ class TestCmdAuditJsonAndScreen:
         _, out = self._run(monkeypatch, capsys, report, argv=("--screen",))
         assert "Screen skipped" in out
         assert "at least 3 models" in out
+
+    def test_json_dataset_build_error_is_operational(self, monkeypatch, capsys):
+        from datasets.exceptions import DatasetGenerationError
+
+        def boom(*a, **k):
+            raise DatasetGenerationError("schema mismatch")
+
+        monkeypatch.setattr(cli, "audit_repo", boom)
+        args = build_parser().parse_args(["audit", "user/data", "--json"])
+        with pytest.raises(SystemExit) as exc_info:
+            cli.cmd_audit(args)
+        assert exc_info.value.code == 2
+        assert "schema mismatch" in json.loads(capsys.readouterr().out)["error"]
+
+
+class TestCountCell:
+    def test_no_colour_on_few_pages(self):
+        assert cli._count_cell(3, 4) == "3/4"
+
+    def test_colour_on_enough_pages(self):
+        assert cli._count_cell(3, 10) == "[red]3/10[/red]"
+        assert cli._count_cell(1, 10) == "[yellow]1/10[/yellow]"
+        assert cli._count_cell(0, 10) == "0/10"
+        assert cli._count_cell(0, 0) == "-"
 
 
 class TestMainErrorHandling:

@@ -460,6 +460,23 @@ class TestAuditScreen:
     @patch("ocr_bench.integrity._load_configs")
     @patch("ocr_bench.integrity.discover_configs")
     @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_all_sentinel_config_does_not_count_as_a_model(self, mock_pr, mock_main, mock_load):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = ["cfg_a", "cfg_b", "cfg_c"]
+        loaded = _three_configs(("cfg_a", "cfg_b"))
+        loaded.append(
+            _loaded_config(
+                "cfg_c", "model-c", ["[OCR ERROR]", "[OCR ERROR]"], {"b_number": [1, 2]}
+            )
+        )
+        mock_load.return_value = loaded
+        report = audit_repo("user/repo", screen=True)
+        assert report.screen is None
+        assert "at least 3 models" in report.screen_skipped
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
     def test_screen_skipped_on_misalignment(self, mock_pr, mock_main, mock_load):
         mock_pr.return_value = ([], {})
         mock_main.return_value = ["cfg_a", "cfg_b", "cfg_c"]

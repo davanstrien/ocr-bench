@@ -18,14 +18,14 @@ current behaviour.
 
 - `--criteria body-text`: the default criteria, except for completeness. Completeness covers the main text, headings, footnotes and captions. Running headers, page numbers, signature marks and catchwords are optional, and the prompt tells the judge not to penalise their absence or reward their presence. Only the completeness criterion changes, so the accuracy and tie rules still see all the text. The prompt does not name other text, such as marginalia or stamps, so the judge decides. Use it when the text will be read or searched, or to compare a board with a ground truth that leaves page furniture out.
 - `audit --screen`: free checks to run before a judge run. Each model's output on a page is compared with the other models' outputs on that page. The screen counts:
-  - loops: the last 2,000 characters compress to less than 15% of their size, or one character repeats 200 or more times;
+  - loops: the last 2,000 characters compress to less than 15% of their size, or one non-space character repeats 200 or more times;
   - outputs more than 5× the median length of the others;
-  - text (100 or more characters) on pages where most other models output under 20 characters;
-  - empty output (under 20 characters) on pages where the others output 200 or more.
+  - text (100 or more characters) on blank pages, where most outputs have under 20 characters;
+  - empty output (under 20 characters) on text pages, where most outputs have 200 or more.
 
-  It also gives each model a peer-agreement score: the mean, over pages, of the median normalised Levenshtein similarity to the others. And it suggests a `--max-ocr-text-len` that fits every output no check flagged. The screen needs 3 or more models with judgeable rows, and it does not change the exit code.
+  It also gives each model a peer-agreement score: the mean, over pages, of the median normalised Levenshtein similarity to the others, with loops left out. It prints the length distribution of the outputs that no check flagged, and suggests a `--max-ocr-text-len` that fits them all. The screen needs 3 or more models whose outputs are not all empty or error placeholders. It does not change the exit code.
 - `audit --configs` and `audit --from-prs` select configs as `judge` does.
-- `audit --json` prints the report as JSON, with the rows that each screen check flagged. The exit codes are unchanged; an audit that cannot complete prints `{"error": ...}`.
+- `audit --json` prints the report as JSON: the ocr-bench version, the screen thresholds, and each flagged output with its row, checks and lengths. The exit codes are unchanged. An audit that cannot complete (a Hub, network or dataset-load error) prints `{"error": ...}` and exits with 2.
 
 ### Other
 

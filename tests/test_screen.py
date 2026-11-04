@@ -82,11 +82,26 @@ class TestScreenOutputs:
         assert models["a"].blank_pages == 1  # b and c are near-empty: 2 of 3 others
         assert models["a"].text_on_blank_rows == []
 
-    def test_blank_page_needs_most_of_the_others(self):
-        # For d, only 2 of 4 others are near-empty: not a blank page.
+    def test_blank_page_needs_most_of_the_outputs(self):
+        # Only 2 of 5 outputs are near-empty: not a blank page.
         texts = {"a": [""], "b": [""], "c": [_prose(300, 1)], "e": [_prose(300, 2)]}
         texts["d"] = [_prose(150, 3)]
         assert _by_name(_screen(texts))["d"].blank_pages == 0
+
+    def test_even_split_is_neither_blank_nor_text(self):
+        # 3 near-empty and 3 long outputs: no page-type flag either way. (The
+        # length check still compares each output with the others' median.)
+        texts = {name: [""] for name in "abc"}
+        texts.update({name: [_prose(400, seed)] for seed, name in enumerate("def")})
+        models = _by_name(_screen(texts))
+        assert all(m.blank_pages == 0 and m.text_pages == 0 for m in models.values())
+        assert all(not m.text_on_blank_rows for m in models.values())
+        assert all(not m.empty_on_text_rows for m in models.values())
+
+    def test_blank_and_text_pages_are_page_properties(self):
+        # The same page counts as blank for every model on it.
+        report = _screen({"a": [""], "b": [""], "c": ["x"], "d": [_prose(150)]})
+        assert {m.blank_pages for m in report.models} == {1}
 
     def test_empty_on_text_page(self):
         texts = {name: [_prose(400, seed)] for seed, name in enumerate("abc")}
@@ -126,12 +141,43 @@ class TestScreenOutputs:
         page = _prose(500, 1)
         texts = {"a": [page], "b": [page], "c": [page + " extra"], "d": [_prose(500, 2)]}
         report = _screen(texts)
-        order = [m.name for m in report.by_peer_agreement()]
-        assert order[-1] == "d"
+        assert [m.name for m in report.models] == ["a", "b", "c", "d"]  # input order
         models = _by_name(report)
+        assert min(models.values(), key=lambda m: m.peer_agreement).name == "d"
         # a's similarities: 1.0 (b), about 0.99 (c), low (d); the median is c's.
         assert models["a"].peer_agreement > 0.95
         assert models["d"].peer_agreement < 0.6
+
+    def test_peer_agreement_leaves_out_loops(self):
+        page = _prose(600, 1)
+        loop = _prose(300, 2) + "the same line again\n" * 120
+        texts = {"a": [page, page], "b": [page, page], "c": [page, page], "d": [page, loop]}
+        models = _by_name(_screen(texts))
+        assert models["d"].loop_rows == [1]
+        assert models["d"].peer_pages == 1  # only row 0
+        assert models["d"].peer_agreement == pytest.approx(1.0)
+        assert models["a"].peer_pages == 2  # row 1 is scored against b and c only
+        assert models["a"].peer_agreement == pytest.approx(1.0)
+
+    def test_flagged_outputs_carry_evidence(self):
+        texts = {name: [_prose(400, seed)] for seed, name in enumerate("abc")}
+        texts["d"] = [""]
+        flagged = _by_name(_screen(texts))["d"].flagged
+        assert len(flagged) == 1
+        assert flagged[0].row == 0
+        assert flagged[0].checks == ["empty_on_text"]
+        assert flagged[0].visible == 0
+        assert flagged[0].others_median_visible > 200
+
+    def test_empty_on_text_is_left_out_of_the_cap(self):
+        texts = {name: ["ab" * 100] for name in "bc"}
+        texts["a"] = [" " * 300 + "x"]  # 301 characters, 1 visible
+        texts["d"] = ["cd" * 100]
+        report = _screen(texts, cap=250)
+        assert _by_name(report)["a"].empty_on_text_rows == [0]
+        assert report.unflagged_outputs == 3
+        assert report.longest_unflagged == 200
+        assert report.suggested_max_ocr_text_len is None
 
     def test_html_is_measured_as_the_judge_sees_it(self):
         empty_table = "<table><tr><td></td></tr></table>"
@@ -166,5 +212,7 @@ class TestScreenOutputs:
         texts = {name: [_prose(400, seed), ""] for seed, name in enumerate("abc")}
         data = json.loads(json.dumps(_screen(texts).to_dict()))
         assert data["rows"] == 2
-        assert {m["name"] for m in data["models"]} == {"a", "b", "c"}
+        assert [m["name"] for m in data["models"]] == ["a", "b", "c"]
         assert set(data["models"][0]) >= {"loop", "long", "text_on_blank", "peer_agreement"}
+        assert data["thresholds"]["loop_tail_compression"] == 0.15
+        assert data["models"][0]["loop"]["char_run_rows"] == []

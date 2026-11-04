@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 import structlog
+from datasets.exceptions import DatasetsError
 from openai import OpenAIError
 from rich.console import Console
 from rich.table import Table
@@ -524,7 +525,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Audit only these configs, loaded from main. With --from-prs, each is "
-            "loaded from its newest open PR, as in 'judge'."
+            "loaded from its newest open PR, or from main if it has no open PR or it "
+            "changed on main after its newest open PR, as in 'judge'."
         ),
     )
     audit.add_argument(
@@ -538,9 +540,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Also run free checks that compare each model's output with the other "
             "models' outputs on the same page: loops, outputs over 5x the others' "
-            "length, text on pages the others leave blank, empty output on text "
-            "pages, and peer agreement. Needs 3 or more models. Use it to find weak "
-            "models before a paid judge run."
+            "length, text on pages that most models leave blank, empty output on "
+            "pages where most models have text, and peer agreement. Needs 3 or more "
+            "models. Use it to find weak models before a paid judge run."
         ),
     )
     audit.add_argument(
@@ -2395,6 +2397,8 @@ _AUDIT_EXIT_INTEGRITY = 1  # audit ran and found blocking problems
 _AUDIT_EXIT_OPERATIONAL = 2  # audit could not complete (network/Hub/load)
 # Screen counts above this rate are shown in red, other non-zero counts in yellow.
 SCREEN_WARN_RATE = 0.10
+# Rates on fewer pages than this are too noisy to colour.
+SCREEN_MIN_COLOUR_PAGES = 10
 
 
 def _pct(rate: float) -> str:
@@ -2433,10 +2437,10 @@ def cmd_audit(args: argparse.Namespace) -> None:
                 from_prs=args.from_prs,
                 screen=args.screen,
             )
-    except (DatasetError, OSError, OpenAIError, ValueError) as exc:
+    except (DatasetError, DatasetsError, OSError, OpenAIError, ValueError) as exc:
         # Couldn't even run the check (repo missing, no OCR columns, network /
-        # Hub outage). Distinct from an integrity failure so automation can tell
-        # "broken run" from "bad data".
+        # Hub outage, a config the datasets library cannot build). Distinct from
+        # an integrity failure so automation can tell "broken run" from "bad data".
         _audit_error(args, f"Audit could not complete: {exc}")
 
     if not report.configs and not report.configs_without_text and not report.auxiliary_configs:
@@ -2521,14 +2525,14 @@ def _audit_error(args: argparse.Namespace, message: str) -> NoReturn:
     sys.exit(_AUDIT_EXIT_OPERATIONAL)
 
 
-def _count_cell(count: int, total: int, warn_rate: float) -> str:
-    """Format 'count/total', in red when count/total is above warn_rate."""
+def _count_cell(count: int, total: int) -> str:
+    """Format 'count/total'; colour it only when total is large enough to judge a rate."""
     if total == 0:
         return "-"
     cell = f"{count}/{total}"
-    if count == 0:
+    if count == 0 or total < SCREEN_MIN_COLOUR_PAGES:
         return cell
-    colour = "red" if count / total > warn_rate else "yellow"
+    colour = "red" if count / total > SCREEN_WARN_RATE else "yellow"
     return f"[{colour}]{cell}[/{colour}]"
 
 
@@ -2543,40 +2547,44 @@ def _print_screen(screen: ScreenReport) -> None:
     table.add_column("Text on blank", justify="right")
     table.add_column("Empty on text", justify="right")
     table.add_column("Peer agreement", justify="right")
-    for m in screen.by_peer_agreement():
+    for m in screen.models:
         peer = "-" if m.peer_agreement is None else f"{m.peer_agreement:.2f}"
         table.add_row(
             m.name,
             m.model,
             str(m.pages),
-            _count_cell(len(m.loop_rows), m.pages, SCREEN_WARN_RATE),
-            _count_cell(len(m.long_rows), m.pages, SCREEN_WARN_RATE),
-            _count_cell(len(m.text_on_blank_rows), m.blank_pages, SCREEN_WARN_RATE),
-            _count_cell(len(m.empty_on_text_rows), m.text_pages, SCREEN_WARN_RATE),
+            _count_cell(len(m.loop_rows), m.pages),
+            _count_cell(len(m.long_rows), m.checked_pages),
+            _count_cell(len(m.text_on_blank_rows), m.blank_pages),
+            _count_cell(len(m.empty_on_text_rows), m.text_pages),
             peer,
         )
     console.print()
     console.print(table)
     console.print(
-        "[dim]Sorted by peer agreement: the mean, over pages, of the median similarity "
-        "to the other models' outputs. 'Text on blank' counts pages where most other "
-        "models output under 20 characters; 'Empty on text' counts pages where the "
-        "others output 200 or more. These checks are leads, not verdicts: look at "
-        "the flagged rows (--json lists them) before you drop a model.[/dim]"
+        "[dim]'Pages' leaves out error placeholders. A blank page is one where most "
+        "outputs have under 20 characters; a text page is one where most have 200 or "
+        "more. Peer agreement is the mean, over pages, of the median similarity to the "
+        "other models' outputs, with loops left out. It is not a ranking. Counts on "
+        f"fewer than {SCREEN_MIN_COLOUR_PAGES} pages are not coloured. These checks are "
+        "leads, not verdicts: look at the flagged rows (--json lists them) before you "
+        "drop a model.[/dim]"
+    )
+    console.print(
+        f"Outputs that no check flagged: {screen.unflagged_outputs}; judge-input length "
+        f"median {screen.unflagged_median}, 95th percentile {screen.unflagged_p95}, "
+        f"longest {screen.longest_unflagged} characters."
     )
     suggested = screen.suggested_max_ocr_text_len
     if suggested is None:
         console.print(
-            f"Text cap: --max-ocr-text-len {screen.max_ocr_text_len} fits all "
-            f"{screen.unflagged_outputs} outputs that no check flagged."
+            f"Text cap: --max-ocr-text-len {screen.max_ocr_text_len} fits all of them."
         )
     else:
         console.print(
-            f"[yellow]Text cap:[/yellow] the judge would truncate "
-            f"{screen.unflagged_over_cap} of {screen.unflagged_outputs} outputs that no "
-            f"check flagged (longest: {screen.longest_unflagged} characters). "
-            f"--max-ocr-text-len {suggested} fits them all; a higher cap makes each "
-            "judge call longer."
+            f"[yellow]Text cap:[/yellow] --max-ocr-text-len {screen.max_ocr_text_len} "
+            f"truncates {screen.unflagged_over_cap} of them. --max-ocr-text-len "
+            f"{suggested} fits them all; a higher cap makes each judge call longer."
         )
 
 

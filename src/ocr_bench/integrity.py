@@ -12,6 +12,7 @@ import statistics
 from dataclasses import dataclass, field
 from typing import Any
 
+from ocr_bench import __version__
 from ocr_bench.dataset import (
     AlignmentResult,
     DatasetError,
@@ -266,6 +267,7 @@ class AuditReport:
             )
         return {
             "repo_id": self.repo_id,
+            "ocr_bench_version": __version__,
             "ok": not self.has_problems,
             "problems": self.problems,
             "judge_text_mode": self.judge_text_mode,
@@ -290,7 +292,10 @@ def _screen_skip_reason(
     if len(row_counts) > 1:
         return "the configs have different row counts"
     if n_models < MIN_MODELS:
-        return f"the screen needs at least {MIN_MODELS} models with judgeable rows"
+        return (
+            f"the screen needs at least {MIN_MODELS} models with outputs that are not "
+            "all empty or error placeholders"
+        )
     return None
 
 
@@ -424,8 +429,14 @@ def audit_repo(
         pr_revisions=pr_revisions,
     )
     if screen:
-        unjudgeable = set(report.unjudgeable_configs)
-        screened = {name: col for name, col in columns.items() if name not in unjudgeable}
+        # Leave out configs whose every row is empty or an error sentinel: they
+        # have no output to compare, and they must not count towards MIN_MODELS.
+        without_output = {
+            c.stats.name
+            for c in report.configs
+            if c.stats.n_empty + c.stats.n_sentinel == c.stats.n_rows
+        }
+        screened = {name: col for name, col in columns.items() if name not in without_output}
         reason = _screen_skip_reason(
             alignment, {len(values) for _, values in screened.values()}, len(screened)
         )
