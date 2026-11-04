@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import sys
@@ -2418,16 +2419,20 @@ def cmd_audit(args: argparse.Namespace) -> None:
     failure), 2 = the audit could not complete (network / Hub / dataset load).
     The screen checks never change the exit code.
     """
+    # With --json, stdout holds only the JSON. Log lines (structlog prints to
+    # stdout by default) and any other output during the audit go to stderr.
+    output = contextlib.redirect_stdout(sys.stderr) if args.json else contextlib.nullcontext()
     try:
-        report = audit_repo(
-            args.dataset,
-            split=args.split,
-            max_ocr_text_len=args.max_ocr_text_len,
-            judge_text_mode=args.judge_text_mode,
-            configs=args.configs,
-            from_prs=args.from_prs,
-            screen=args.screen,
-        )
+        with output:
+            report = audit_repo(
+                args.dataset,
+                split=args.split,
+                max_ocr_text_len=args.max_ocr_text_len,
+                judge_text_mode=args.judge_text_mode,
+                configs=args.configs,
+                from_prs=args.from_prs,
+                screen=args.screen,
+            )
     except (DatasetError, OSError, OpenAIError, ValueError) as exc:
         # Couldn't even run the check (repo missing, no OCR columns, network /
         # Hub outage). Distinct from an integrity failure so automation can tell

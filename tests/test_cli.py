@@ -493,6 +493,22 @@ class TestCmdAuditJsonAndScreen:
         assert data["ok"] is False
         assert data["problems"] == [">10% sentinels: m"]
 
+    def test_json_stdout_holds_only_json(self, monkeypatch, capsys):
+        # structlog prints to stdout by default; a warning during discovery
+        # (for example main_newer_than_pr) must not corrupt the JSON.
+        def noisy_audit(*a, **k):
+            cli.logger.warning("main_newer_than_pr", config="cfg", ignoring_prs=[2])
+            print("stray output")
+            return _audit_report()
+
+        monkeypatch.setattr(cli, "audit_repo", noisy_audit)
+        args = build_parser().parse_args(["audit", "user/data", "--json"])
+        cli.cmd_audit(args)
+        captured = capsys.readouterr()
+        assert json.loads(captured.out)["ok"] is True
+        assert "main_newer_than_pr" in captured.err
+        assert "stray output" in captured.err
+
     def test_json_operational_error(self, monkeypatch, capsys):
         def boom(*a, **k):
             raise OSError("hub unreachable")
