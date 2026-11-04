@@ -38,6 +38,7 @@ from ocr_bench.dataset import (
     evaluation_input_fingerprints,
     load_config_dataset,
     load_flat_dataset,
+    require_dataset_repo,
 )
 from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo
 from ocr_bench.integrity import (
@@ -1115,6 +1116,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
             )
 
     _check_visibility_flags(args)
+    # A missing source repo stops here with a plain message, before the
+    # results-repo check and PR discovery make their own Hub requests.
+    require_dataset_repo(args.dataset)
     if results_repo:
         console.print(f"Results will be published to [bold]{results_repo}[/bold]")
         # Read-only check first: an existing results repo that must be private

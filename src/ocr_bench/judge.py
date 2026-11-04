@@ -43,15 +43,33 @@ _MAX_SENTINEL_WORDS = 4
 _SENTINEL_TOKEN_RE = re.compile(r"^\[[A-Z0-9 ._/-]{0,30}(?:ERROR|FAILED)\]$")
 
 
+def ocr_text(value: object) -> str:
+    """Return one OCR output cell as text. A value that is not a string counts as missing.
+
+    The judge, the audit and the screen read every OCR output cell through this
+    function. A string is returned unchanged. Any other value (``None``, a
+    number, a float NaN, a list) becomes ``""``, so it is counted and judged as
+    an empty output.
+
+    A non-string cell is treated as missing, not converted with ``str()``,
+    because ``str()`` would give the judge text that is not on the page: a NaN
+    from a pandas export becomes ``"nan"``, and a list of lines becomes its
+    Python repr. As an empty output it shows in the audit's Empty column, and
+    a column with no string values is reported as having no judgeable rows.
+    """
+    return value if isinstance(value, str) else ""
+
+
 def is_sentinel(text: str | None) -> bool:
     """True if ``text`` is an OCR error sentinel rather than a transcription.
 
     Matches the known literals (case-insensitively) plus any short (≤40 char,
     ≤4 word) string that strips to a single bracketed ALL-CAPS token ending in
     ``ERROR``/``FAILED``. Empty or ``None`` values are *not* sentinels (they are
-    handled as missing output on their own).
+    handled as missing output on their own). Nor is any other value that is not
+    a string (see :func:`ocr_text`).
     """
-    if not text:
+    if not text or not isinstance(text, str):
         return False
     stripped = text.strip()
     if not stripped:
@@ -708,12 +726,13 @@ def build_comparisons(
             continue  # Skip image encoding entirely
 
         # Fetch text once per row (avoids re-decoding the image on list-backed
-        # datasets that key the row dict lazily).
+        # datasets that key the row dict lazily). A cell that is not a string
+        # is read as an empty output (see ocr_text).
         if text_cols_data is not None:
-            texts = {col: (text_cols_data[col][idx] or "") for col in col_names}
+            texts = {col: ocr_text(text_cols_data[col][idx]) for col in col_names}
         else:
             row = dataset[idx]
-            texts = {col: (row[col] or "") for col in col_names}
+            texts = {col: ocr_text(row[col]) for col in col_names}
 
         # Classify each pair before touching the image. Each entry is
         # (i, j, text_a, text_b, auto_result) where auto_result is None for a

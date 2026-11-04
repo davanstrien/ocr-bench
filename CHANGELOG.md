@@ -9,6 +9,13 @@ current behaviour.
 
 ## [Unreleased]
 
+### Fixes
+
+- An OCR output cell that is not a string (a number, a NaN, a list) is read as an empty output by `judge`, `audit` and `audit --screen`. Before, such a cell crashed them. The cell is not converted with `str()`, so the judge never sees text such as `nan`. In the audit, the cell counts as empty, and a column with no string values has no judgeable rows.
+- A flat dataset with no rows stops with an error that says so. Before, it raised `IndexError`.
+- `audit` and `judge` check that the dataset repo exists before they look for configs. For a missing repo, or a private repo that the token cannot read, the error is now "Dataset repo '<id>' was not found on the Hub (repo type: dataset)". Before, the error named the discussions endpoint. `audit` still exits with 2.
+- The "no HF token" error of `run` says `hf auth login`, not `hf login`.
+
 ## [0.0.6] - 2026-11-04
 
 ### Upgrading from 0.0.5

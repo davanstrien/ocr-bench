@@ -16,6 +16,7 @@ from ocr_bench.judge import (
     image_to_base64,
     is_sentinel,
     normalize_for_judge,
+    ocr_text,
     parse_judge_output,
     prompt_hash,
     validate_prompt_template,
@@ -612,6 +613,24 @@ class TestIsSentinel:
         # A sentinel embedded in real text is not a whole-column failure.
         assert not is_sentinel("Title page\n[OCR ERROR]\nmore text")
 
+    def test_values_that_are_not_strings_are_not_sentinels(self):
+        # A number in an OCR column used to crash here (``.strip()`` on an int).
+        assert not is_sentinel(12)
+        assert not is_sentinel(3.5)
+        assert not is_sentinel(float("nan"))
+        assert not is_sentinel(["[OCR ERROR]"])
+
+
+class TestOcrText:
+    def test_string_is_unchanged(self):
+        assert ocr_text("  page text\n") == "  page text\n"
+        assert ocr_text("") == ""
+
+    def test_values_that_are_not_strings_count_as_missing(self):
+        # Not str(): NaN would become "nan" and a list its repr in the prompt.
+        for value in (None, 0, 12, 3.5, float("nan"), True, ["line 1", "line 2"], b"x"):
+            assert ocr_text(value) == "", value
+
 
 class TestComparison:
     def test_text_fields_default_empty(self):
@@ -708,6 +727,39 @@ class TestBuildComparisons:
         ]
         comps = build_comparisons(ds, {"ocr_a": "A", "ocr_b": "B"})
         assert len(comps) == 0
+
+    def test_number_cell_is_judged_as_empty_output(self):
+        """A number in an OCR column is read as an empty output, as None is.
+
+        The other side has text, so the pair is still judged (the empty side
+        should lose). Before, ``.strip()`` on the number crashed.
+        """
+        ds = [
+            {
+                "image": Image.new("RGB", (60, 60)),
+                "ocr_a": 12345,
+                "ocr_b": "a proper full transcription of the whole page here",
+            },
+        ]
+        comps = build_comparisons(ds, {"ocr_a": "A", "ocr_b": "B"})
+        assert len(comps) == 1
+        assert comps[0].text_a == ""
+        assert comps[0].auto_result is None
+
+    def test_nan_column_in_a_dataset_is_read_as_empty(self):
+        """Column access on an HF Dataset applies the same rule (a float NaN column)."""
+        from datasets import Dataset
+
+        ds = Dataset.from_dict(
+            {
+                "image": [Image.new("RGB", (60, 60)), Image.new("RGB", (60, 60))],
+                "ocr_a": [float("nan"), 2.0],
+                "ocr_b": ["a proper full transcription of page one", "short"],
+            }
+        )
+        comps = build_comparisons(ds, {"ocr_a": "A", "ocr_b": "B"})
+        # Row 0: "" against real text is judged. Row 1: both under min_chars.
+        assert [(c.sample_idx, c.text_a) for c in comps] == [(0, "")]
 
     def test_sentinel_excludes_only_affected_pairs(self):
         """With 3 models where one is a sentinel, only the pair between the two

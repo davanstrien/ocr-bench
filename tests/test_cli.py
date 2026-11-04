@@ -567,6 +567,33 @@ class TestCmdAuditJsonAndScreen:
         assert exc_info.value.code == 2
         assert "schema mismatch" in json.loads(capsys.readouterr().out)["error"]
 
+    def test_json_missing_repo_says_so(self, monkeypatch, capsys):
+        # The real audit_repo, with a Hub that has no such repo. Before, the
+        # error came from the PR listing and named the discussions endpoint.
+        from types import SimpleNamespace
+
+        from huggingface_hub.errors import RepositoryNotFoundError
+
+        from ocr_bench import dataset, integrity
+
+        hub = MagicMock()
+        response = SimpleNamespace(status_code=404, headers={}, request=None)
+        hub.repo_info.side_effect = RepositoryNotFoundError("404", response=response)
+        monkeypatch.setattr(
+            integrity,
+            "require_dataset_repo",
+            lambda repo_id, api=None: dataset.require_dataset_repo(repo_id, api=hub),
+        )
+        monkeypatch.setattr(
+            integrity, "discover_pr_configs", MagicMock(side_effect=AssertionError("listed PRs"))
+        )
+        args = build_parser().parse_args(["audit", "user/missing", "--json"])
+        with pytest.raises(SystemExit) as exc_info:
+            cli.cmd_audit(args)
+        assert exc_info.value.code == 2
+        error = json.loads(capsys.readouterr().out)["error"]
+        assert "Dataset repo 'user/missing' was not found on the Hub" in error
+
 
 class TestCountCell:
     def test_no_colour_on_few_pages(self):
@@ -1218,6 +1245,23 @@ class TestCmdJudgeEmptyGuard:
         out = capsys.readouterr().out
         assert "No valid comparisons" in out
         assert "OCR Model Leaderboard" not in out
+
+
+class TestJudgeMissingSourceRepo:
+    def test_stops_before_the_results_repo_and_discovery(
+        self, monkeypatch, _offline_destination_repos
+    ):
+        def missing(repo_id, api=None):
+            raise DatasetError(f"Dataset repo '{repo_id}' was not found on the Hub")
+
+        monkeypatch.setattr(cli, "require_dataset_repo", missing)
+        monkeypatch.setattr(
+            cli, "discover_configs", MagicMock(side_effect=AssertionError("discovery ran"))
+        )
+        args = build_parser().parse_args(["judge", "user/missing"])
+        with pytest.raises(DatasetError, match="'user/missing' was not found"):
+            cli.cmd_judge(args)
+        assert _offline_destination_repos == []  # the results repo was not checked
 
 
 class TestJudgeSelectsPrConfigs:

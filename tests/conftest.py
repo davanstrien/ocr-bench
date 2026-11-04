@@ -21,3 +21,21 @@ def _offline_destination_repos(monkeypatch):
 
     monkeypatch.setattr("ocr_bench.cli.ensure_dataset_repo", fake_ensure)
     return calls
+
+
+@pytest.fixture(autouse=True)
+def _offline_source_repo_check(monkeypatch):
+    """Keep ``judge`` and ``audit`` tests off the Hub when they check the source repo exists.
+
+    ``require_dataset_repo`` calls ``HfApi.repo_info``. Tests that exercise it
+    call ``ocr_bench.dataset.require_dataset_repo`` with a fake API, or patch
+    these names themselves.
+    """
+    calls: list[str] = []
+
+    def fake_require(repo_id, api=None):
+        calls.append(repo_id)
+
+    monkeypatch.setattr("ocr_bench.cli.require_dataset_repo", fake_require)
+    monkeypatch.setattr("ocr_bench.integrity.require_dataset_repo", fake_require)
+    return calls
