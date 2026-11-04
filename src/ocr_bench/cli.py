@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import sys
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 import structlog
+from datasets.exceptions import DatasetsError
 from openai import OpenAIError
 from rich.console import Console
 from rich.table import Table
@@ -68,6 +70,7 @@ from ocr_bench.publish import (
     publish_checkpoint,
     publish_results,
 )
+from ocr_bench.screen import ScreenReport
 
 if TYPE_CHECKING:
     from ocr_bench.run import JobRun
@@ -514,6 +517,40 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Text length above which the judge truncates an output "
             f"(default: {MAX_OCR_TEXT_LENGTH}); reported as truncation exposure"
+        ),
+    )
+    audit.add_argument(
+        "--configs",
+        nargs="+",
+        default=None,
+        help=(
+            "Audit only these configs, loaded from main. With --from-prs, each is "
+            "loaded from its newest open PR, or from main if it has no open PR or it "
+            "changed on main after its newest open PR, as in 'judge'."
+        ),
+    )
+    audit.add_argument(
+        "--from-prs",
+        action="store_true",
+        help="Audit the configs in open PRs (newest open PR per config), as in 'judge'.",
+    )
+    audit.add_argument(
+        "--screen",
+        action="store_true",
+        help=(
+            "Also run free checks that compare each model's output with the other "
+            "models' outputs on the same page: loops, outputs over 5x the others' "
+            "length, text on pages that most models leave blank, empty output on "
+            "pages where most models have text, and peer agreement. Needs 3 or more "
+            "models. Use it to find weak models before a paid judge run."
+        ),
+    )
+    audit.add_argument(
+        "--json",
+        action="store_true",
+        help=(
+            "Print the report as JSON on stdout, with the flagged rows of each "
+            "screen check. The exit codes do not change."
         ),
     )
 
@@ -2358,6 +2395,10 @@ def cmd_bench(args: argparse.Namespace) -> None:
 # Audit exit codes, so CI can tell a bad *repo* from a broken *run*.
 _AUDIT_EXIT_INTEGRITY = 1  # audit ran and found blocking problems
 _AUDIT_EXIT_OPERATIONAL = 2  # audit could not complete (network/Hub/load)
+# Screen counts above this rate are shown in red, other non-zero counts in yellow.
+SCREEN_WARN_RATE = 0.10
+# Rates on fewer pages than this are too noisy to colour.
+SCREEN_MIN_COLOUR_PAGES = 10
 
 
 def _pct(rate: float) -> str:
@@ -2380,24 +2421,36 @@ def cmd_audit(args: argparse.Namespace) -> None:
 
     Exit codes: 0 = clean, 1 = the repo would poison a judge run (integrity
     failure), 2 = the audit could not complete (network / Hub / dataset load).
+    The screen checks never change the exit code.
     """
+    # With --json, stdout holds only the JSON. Log lines (structlog prints to
+    # stdout by default) and any other output during the audit go to stderr.
+    output = contextlib.redirect_stdout(sys.stderr) if args.json else contextlib.nullcontext()
     try:
-        report = audit_repo(
-            args.dataset,
-            split=args.split,
-            max_ocr_text_len=args.max_ocr_text_len,
-            judge_text_mode=args.judge_text_mode,
-        )
-    except (DatasetError, OSError, OpenAIError, ValueError) as exc:
+        with output:
+            report = audit_repo(
+                args.dataset,
+                split=args.split,
+                max_ocr_text_len=args.max_ocr_text_len,
+                judge_text_mode=args.judge_text_mode,
+                configs=args.configs,
+                from_prs=args.from_prs,
+                screen=args.screen,
+            )
+    except (DatasetError, DatasetsError, OSError, OpenAIError, ValueError) as exc:
         # Couldn't even run the check (repo missing, no OCR columns, network /
-        # Hub outage). Distinct from an integrity failure so automation can tell
-        # "broken run" from "bad data".
-        console.print(f"[red]Audit could not complete:[/red] {exc}")
-        sys.exit(_AUDIT_EXIT_OPERATIONAL)
+        # Hub outage, a config the datasets library cannot build). Distinct from
+        # an integrity failure so automation can tell "broken run" from "bad data".
+        _audit_error(args, f"Audit could not complete: {exc}")
 
     if not report.configs and not report.configs_without_text and not report.auxiliary_configs:
-        console.print("[red]No OCR configs/columns found to audit.[/red]")
-        sys.exit(_AUDIT_EXIT_OPERATIONAL)
+        _audit_error(args, "No OCR configs/columns found to audit.")
+
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2))
+        if report.has_problems:
+            sys.exit(_AUDIT_EXIT_INTEGRITY)
+        return
 
     align = report.alignment
     table = Table(
@@ -2451,24 +2504,88 @@ def cmd_audit(args: argparse.Namespace) -> None:
     else:
         console.print(f"Alignment: {align.describe()}")
 
+    if report.screen is not None:
+        _print_screen(report.screen)
+    elif report.screen_skipped:
+        console.print(f"\n[yellow]Screen skipped:[/yellow] {report.screen_skipped}.")
+
     # Verdict + exit code (usable in automation)
     if report.has_problems:
-        problems: list[str] = []
-        if align.status == "misaligned":
-            problems.append("row misalignment")
-        if report.row_count_mismatch:
-            counts = ", ".join(f"{c.stats.name}={c.stats.n_rows}" for c in report.configs)
-            problems.append(f"row-count mismatch ({counts})")
-        if report.flagged_models:
-            flagged = ", ".join(report.flagged_models)
-            problems.append(f">{SENTINEL_FLAG_RATE:.0%} sentinels: {flagged}")
-        if report.unjudgeable_configs:
-            problems.append(f"no judgeable rows: {', '.join(report.unjudgeable_configs)}")
-        if report.too_few_models:
-            problems.append("fewer than two judgeable configs")
-        console.print(f"\n[red]FAIL[/red] — {'; '.join(problems)}")
+        console.print(f"\n[red]FAIL[/red] — {'; '.join(report.problems)}")
         sys.exit(_AUDIT_EXIT_INTEGRITY)
     console.print("\n[green]OK[/green] — no blocking issues found")
+
+
+def _audit_error(args: argparse.Namespace, message: str) -> NoReturn:
+    """Report an audit that could not complete, and exit with the operational code."""
+    if args.json:
+        print(json.dumps({"error": message}))
+    else:
+        console.print(f"[red]{message}[/red]")
+    sys.exit(_AUDIT_EXIT_OPERATIONAL)
+
+
+def _count_cell(count: int, total: int) -> str:
+    """Format 'count/total'; colour it only when total is large enough to judge a rate."""
+    if total == 0:
+        return "-"
+    cell = f"{count}/{total}"
+    if count == 0 or total < SCREEN_MIN_COLOUR_PAGES:
+        return cell
+    colour = "red" if count / total > SCREEN_WARN_RATE else "yellow"
+    return f"[{colour}]{cell}[/{colour}]"
+
+
+def _print_screen(screen: ScreenReport) -> None:
+    """Print the screen table and the text-cap line."""
+    table = Table(title=f"Screen — {screen.rows} rows, no judge", show_lines=False)
+    table.add_column("Config", style="cyan")
+    table.add_column("Model")
+    table.add_column("Pages", justify="right")
+    table.add_column("Loops", justify="right")
+    table.add_column(">5x length", justify="right")
+    table.add_column("Text on blank", justify="right")
+    table.add_column("Empty on text", justify="right")
+    table.add_column("Peer agreement", justify="right")
+    for m in screen.models:
+        peer = "-" if m.peer_agreement is None else f"{m.peer_agreement:.2f}"
+        table.add_row(
+            m.name,
+            m.model,
+            str(m.pages),
+            _count_cell(len(m.loop_rows), m.pages),
+            _count_cell(len(m.long_rows), m.checked_pages),
+            _count_cell(len(m.text_on_blank_rows), m.blank_pages),
+            _count_cell(len(m.empty_on_text_rows), m.text_pages),
+            peer,
+        )
+    console.print()
+    console.print(table)
+    console.print(
+        "[dim]'Pages' leaves out error placeholders. A blank page is one where most "
+        "outputs have under 20 characters; a text page is one where most have 200 or "
+        "more. Peer agreement is the mean, over pages, of the median similarity to the "
+        "other models' outputs, with loops left out. It is not a ranking. Counts on "
+        f"fewer than {SCREEN_MIN_COLOUR_PAGES} pages are not coloured. These checks are "
+        "leads, not verdicts: look at the flagged rows (--json lists them) before you "
+        "drop a model.[/dim]"
+    )
+    console.print(
+        f"Outputs that no check flagged: {screen.unflagged_outputs}; judge-input length "
+        f"median {screen.unflagged_median}, 95th percentile {screen.unflagged_p95}, "
+        f"longest {screen.longest_unflagged} characters."
+    )
+    suggested = screen.suggested_max_ocr_text_len
+    if suggested is None:
+        console.print(
+            f"Text cap: --max-ocr-text-len {screen.max_ocr_text_len} fits all of them."
+        )
+    else:
+        console.print(
+            f"[yellow]Text cap:[/yellow] --max-ocr-text-len {screen.max_ocr_text_len} "
+            f"truncates {screen.unflagged_over_cap} of them. --max-ocr-text-len "
+            f"{suggested} fits them all; a higher cap makes each judge call longer."
+        )
 
 
 def main() -> None:

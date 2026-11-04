@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+import pytest
 from datasets import Dataset
 
-from ocr_bench.dataset import LoadedConfig
+from ocr_bench.dataset import DatasetError, LoadedConfig
 from ocr_bench.integrity import (
     audit_repo,
     compute_column_stats,
@@ -329,3 +330,212 @@ class TestAuditRepo:
         assert report.judge_text_mode == "normalized"
         assert len(report.configs) == 1
         assert report.has_problems  # 50% sentinels
+
+
+_PAGES = [
+    "first page of a longer transcription",
+    "second page of a longer transcription",
+]
+
+
+def _three_configs(names=("cfg_a", "cfg_b", "cfg_c")):
+    return [
+        _loaded_config(name, f"model-{name}", list(_PAGES), {"b_number": [1, 2]})
+        for name in names
+    ]
+
+
+class TestAuditDiscovery:
+    """audit selects configs the way judge does with the same flags."""
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_configs_alone_load_from_main(self, mock_pr, mock_main, mock_load):
+        mock_load.return_value = _three_configs(("cfg_b", "cfg_a"))
+        report = audit_repo("user/repo", configs=["cfg_b", "cfg_a"])
+        mock_pr.assert_not_called()
+        names, _, revisions = mock_load.call_args.args[1:]
+        assert names == ["cfg_b", "cfg_a"]
+        assert revisions == {}
+        assert report.pr_revisions == {}
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_configs_with_from_prs_use_the_newest_pr(self, mock_pr, mock_main, mock_load):
+        def discover(
+            repo_id, api=None, only=None, duplicates=None, main_configs=(), superseded=None
+        ):
+            assert only == ["cfg_a", "cfg_b"]
+            assert list(main_configs) == ["cfg_b"]
+            duplicates["cfg_a"] = [2]
+            return ["cfg_a"], {"cfg_a": "refs/pr/5"}
+
+        mock_pr.side_effect = discover
+        mock_main.return_value = ["cfg_b"]
+        mock_load.return_value = _three_configs(("cfg_a", "cfg_b"))
+        report = audit_repo("user/repo", configs=["cfg_a", "cfg_b"], from_prs=True)
+        names, _, revisions = mock_load.call_args.args[1:]
+        assert names == ["cfg_a", "cfg_b"]
+        assert revisions == {"cfg_a": "refs/pr/5"}
+        assert report.duplicate_prs == {"cfg_a": [2]}
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_from_prs_adds_superseded_configs_from_main(self, mock_pr, mock_main, mock_load):
+        def discover(repo_id, api=None, duplicates=None, main_configs=(), superseded=None):
+            superseded["cfg_b"] = [3]
+            return ["cfg_a"], {"cfg_a": "refs/pr/4"}
+
+        mock_pr.side_effect = discover
+        mock_main.return_value = ["cfg_b", "cfg_c"]
+        mock_load.return_value = _three_configs(("cfg_a", "cfg_b"))
+        report = audit_repo("user/repo", from_prs=True)
+        names, _, revisions = mock_load.call_args.args[1:]
+        assert names == ["cfg_a", "cfg_b"]  # cfg_c is on main only: not audited
+        assert revisions == {"cfg_a": "refs/pr/4"}
+        assert report.superseded_prs == {"cfg_b": [3]}
+
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_from_prs_without_prs_is_an_error(self, mock_pr, mock_main):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = ["cfg_a"]
+        with pytest.raises(DatasetError, match="No configs found in open PRs"):
+            audit_repo("user/repo", from_prs=True)
+
+
+class TestAuditScreen:
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_screen_runs_on_three_configs(self, mock_pr, mock_main, mock_load):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = ["cfg_a", "cfg_b", "cfg_c"]
+        mock_load.return_value = _three_configs()
+        report = audit_repo("user/repo", screen=True)
+        assert report.screen is not None
+        assert report.screen_skipped is None
+        assert [m.name for m in report.screen.models] == ["cfg_a", "cfg_b", "cfg_c"]
+        assert report.screen.models[0].model == "model-cfg_a"
+        assert report.screen.rows == 2
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_no_screen_unless_asked(self, mock_pr, mock_main, mock_load):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = ["cfg_a", "cfg_b", "cfg_c"]
+        mock_load.return_value = _three_configs()
+        report = audit_repo("user/repo")
+        assert report.screen is None
+        assert report.screen_skipped is None
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_screen_skipped_with_two_models(self, mock_pr, mock_main, mock_load):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = ["cfg_a", "cfg_b"]
+        mock_load.return_value = _three_configs(("cfg_a", "cfg_b"))
+        report = audit_repo("user/repo", screen=True)
+        assert report.screen is None
+        assert "at least 3 models" in report.screen_skipped
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_screen_leaves_out_unjudgeable_configs(self, mock_pr, mock_main, mock_load):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = ["cfg_a", "cfg_b", "cfg_c", "cfg_d"]
+        mock_load.return_value = _three_configs() + [
+            _loaded_config("cfg_d", "model-d", ["", ""], {"b_number": [1, 2]})
+        ]
+        report = audit_repo("user/repo", screen=True)
+        assert report.unjudgeable_configs == ["cfg_d"]
+        assert [m.name for m in report.screen.models] == ["cfg_a", "cfg_b", "cfg_c"]
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_all_sentinel_config_does_not_count_as_a_model(self, mock_pr, mock_main, mock_load):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = ["cfg_a", "cfg_b", "cfg_c"]
+        loaded = _three_configs(("cfg_a", "cfg_b"))
+        loaded.append(
+            _loaded_config(
+                "cfg_c", "model-c", ["[OCR ERROR]", "[OCR ERROR]"], {"b_number": [1, 2]}
+            )
+        )
+        mock_load.return_value = loaded
+        report = audit_repo("user/repo", screen=True)
+        assert report.screen is None
+        assert "at least 3 models" in report.screen_skipped
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_screen_skipped_on_misalignment(self, mock_pr, mock_main, mock_load):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = ["cfg_a", "cfg_b", "cfg_c"]
+        loaded = _three_configs()
+        loaded[2] = _loaded_config("cfg_c", "model-c", list(_PAGES), {"b_number": [2, 1]})
+        mock_load.return_value = loaded
+        report = audit_repo("user/repo", screen=True)
+        assert report.alignment.status == "misaligned"
+        assert report.screen is None
+        assert "misaligned" in report.screen_skipped
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_screen_skipped_on_row_count_mismatch(self, mock_pr, mock_main, mock_load):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = ["cfg_a", "cfg_b", "cfg_c"]
+        loaded = _three_configs()
+        loaded[2] = _loaded_config("cfg_c", "model-c", ["only one page here"])
+        mock_load.return_value = loaded
+        report = audit_repo("user/repo", screen=True)
+        assert report.screen is None
+        assert "row counts" in report.screen_skipped
+
+    @patch("ocr_bench.integrity.load_flat_dataset")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_screen_on_flat_columns(self, mock_pr, mock_main, mock_flat):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = []
+        ds = Dataset.from_dict({"image": [None, None], "x": _PAGES, "y": _PAGES, "z": _PAGES})
+        mock_flat.return_value = (ds, {"x": "model-x", "y": "model-y", "z": "model-z"})
+        report = audit_repo("user/repo", screen=True)
+        assert [m.model for m in report.screen.models] == ["model-x", "model-y", "model-z"]
+
+
+class TestAuditReportToDict:
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_round_trips_through_json(self, mock_pr, mock_main, mock_load):
+        mock_pr.return_value = (["cfg_a"], {"cfg_a": "refs/pr/9"})
+        mock_main.return_value = ["cfg_b", "cfg_c"]
+        mock_load.return_value = _three_configs()
+        data = json.loads(json.dumps(audit_repo("user/repo", screen=True).to_dict()))
+        assert data["ok"] is True
+        assert data["problems"] == []
+        assert [c["source"] for c in data["configs"]] == ["refs/pr/9", "main", "main"]
+        assert data["screen"]["rows"] == 2
+        assert data["screen_skipped"] is None
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_lists_problems(self, mock_pr, mock_main, mock_load):
+        mock_pr.return_value = ([], {})
+        mock_main.return_value = ["cfg_a"]
+        mock_load.return_value = _three_configs(("cfg_a",))
+        data = audit_repo("user/repo").to_dict()
+        assert data["ok"] is False
+        assert data["problems"] == ["fewer than two judgeable configs"]
+        assert data["screen"] is None

@@ -12,8 +12,10 @@ import statistics
 from dataclasses import dataclass, field
 from typing import Any
 
+from ocr_bench import __version__
 from ocr_bench.dataset import (
     AlignmentResult,
+    DatasetError,
     _load_configs,
     check_config_alignment,
     discover_configs,
@@ -21,6 +23,7 @@ from ocr_bench.dataset import (
     load_flat_dataset,
 )
 from ocr_bench.judge import MAX_OCR_TEXT_LENGTH, is_sentinel, normalize_for_judge
+from ocr_bench.screen import MIN_MODELS, ScreenReport, screen_outputs
 
 # A model with more than this fraction of error sentinels is flagged: the run
 # effectively failed on this corpus, so its outputs are not comparable.
@@ -173,6 +176,9 @@ class AuditReport:
     duplicate_prs: dict[str, list[int]] = field(default_factory=dict)
     superseded_prs: dict[str, list[int]] = field(default_factory=dict)
     pr_revisions: dict[str, str] = field(default_factory=dict)
+    # Set by audit_repo(screen=True): the screen results, or why it did not run.
+    screen: ScreenReport | None = None
+    screen_skipped: str | None = None
 
     @property
     def unjudgeable_configs(self) -> list[str]:
@@ -221,6 +227,77 @@ class AuditReport:
             or self.too_few_models
         )
 
+    @property
+    def problems(self) -> list[str]:
+        """One line per blocking problem; empty when ``has_problems`` is False."""
+        problems: list[str] = []
+        if self.alignment.status == "misaligned":
+            problems.append("row misalignment")
+        if self.row_count_mismatch:
+            counts = ", ".join(f"{c.stats.name}={c.stats.n_rows}" for c in self.configs)
+            problems.append(f"row-count mismatch ({counts})")
+        if self.flagged_models:
+            flagged = ", ".join(self.flagged_models)
+            problems.append(f">{SENTINEL_FLAG_RATE:.0%} sentinels: {flagged}")
+        if self.unjudgeable_configs:
+            problems.append(f"no judgeable rows: {', '.join(self.unjudgeable_configs)}")
+        if self.too_few_models:
+            problems.append("fewer than two judgeable configs")
+        return problems
+
+    def to_dict(self) -> dict:
+        """The report as plain data, for ``audit --json``."""
+        configs = []
+        for cfg in self.configs:
+            s = cfg.stats
+            configs.append(
+                {
+                    "name": s.name,
+                    "model": s.model,
+                    "source": self.pr_revisions.get(s.name, "main"),
+                    "rows": s.n_rows,
+                    "empty": s.n_empty,
+                    "short": s.n_short,
+                    "sentinel": s.n_sentinel,
+                    "over_max": s.n_over_max,
+                    "median_len": s.median_len,
+                    "max_len": s.max_len,
+                    "alignment": self.alignment.config_status(s.name),
+                }
+            )
+        return {
+            "repo_id": self.repo_id,
+            "ocr_bench_version": __version__,
+            "ok": not self.has_problems,
+            "problems": self.problems,
+            "judge_text_mode": self.judge_text_mode,
+            "max_ocr_text_len": self.max_ocr_text_len,
+            "alignment": {"status": self.alignment.status, "summary": self.alignment.describe()},
+            "configs": configs,
+            "configs_without_text": self.configs_without_text,
+            "auxiliary_configs": self.auxiliary_configs,
+            "duplicate_prs": self.duplicate_prs,
+            "superseded_prs": self.superseded_prs,
+            "screen": self.screen.to_dict() if self.screen is not None else None,
+            "screen_skipped": self.screen_skipped,
+        }
+
+
+def _screen_skip_reason(
+    alignment: AlignmentResult, row_counts: set[int], n_models: int
+) -> str | None:
+    """Why the screen cannot run on these configs, or None if it can."""
+    if alignment.status == "misaligned":
+        return "the configs' rows are misaligned"
+    if len(row_counts) > 1:
+        return "the configs have different row counts"
+    if n_models < MIN_MODELS:
+        return (
+            f"the screen needs at least {MIN_MODELS} models with outputs that are not "
+            "all empty or error placeholders"
+        )
+    return None
+
 
 def _looks_like_ocr_output(loaded_config: Any) -> bool:
     """True if a config has the page images or run metadata of an OCR output."""
@@ -234,31 +311,70 @@ def audit_repo(
     max_ocr_text_len: int = MAX_OCR_TEXT_LENGTH,
     judge_text_mode: str = "normalized",
     api: Any | None = None,
+    configs: list[str] | None = None,
+    from_prs: bool = False,
+    screen: bool = False,
 ) -> AuditReport:
     """Run config discovery and compute a health report — no judging, no writes.
 
-    Mirrors the judge's discovery cascade (open PRs + main-branch configs, then
-    flat fallback) so the audit sees exactly what a judge run would.
+    Discovery follows ``ocr-bench judge`` with the same flags, so the audit sees
+    exactly what a judge run would:
+
+    - ``configs`` and ``from_prs``: the named configs, each from its newest open
+      PR, or from main when it has no PR or main changed after the PR;
+    - ``configs`` only: the named configs from main;
+    - ``from_prs`` only: every config with an open PR;
+    - neither: open PRs plus main-branch configs, then flat columns.
+
+    With ``screen``, also run the screen checks (see :mod:`ocr_bench.screen`)
+    on the configs with judgeable rows.
     """
     if judge_text_mode not in {"normalized", "raw"}:
         raise ValueError("judge_text_mode must be 'normalized' or 'raw'")
     normalize = judge_text_mode == "normalized"
 
-    main_configs = discover_configs(repo_id)
     duplicate_prs: dict[str, list[int]] = {}
     superseded_prs: dict[str, list[int]] = {}
-    pr_configs, pr_revisions = discover_pr_configs(
-        repo_id,
-        api=api,
-        duplicates=duplicate_prs,
-        main_configs=main_configs,
-        superseded=superseded_prs,
-    )
-    config_names = list(pr_configs)
-    for mc in main_configs:
-        if mc not in pr_configs:
-            config_names.append(mc)
+    pr_revisions: dict[str, str] = {}
+    if configs and from_prs:
+        config_names = list(configs)
+        _, pr_revisions = discover_pr_configs(
+            repo_id,
+            api=api,
+            only=config_names,
+            duplicates=duplicate_prs,
+            main_configs=discover_configs(repo_id),
+            superseded=superseded_prs,
+        )
+    elif configs:
+        config_names = list(configs)
+    elif from_prs:
+        pr_configs, pr_revisions = discover_pr_configs(
+            repo_id,
+            api=api,
+            duplicates=duplicate_prs,
+            main_configs=discover_configs(repo_id),
+            superseded=superseded_prs,
+        )
+        config_names = pr_configs + list(superseded_prs)
+        if not config_names:
+            raise DatasetError("No configs found in open PRs")
+    else:
+        main_configs = discover_configs(repo_id)
+        pr_configs, pr_revisions = discover_pr_configs(
+            repo_id,
+            api=api,
+            duplicates=duplicate_prs,
+            main_configs=main_configs,
+            superseded=superseded_prs,
+        )
+        config_names = list(pr_configs)
+        for mc in main_configs:
+            if mc not in pr_configs:
+                config_names.append(mc)
 
+    # name -> (model label, outputs), for the screen.
+    columns: dict[str, tuple[str, list]] = {}
     if config_names:
         loaded = _load_configs(repo_id, config_names, split, pr_revisions)
         usable = [lc for lc in loaded if lc.text_col is not None]
@@ -268,34 +384,41 @@ def audit_repo(
         configs_without_text = [lc.config for lc in no_text if _looks_like_ocr_output(lc)]
         auxiliary_configs = [lc.config for lc in no_text if not _looks_like_ocr_output(lc)]
         alignment = check_config_alignment(usable)
-        configs = []
+        audits: list[ConfigAudit] = []
         for lc in usable:
             text_col = lc.text_col
             if text_col is None:  # filtered into `usable` above; narrows the type
                 continue
+            values = _column_values(lc.ds, text_col)
+            columns[lc.config] = (lc.model_id, values)
             stats = compute_column_stats(
                 lc.config,
                 lc.model_id,
-                _column_values(lc.ds, text_col),
+                values,
                 max_ocr_text_len,
                 normalize=normalize,
             )
-            configs.append(ConfigAudit(stats))
+            audits.append(ConfigAudit(stats))
     else:
         configs_without_text = []
         auxiliary_configs = []
         ds, ocr_columns = load_flat_dataset(repo_id, split=split)
         alignment = AlignmentResult(status="n/a")
-        configs = [
-            ConfigAudit(stats)
-            for stats in compute_model_stats(
-                ds, ocr_columns, max_ocr_text_len, normalize=normalize
+        audits = []
+        for col, model in ocr_columns.items():  # same order as compute_model_stats
+            values = _column_values(ds, col)
+            columns[col] = (model, values)
+            audits.append(
+                ConfigAudit(
+                    compute_column_stats(
+                        col, model, values, max_ocr_text_len, normalize=normalize
+                    )
+                )
             )
-        ]
 
-    return AuditReport(
+    report = AuditReport(
         repo_id=repo_id,
-        configs=configs,
+        configs=audits,
         alignment=alignment,
         max_ocr_text_len=max_ocr_text_len,
         judge_text_mode=judge_text_mode,
@@ -305,3 +428,25 @@ def audit_repo(
         superseded_prs=superseded_prs,
         pr_revisions=pr_revisions,
     )
+    if screen:
+        # Leave out configs whose every row is empty or an error sentinel: they
+        # have no output to compare, and they must not count towards MIN_MODELS.
+        without_output = {
+            c.stats.name
+            for c in report.configs
+            if c.stats.n_empty + c.stats.n_sentinel == c.stats.n_rows
+        }
+        screened = {name: col for name, col in columns.items() if name not in without_output}
+        reason = _screen_skip_reason(
+            alignment, {len(values) for _, values in screened.values()}, len(screened)
+        )
+        if reason is None:
+            report.screen = screen_outputs(
+                {name: values for name, (_, values) in screened.items()},
+                {name: model for name, (model, _) in screened.items()},
+                max_ocr_text_len,
+                normalize=normalize,
+            )
+        else:
+            report.screen_skipped = reason
+    return report
