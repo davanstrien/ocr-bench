@@ -752,8 +752,9 @@ def _warn_text_cap(
         console.print(
             f"  --max-ocr-text-len {max_ocr_text_len} fits every output that the "
             "`audit --screen` checks do not flag. Every output over the cap is flagged "
-            "(a loop, or over 5x the others' length). Inspect them before you choose a "
-            "cap: `ocr-bench audit --screen --json` lists the flagged rows."
+            "(for example as a loop, or as over 5x the others' length). Inspect them "
+            "before you choose a cap: `ocr-bench audit --screen --json` lists the "
+            "flagged rows."
         )
         return
     console.print(
