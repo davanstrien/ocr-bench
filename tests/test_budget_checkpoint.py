@@ -445,6 +445,119 @@ class TestFailedModelStatus:
         assert metadata.failed_outputs == {"model-a": 10}
 
 
+def _prose_ds(n: int, lengths: dict[str, int]):
+    """A FakeDataset whose outputs are distinct prose of a set length per model."""
+    import random
+    import string
+
+    cols = {}
+    for m, length in lengths.items():
+        rows = []
+        for i in range(n):
+            rng = random.Random(f"{m}-{i}")
+            alphabet = string.ascii_lowercase + "     "
+            rows.append("".join(rng.choice(alphabet) for _ in range(length)))
+        cols[f"col_{m}"] = rows
+    return FakeDataset(n, cols), {f"col_{m}": f"model-{m}" for m in lengths}
+
+
+class TestCoverageReport:
+    """judge reports on how many pages of the sample each model is ranked."""
+
+    def test_metadata_records_ranked_pages_and_error_pages(self, capsys):
+        ds, ocr = make_ds(n=10)
+        ds._columns["col_b"][3] = "[OCR ERROR]"  # 10%: no warning, but a note
+
+        _, m_publish, _ = _run_judge(["--no-adaptive", "--checkpoint-every", "0"], ds, ocr)
+
+        metadata = _published_metadata(m_publish)
+        assert metadata.model_coverage == {
+            "model-a": {"sampled_pages": 10, "ranked_pages": 10, "sentinel_pages": 0},
+            "model-b": {"sampled_pages": 10, "ranked_pages": 9, "sentinel_pages": 1},
+            "model-c": {"sampled_pages": 10, "ranked_pages": 10, "sentinel_pages": 0},
+        }
+        out = " ".join(capsys.readouterr().out.split())  # undo console line wrapping
+        assert "Note: model-b: 1/10 outputs are error placeholders (10.0%)" in out
+        assert "its rank leaves out those pages" in out
+        assert "9/10" in out  # the Pages column
+        assert "model-b: ranked on 9 of 10 pages; 1 error placeholder(s) left out" in out
+
+    def test_coverage_follows_max_samples(self):
+        ds, ocr = make_ds(n=10)
+        _, m_publish, _ = _run_judge(
+            ["--no-adaptive", "--checkpoint-every", "0", "--max-samples", "4"], ds, ocr
+        )
+        coverage = _published_metadata(m_publish).model_coverage
+        assert {entry["sampled_pages"] for entry in coverage.values()} == {4}
+        assert {entry["ranked_pages"] for entry in coverage.values()} == {4}
+
+    def test_failed_model_is_ranked_on_no_pages(self):
+        ds, ocr = make_ds(n=10)
+        ds._columns["col_a"] = ["[OCR ERROR]"] * 10
+        _, m_publish, _ = _run_judge(["--no-adaptive", "--checkpoint-every", "0"], ds, ocr)
+        coverage = _published_metadata(m_publish).model_coverage
+        assert coverage["model-a"] == {
+            "sampled_pages": 10,
+            "ranked_pages": 0,
+            "sentinel_pages": 10,
+        }
+
+    def test_high_sentinel_rate_keeps_the_warning_not_the_note(self, capsys):
+        ds, ocr = make_ds(n=10)
+        ds._columns["col_b"][0] = "[OCR ERROR]"
+        ds._columns["col_b"][1] = "[OCR ERROR]"  # 20%
+        _run_judge(["--no-adaptive", "--checkpoint-every", "0"], ds, ocr)
+        out = " ".join(capsys.readouterr().out.split())
+        assert "model-b: 2/10 outputs are error sentinels (20%)" in out
+        assert "Note: model-b" not in out
+
+
+class TestTextCapWarning:
+    """judge warns, before judging, when the cap truncates over half the outputs."""
+
+    def test_warns_with_the_screen_suggestion(self, capsys):
+        ds, ocr = _prose_ds(10, {"a": 300, "b": 320, "c": 340})
+        _, m_publish, _ = _run_judge(
+            ["--no-adaptive", "--checkpoint-every", "0", "--max-ocr-text-len", "100"], ds, ocr
+        )
+        out = " ".join(capsys.readouterr().out.split())
+        assert "--max-ocr-text-len 100 truncates 30 of 30 outputs (100%)" in out
+        assert "Over half are truncated for: model-a (100%), model-b (100%), model-c (100%)" in out
+        # The screen rounds the longest unflagged output (340) up to 500.
+        assert "--max-ocr-text-len 500 fits every output" in out
+        assert "This run keeps 100." in out
+        # The default and this run's cap are unchanged.
+        assert _published_metadata(m_publish).max_ocr_text_len == 100
+
+    def test_one_model_over_half_is_enough(self, capsys):
+        ds, ocr = _prose_ds(10, {"a": 60, "b": 60, "c": 60, "d": 300})
+        _run_judge(
+            ["--no-adaptive", "--checkpoint-every", "0", "--max-ocr-text-len", "100"], ds, ocr
+        )
+        out = " ".join(capsys.readouterr().out.split())
+        assert "truncates 10 of 40 outputs (25%)" in out
+        assert "Over half are truncated for: model-d (100%)" in out
+
+    def test_no_warning_when_half_or_fewer_are_truncated(self, capsys):
+        ds, ocr = _prose_ds(10, {"a": 60, "b": 60, "c": 60})
+        long_ds, _ = _prose_ds(10, {"b": 300})
+        # Exactly half of model-b's outputs are over the cap: not more than half.
+        ds._columns["col_b"][:5] = long_ds._columns["col_b"][:5]
+        _run_judge(
+            ["--no-adaptive", "--checkpoint-every", "0", "--max-ocr-text-len", "100"], ds, ocr
+        )
+        assert "Text cap" not in capsys.readouterr().out
+
+    def test_two_models_get_no_suggestion(self, capsys):
+        ds, ocr = _prose_ds(10, {"a": 300, "b": 320})
+        _run_judge(
+            ["--no-adaptive", "--checkpoint-every", "0", "--max-ocr-text-len", "100"], ds, ocr
+        )
+        out = " ".join(capsys.readouterr().out.split())
+        assert "truncates 20 of 20 outputs" in out
+        assert "No cap is suggested: the screen checks need outputs from 3 or more models" in out
+
+
 class TestCheckpointFullRejudge:
     def test_default_disabled_under_full_rejudge(self, capsys):
         # No explicit --checkpoint-every + --full-rejudge -> checkpointing off,

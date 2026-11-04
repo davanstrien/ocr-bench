@@ -189,6 +189,26 @@ class TestBuildMetadataRow:
         )
 
 
+def test_metadata_row_records_model_coverage():
+    coverage = {"model-a": {"sampled_pages": 5, "ranked_pages": 4, "sentinel_pages": 1}}
+    meta = EvalMetadata(
+        source_dataset="user/data",
+        judge_models=["org/judge"],
+        seed=42,
+        max_samples=5,
+        total_comparisons=3,
+        valid_comparisons=3,
+        model_coverage=coverage,
+    )
+    row = build_metadata_row(meta)
+    assert json.loads(row["model_coverage"]) == coverage
+    # A 0.0.6 metadata row has no model_coverage; the union of keys keeps both.
+    old_row = {k: v for k, v in row.items() if k != "model_coverage"}
+    aligned = _align_metadata_rows([old_row, row])
+    assert aligned[0]["model_coverage"] is None
+    assert json.loads(aligned[1]["model_coverage"]) == coverage
+
+
 class TestEvaluationProvenanceHash:
     def _kwargs(self):
         return {
@@ -208,6 +228,14 @@ class TestEvaluationProvenanceHash:
             "max_tokens": 4096,
             "min_chars": 20,
         }
+
+    def test_hash_is_unchanged_from_0_0_6(self):
+        # Pinned with ocr-bench 0.0.6. A different value means results repos
+        # written by 0.0.6 can no longer resume. Reporting fields such as
+        # EvalMetadata.model_coverage must never enter this hash.
+        assert evaluation_provenance_hash(**self._kwargs()) == (
+            "c33ed457a7e36655aa0a1fef07311ffe27146e5df90be22ebc3d9525e1e7cdb8"
+        )
 
     def test_is_stable_across_mapping_order(self):
         kwargs = self._kwargs()
@@ -882,6 +910,34 @@ class TestBuildReadme:
             total_comparisons=3,
             valid_comparisons=3,
         )
+
+    def test_coverage_section_lists_every_model(self):
+        from ocr_bench.publish import _build_readme
+
+        board = _make_board()
+        rows = build_leaderboard_rows(board)
+        meta = self._make_metadata()
+        meta.model_coverage = {
+            "model-a": {"sampled_pages": 10, "ranked_pages": 10, "sentinel_pages": 0},
+            "model-b": {"sampled_pages": 10, "ranked_pages": 8, "sentinel_pages": 2},
+            "model-c": {"sampled_pages": 10, "ranked_pages": 10, "sentinel_pages": 0},
+        }
+        readme = _build_readme("user/results", rows, board, meta)
+        assert "## Coverage" in readme
+        assert "The judged sample has 10 pages." in readme
+        assert "| model-b | 8 of 10 pages | 2 |" in readme
+        # Same order as the leaderboard table.
+        section = readme[readme.index("## Coverage"):]
+        assert section.index("model-a") < section.index("model-c") < section.index("model-b")
+
+    def test_no_coverage_section_without_coverage(self):
+        from ocr_bench.publish import _build_readme
+
+        board = _make_board()
+        readme = _build_readme(
+            "user/results", build_leaderboard_rows(board), board, self._make_metadata()
+        )
+        assert "## Coverage" not in readme
 
     def test_no_license_by_default(self):
         """The results data embeds source-derived text — the tool must not

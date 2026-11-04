@@ -117,6 +117,25 @@ class TestEvaluationInputFingerprints:
 # ---------------------------------------------------------------------------
 
 
+def test_fingerprints_are_unchanged_from_0_0_6():
+    # Pinned with ocr-bench 0.0.6. A different value means results repos
+    # written by 0.0.6 can no longer resume. Text-only rows keep the pin
+    # independent of the image encoder.
+    dataset = Dataset.from_dict(
+        {
+            "id": ["p0", "p1", "p2"],
+            "ocr_a": ["alpha", "beta", None],
+            "ocr_b": ["[OCR ERROR]", "b1", "b2"],
+        }
+    )
+    page, columns = evaluation_input_fingerprints(dataset, {"ocr_a": "A", "ocr_b": "B"}, [2, 0])
+    assert page == "fba738d5c69d902b24bcc59b4637a7b48fcc36521c14bbbe639a29eed2b477e0"
+    assert columns == {
+        "ocr_a": "1f1dd517c9ea5d030b78b7335c1330811ff60a3789d917b41e80c04effc6ee4e",
+        "ocr_b": "6c1a47d1c65e2a2d632aaf7ae8e152515a1d21778f2f0f789c58e26847bf5e92",
+    }
+
+
 class TestDiscoverOcrColumns:
     def test_inference_info_single_entry(self):
         info = json.dumps({"column_name": "markdown_col", "model_id": "org/model-a"})
