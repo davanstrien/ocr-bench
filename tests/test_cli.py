@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import replace
 from unittest.mock import MagicMock, patch
@@ -25,6 +26,7 @@ from ocr_bench.dataset import AlignmentResult, DatasetError
 from ocr_bench.elo import compute_elo
 from ocr_bench.integrity import AuditReport, ColumnStats, ConfigAudit
 from ocr_bench.judge import CRITERIA_PROFILES, DEFAULT_CRITERIA, Comparison, prompt_hash
+from ocr_bench.screen import ModelScreen, ScreenReport
 
 
 class TestBuildParser:
@@ -285,6 +287,19 @@ class TestAuditParser:
         assert args.split == "train"
         assert args.judge_text_mode == "normalized"
         assert args.max_ocr_text_len == 2500
+        assert args.configs is None
+        assert args.from_prs is False
+        assert args.screen is False
+        assert args.json is False
+
+    def test_audit_selection_and_screen_flags(self):
+        args = build_parser().parse_args(
+            ["audit", "user/data", "--from-prs", "--configs", "a", "b", "--screen", "--json"]
+        )
+        assert args.configs == ["a", "b"]
+        assert args.from_prs is True
+        assert args.screen is True
+        assert args.json is True
 
     def test_audit_overrides(self):
         args = build_parser().parse_args(
@@ -419,6 +434,102 @@ class TestCmdAudit:
         with pytest.raises(SystemExit) as exc_info:
             cli.cmd_audit(args)
         assert exc_info.value.code == 2
+
+    def test_forwards_selection_and_screen(self, monkeypatch):
+        seen = {}
+
+        def fake_audit(dataset, **kwargs):
+            seen.update(kwargs, dataset=dataset)
+            return _audit_report()
+
+        monkeypatch.setattr(cli, "audit_repo", fake_audit)
+        args = build_parser().parse_args(
+            ["audit", "user/data", "--from-prs", "--configs", "a", "b", "--screen"]
+        )
+        cli.cmd_audit(args)
+        assert seen["dataset"] == "user/data"
+        assert seen["configs"] == ["a", "b"]
+        assert seen["from_prs"] is True
+        assert seen["screen"] is True
+
+
+def _screen_report() -> ScreenReport:
+    models = [
+        ModelScreen(name="cfg", model="m", pages=10, loop_rows=[3], peer_agreement=0.8),
+        ModelScreen(name="cfg2", model="m2", pages=10, peer_agreement=0.9),
+    ]
+    return ScreenReport(
+        models=models,
+        rows=10,
+        max_ocr_text_len=2500,
+        longest_unflagged=3100,
+        unflagged_outputs=19,
+        unflagged_over_cap=4,
+    )
+
+
+class TestCmdAuditJsonAndScreen:
+    def _run(self, monkeypatch, capsys, report, argv=("--json",)):
+        monkeypatch.setattr(cli, "audit_repo", lambda *a, **k: report)
+        args = build_parser().parse_args(["audit", "user/data", *argv])
+        code = 0
+        try:
+            cli.cmd_audit(args)
+        except SystemExit as exc:
+            code = exc.code
+        return code, capsys.readouterr().out
+
+    def test_json_clean_report(self, monkeypatch, capsys):
+        code, out = self._run(monkeypatch, capsys, _audit_report())
+        data = json.loads(out)
+        assert code == 0
+        assert data["ok"] is True
+        assert [c["name"] for c in data["configs"]] == ["cfg", "cfg2"]
+
+    def test_json_keeps_the_integrity_exit_code(self, monkeypatch, capsys):
+        code, out = self._run(monkeypatch, capsys, _audit_report(sentinel_count=5))
+        data = json.loads(out)
+        assert code == 1
+        assert data["ok"] is False
+        assert data["problems"] == [">10% sentinels: m"]
+
+    def test_json_operational_error(self, monkeypatch, capsys):
+        def boom(*a, **k):
+            raise OSError("hub unreachable")
+
+        monkeypatch.setattr(cli, "audit_repo", boom)
+        args = build_parser().parse_args(["audit", "user/data", "--json"])
+        with pytest.raises(SystemExit) as exc_info:
+            cli.cmd_audit(args)
+        assert exc_info.value.code == 2
+        assert json.loads(capsys.readouterr().out) == {
+            "error": "Audit could not complete: hub unreachable"
+        }
+
+    def test_json_includes_the_screen(self, monkeypatch, capsys):
+        report = _audit_report()
+        report.screen = _screen_report()
+        _, out = self._run(monkeypatch, capsys, report)
+        screen = json.loads(out)["screen"]
+        assert screen["suggested_max_ocr_text_len"] == 3500
+        assert [m["name"] for m in screen["models"]] == ["cfg2", "cfg"]  # by peer agreement
+        assert screen["models"][1]["loop"]["rows"] == [3]
+
+    def test_screen_table_and_cap_line(self, monkeypatch, capsys):
+        report = _audit_report()
+        report.screen = _screen_report()
+        code, out = self._run(monkeypatch, capsys, report, argv=("--screen",))
+        assert code == 0  # screen findings never fail the audit
+        assert "Screen" in out
+        assert "1/10" in out  # cfg's loops
+        assert "--max-ocr-text-len 3500" in out
+
+    def test_screen_skip_reason_is_printed(self, monkeypatch, capsys):
+        report = _audit_report()
+        report.screen_skipped = "the screen needs at least 3 models with judgeable rows"
+        _, out = self._run(monkeypatch, capsys, report, argv=("--screen",))
+        assert "Screen skipped" in out
+        assert "at least 3 models" in out
 
 
 class TestMainErrorHandling:
