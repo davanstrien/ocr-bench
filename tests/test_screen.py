@@ -9,8 +9,10 @@ import string
 import pytest
 
 from ocr_bench.screen import (
+    COUNTING_RUN,
     LOOP_MIN_CHARS,
     ScreenReport,
+    longest_counting_run,
     loop_kind,
     screen_outputs,
     visible_chars,
@@ -63,6 +65,50 @@ class TestLoopKind:
 
     def test_whitespace_run_is_not_a_character_run(self):
         assert loop_kind("Title" + " " * 300 + "end") is None
+
+    def test_counting_list_is_a_loop(self):
+        # DeepSeek-OCR's output for a near-blank Britannica page: "- 1" to "- 1656".
+        # Each line has a new number, so the tail does not compress.
+        text = "".join(f"- {n}\n" for n in range(1, 1657))
+        assert loop_kind(text) == "counting"
+
+    def test_inline_counting_is_a_loop(self):
+        text = _prose(400) + " ".join(f"{n}." for n in range(800, 1200))
+        assert loop_kind(text) == "counting"
+
+    def test_short_numbered_list_is_not_a_loop(self):
+        entries = "".join(f"{n}. {_prose(30, n)}\n" for n in range(1, COUNTING_RUN))
+        assert len(entries) >= LOOP_MIN_CHARS
+        assert loop_kind(entries) is None
+
+    def test_numeric_table_is_not_a_loop(self):
+        # Digits differ on every row, but the numbers do not count up. Replacing
+        # every digit with 0 first would make this table compress like a loop.
+        rng = random.Random(3)
+        rows = [" | ".join(str(rng.randint(1, 9999)) for _ in range(8)) for _ in range(80)]
+        text = "\n".join(f"| {row} |" for row in rows)
+        assert len(text) >= LOOP_MIN_CHARS
+        assert loop_kind(text) is None
+
+
+class TestLongestCountingRun:
+    def test_counts_numbers_that_go_up_by_one(self):
+        assert longest_counting_run("- 7\n- 8\n- 9") == 3
+        assert longest_counting_run("7. 8. 9. 10.") == 4
+
+    def test_a_gap_starts_a_new_run(self):
+        assert longest_counting_run("1 2 3 5 6") == 3
+
+    def test_decimal_is_two_numbers(self):
+        assert longest_counting_run("1.10") == 1
+
+    def test_no_numbers(self):
+        assert longest_counting_run("no digits here") == 0
+
+    def test_very_long_digit_string_ends_the_run(self):
+        # int() refuses digit strings over 4,300 characters; such a string is
+        # not read as a number.
+        assert longest_counting_run("1 2 " + "7" * 5000 + " 3 4") == 2
 
 
 class TestScreenOutputs:
@@ -216,6 +262,14 @@ class TestScreenOutputs:
         assert models["d"].loop_rows == [0]
         assert models["d"].char_run_rows == [0]
 
+    def test_counting_rows_are_listed(self):
+        texts = {name: [_prose(400, seed)] for seed, name in enumerate("abc")}
+        texts["d"] = ["".join(f"- {n}\n" for n in range(1, 400))]
+        models = _by_name(_screen(texts))
+        assert models["d"].loop_rows == [0]
+        assert models["d"].counting_rows == [0]
+        assert models["d"].char_run_rows == []
+
     def test_to_dict_is_json(self):
         texts = {name: [_prose(400, seed), ""] for seed, name in enumerate("abc")}
         data = json.loads(json.dumps(_screen(texts).to_dict()))
@@ -224,3 +278,5 @@ class TestScreenOutputs:
         assert set(data["models"][0]) >= {"loop", "long", "text_on_blank", "peer_agreement"}
         assert data["thresholds"]["loop_tail_compression"] == 0.15
         assert data["models"][0]["loop"]["char_run_rows"] == []
+        assert data["models"][0]["loop"]["counting_rows"] == []
+        assert data["thresholds"]["counting_run"] == COUNTING_RUN

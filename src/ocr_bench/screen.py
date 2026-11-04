@@ -6,7 +6,8 @@ that a judge would score low anyway, so a weak model can be found, and dropped,
 before the judge run:
 
 - **loop**: the end of the output repeats itself (generation ran on to the token
-  limit), or one non-space character repeats 200 or more times;
+  limit), the end of the output counts up (``- 1``, ``- 2``, ``- 3``, …), or one
+  non-space character repeats 200 or more times;
 - **long**: the output is more than five times as long as the median of the
   other models' outputs on the page;
 - **text on a blank page**: most outputs on the page have almost no text, and
@@ -19,8 +20,10 @@ before the judge run:
 
 These are signals, not verdicts. A model can transcribe faint text that the other
 models leave out, and a page can have one correct model and several wrong ones.
-The loop check measures how well the tail compresses, so a loop whose text
-changes on each repeat (for example a counting list ``- 1``, ``- 2``, …) can pass.
+The loop check measures how well the tail compresses. A counting list changes on
+every line, so its tail does not compress; a second test finds a long run of
+numbers that each count up by one. A loop whose text changes in other ways can
+still pass both tests.
 """
 
 from __future__ import annotations
@@ -44,6 +47,16 @@ LOOP_TAIL_COMPRESSION = 0.15  # compressed size / original size of the tail
 CHAR_RUN_LENGTH = 200
 # One non-space character repeated CHAR_RUN_LENGTH times or more.
 CHAR_RUN = re.compile(r"(\S)\1{" + str(CHAR_RUN_LENGTH - 1) + ",}")
+# A counting list (``- 1``, ``- 2``, …) does not compress, because each line has
+# a new number. The tail is a counting loop if it has COUNTING_RUN or more
+# numbers in a row that each count up by one. In 2,230 outputs from seven public
+# ocr-bench collections, two of them full of numeric tables, the longest such run
+# in a real transcription was 23 numbers. Counting loops had runs of 100 or more.
+COUNTING_RUN = 50
+NUMBER = re.compile(r"\d+")
+# A digit string longer than this is not read as a number. It ends a counting
+# run (and int() refuses digit strings over 4,300 characters).
+MAX_NUMBER_DIGITS = 9
 
 LONG_RATIO = 5.0
 # Floor for the others' median in the length ratio, so that a page where the
@@ -68,6 +81,7 @@ THRESHOLDS = {
     "loop_min_chars": LOOP_MIN_CHARS,
     "loop_tail_compression": LOOP_TAIL_COMPRESSION,
     "char_run_length": CHAR_RUN_LENGTH,
+    "counting_run": COUNTING_RUN,
     "long_ratio": LONG_RATIO,
     "long_min_peer_chars": LONG_MIN_PEER_CHARS,
     "near_empty_chars": NEAR_EMPTY_CHARS,
@@ -91,18 +105,51 @@ def _compression_ratio(text: str) -> float:
     return len(zlib.compress(data, 9)) / len(data)
 
 
-def loop_kind(text: str) -> str | None:
-    """Return ``"repeat"`` or ``"char run"`` if the text looks like a loop, else None.
+def longest_counting_run(text: str) -> int:
+    """Return the length of the longest run of numbers that each count up by one.
 
-    ``repeat``: the output has at least LOOP_MIN_CHARS characters and its last
-    LOOP_TAIL_CHARS characters compress to less than LOOP_TAIL_COMPRESSION of
-    their size. ``char run``: one non-space character repeats CHAR_RUN_LENGTH
-    times or more.
+    The numbers are the digit strings in ``text``, read from left to right. So
+    the lines ``- 7``, ``- 8``, ``- 9`` and the text ``7. 8. 9.`` are runs of 3,
+    and ``1.10`` is the number 1 then the number 10. A digit string longer than
+    MAX_NUMBER_DIGITS ends the run.
+    """
+    longest = 0
+    run = 0
+    previous: int | None = None
+    for match in NUMBER.finditer(text):
+        digits = match.group()
+        if len(digits) > MAX_NUMBER_DIGITS:
+            run = 0
+            previous = None
+            continue
+        number = int(digits)
+        if previous is not None and number == previous + 1:
+            run += 1
+        else:
+            run = 1
+        previous = number
+        longest = max(longest, run)
+    return longest
+
+
+def loop_kind(text: str) -> str | None:
+    """Return ``"repeat"``, ``"counting"`` or ``"char run"`` if the text looks like a loop.
+
+    Returns None if it does not. The first two tests need an output of at least
+    LOOP_MIN_CHARS characters and look at its last LOOP_TAIL_CHARS characters:
+
+    - ``repeat``: the tail compresses to less than LOOP_TAIL_COMPRESSION of its size;
+    - ``counting``: the tail has COUNTING_RUN or more numbers in a row that each
+      count up by one (see :func:`longest_counting_run`).
+
+    ``char run``: one non-space character repeats CHAR_RUN_LENGTH times or more.
     """
     if len(text) >= LOOP_MIN_CHARS:
         tail = text[-LOOP_TAIL_CHARS:]
         if _compression_ratio(tail) < LOOP_TAIL_COMPRESSION:
             return "repeat"
+        if longest_counting_run(tail) >= COUNTING_RUN:
+            return "counting"
     if CHAR_RUN.search(text):
         return "char run"
     return None
@@ -134,6 +181,7 @@ class ModelScreen:
     pages: int = 0  # rows with an output that is not an error sentinel
     checked_pages: int = 0  # of those, rows with outputs from MIN_MODELS or more models
     loop_rows: list[int] = field(default_factory=list)
+    counting_rows: list[int] = field(default_factory=list)  # loops found by the counting test
     char_run_rows: list[int] = field(default_factory=list)  # loops found by CHAR_RUN only
     long_rows: list[int] = field(default_factory=list)
     blank_pages: int = 0  # checked rows where most outputs have almost no text
@@ -154,6 +202,7 @@ class ModelScreen:
                 "count": len(self.loop_rows),
                 "pages": self.pages,
                 "rows": self.loop_rows,
+                "counting_rows": self.counting_rows,
                 "char_run_rows": self.char_run_rows,
             },
             "long": {
@@ -295,6 +344,8 @@ def screen_outputs(
             if kind is not None:
                 checks.append("loop")
                 result.loop_rows.append(row)
+                if kind == "counting":
+                    result.counting_rows.append(row)
                 if kind == "char run":
                     result.char_run_rows.append(row)
 

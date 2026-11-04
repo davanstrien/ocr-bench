@@ -9,6 +9,13 @@ current behaviour.
 
 ## [Unreleased]
 
+### Behaviour changes
+
+- `audit --screen` also counts a counting list (`- 1`, `- 2`, `- 3`, …) as a loop: the last 2,000 characters of an output of 500 or more characters hold 50 or more numbers in a row that each count up by one. Such a list does not compress, because each line has a new number, so the compression test missed it. In `--json`, these rows are listed under `loop.counting_rows`, and the thresholds include `counting_run`. Peer agreement leaves out these loops, as it does the others.
+  - On the public Britannica board (6 models, 50 pages), the screen now finds 21 loops: the 20 it found before, and DeepSeek-OCR's 10,490-character list on row 0, which only `>5x length` flagged before.
+  - On 2,230 outputs from seven public ocr-bench collections, the test flags 15 more outputs. All 15 are counting lists. No real transcription had a run longer than 23 numbers.
+  - Replacing every digit with 0 before the compression test also finds these lists, but it flagged 16 numeric tables on the same outputs, so it is not used.
+
 ### Fixes
 
 - An OCR output cell that is not a string (a number, a NaN, a list) is read as an empty output by `judge`, `audit` and `audit --screen`. Before, such a cell crashed them. The cell is not converted with `str()`, so the judge never sees text such as `nan`. In the audit, the cell counts as empty, and a column with no string values has no judgeable rows.
