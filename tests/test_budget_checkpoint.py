@@ -477,10 +477,10 @@ class TestCoverageReport:
             "model-c": {"sampled_pages": 10, "ranked_pages": 10, "sentinel_pages": 0},
         }
         out = " ".join(capsys.readouterr().out.split())  # undo console line wrapping
-        assert "Note: model-b: 1/10 outputs are error placeholders (10.0%)" in out
+        assert "Note: model-b: 1/10 outputs are error sentinels (10.0%)" in out
         assert "its rank leaves out those pages" in out
         assert "9/10" in out  # the Pages column
-        assert "model-b: ranked on 9 of 10 pages; 1 error placeholder(s) left out" in out
+        assert "model-b: ranked on 9 of 10 pages; 1 error sentinel(s) left out" in out
 
     def test_coverage_follows_max_samples(self):
         ds, ocr = make_ds(n=10)
@@ -547,6 +547,20 @@ class TestTextCapWarning:
             ["--no-adaptive", "--checkpoint-every", "0", "--max-ocr-text-len", "100"], ds, ocr
         )
         assert "Text cap" not in capsys.readouterr().out
+
+    def test_flagged_long_output_does_not_claim_a_higher_cap_cannot_help(self, capsys):
+        # One complete 3,000-character transcription next to two 400-character
+        # partial ones: the screen flags the complete one as >5x length, so it
+        # suggests no cap. That flag is a lead, not proof that the text is wrong.
+        ds, ocr = _prose_ds(5, {"a": 3000, "b": 400, "c": 400})
+        _run_judge(["--no-adaptive", "--checkpoint-every", "0"], ds, ocr)
+        out = " ".join(capsys.readouterr().out.split())
+        assert "--max-ocr-text-len 2500 truncates 5 of 15 outputs (33%)" in out
+        assert "Over half are truncated for: model-a (100%)" in out
+        assert "--max-ocr-text-len 2500 fits every output that the `audit --screen` checks" in out
+        assert "Every output over the cap is flagged" in out
+        assert "`ocr-bench audit --screen --json` lists the flagged rows" in out
+        assert "would not help" not in out
 
     def test_two_models_get_no_suggestion(self, capsys):
         ds, ocr = _prose_ds(10, {"a": 300, "b": 320})

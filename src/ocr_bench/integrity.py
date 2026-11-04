@@ -173,7 +173,7 @@ class ModelCoverage:
       least one comparison on the board, judged or auto-tied. Its rating uses
       only these pages.
     - ``sentinel_pages``: the sampled pages where the model's output is an
-      error placeholder. Those pages are never judged for the model.
+      error sentinel. Those pages are never judged for the model.
 
     N can also be below M minus ``sentinel_pages`` for every model. That
     happens on a page where all outputs are shorter than ``--min-chars``, or
@@ -230,11 +230,11 @@ def model_coverage(
 class TruncationExposure:
     """How many outputs in the judged sample the judge's text cap cuts short.
 
-    Error placeholders are left out: the judge never sees them.
+    Error sentinels are left out of both counts: the judge never sees them.
     """
 
     max_ocr_text_len: int
-    outputs: dict[str, int]  # model → outputs that are not error placeholders
+    outputs: dict[str, int]  # model → outputs that are not error sentinels
     over_cap: dict[str, int]  # model → of those, outputs longer than the cap
 
     @property
@@ -279,19 +279,17 @@ def truncation_exposure(
     """Count the sampled outputs that ``max_ocr_text_len`` truncates, per model.
 
     Lengths are measured as the judge caps them (after HTML normalisation when
-    ``normalize`` is true), with :func:`compute_column_stats`.
+    ``normalize`` is true), with :func:`compute_column_stats`. Error sentinels
+    are removed first, so a sentinel padded with whitespace is never counted
+    as a truncated output.
     """
     outputs: dict[str, int] = {}
     over_cap: dict[str, int] = {}
     for col, model in ocr_columns.items():
-        stats = compute_column_stats(
-            col,
-            model,
-            _sampled_values(dataset, col, indices),
-            max_ocr_text_len,
-            normalize=normalize,
-        )
-        outputs[model] = stats.n_rows - stats.n_sentinel
+        values = _sampled_values(dataset, col, indices)
+        judged = [value for value in values if not is_sentinel(value)]
+        stats = compute_column_stats(col, model, judged, max_ocr_text_len, normalize=normalize)
+        outputs[model] = stats.n_rows
         over_cap[model] = stats.n_over_max
     return TruncationExposure(max_ocr_text_len, outputs, over_cap)
 
@@ -306,7 +304,7 @@ def suggest_text_cap(
     """Run the ``audit --screen`` checks on the judged sample, for its text-cap suggestion.
 
     Returns None when the screen cannot run: it needs MIN_MODELS or more
-    models whose sampled outputs are not all empty or error placeholders.
+    models whose sampled outputs are not all empty or error sentinels.
     The suggestion is ``ScreenReport.suggested_max_ocr_text_len``.
     """
     texts: dict[str, list] = {}

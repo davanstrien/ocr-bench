@@ -758,12 +758,12 @@ def _build_readme(
             "",
             f"The judged sample has {sampled} pages. Each model is ranked on the pages "
             "where it took part in at least one judged or auto-tied comparison. A page "
-            "is left out for a model when its output is an error placeholder. A page is "
+            "is left out for a model when its output is an error sentinel. A page is "
             f"left out for every model when {short_pages}adaptive stopping or the "
             "comparison budget ended the run first.",
             "",
-            "| Model | Ranked on | Error placeholders |",
-            "|-------|-----------|--------------------|",
+            "| Model | Ranked on | Error sentinels |",
+            "|-------|-----------|-----------------|",
         ]
         listed = [row["model"] for row in rows if row["model"] in coverage]
         listed += sorted(model for model in coverage if model not in listed)

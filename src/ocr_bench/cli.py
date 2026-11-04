@@ -694,7 +694,7 @@ def print_leaderboard(
 
 
 def _print_coverage_note(coverage: dict[str, ModelCoverage]) -> None:
-    """Explain the Pages column, and name the models whose rank leaves out error pages."""
+    """Explain the Pages column, and name the models whose rank leaves out sentinel pages."""
     sampled = max(entry.sampled_pages for entry in coverage.values())
     console.print(
         f"[dim]Pages: ranked on N of the {sampled} sampled pages, the pages with at least "
@@ -706,7 +706,7 @@ def _print_coverage_note(coverage: dict[str, ModelCoverage]) -> None:
         if entry.sentinel_pages:
             console.print(
                 f"  {model}: ranked on {entry.ranked_pages} of {entry.sampled_pages} "
-                f"pages; {entry.sentinel_pages} error placeholder(s) left out."
+                f"pages; {entry.sentinel_pages} error sentinel(s) left out."
             )
 
 
@@ -730,8 +730,8 @@ def _warn_text_cap(
     console.print(
         f"[yellow]⚠ Text cap:[/yellow] --max-ocr-text-len {max_ocr_text_len} truncates "
         f"{exposure.total_over_cap} of {exposure.total_outputs} outputs "
-        f"({exposure.overall_rate:.0%}) in the judged sample. The judge sees only the "
-        f"first {max_ocr_text_len} characters of each."
+        f"({exposure.overall_rate:.0%}) in the judged sample. The judge sees the first "
+        f"{max_ocr_text_len} characters of each, with a note that the output was cut."
     )
     over_half = exposure.models_over_warn_rate
     if over_half:
@@ -746,9 +746,14 @@ def _warn_text_cap(
         return
     suggested = screen.suggested_max_ocr_text_len
     if suggested is None:
+        # The screen's flags are leads: a flagged output can still be a complete
+        # transcription (for example the one long output on a page where the
+        # other models stopped early), so do not say that a higher cap cannot help.
         console.print(
-            "  The screen checks flag every output over the cap (loops or over-long "
-            "outputs), so a higher cap would not help."
+            f"  --max-ocr-text-len {max_ocr_text_len} fits every output that the "
+            "`audit --screen` checks do not flag. Every output over the cap is flagged "
+            "(a loop, or over 5x the others' length). Inspect them before you choose a "
+            "cap: `ocr-bench audit --screen --json` lists the flagged rows."
         )
         return
     console.print(
@@ -1397,7 +1402,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             # Under the warning rate, but its rank still rests on fewer pages.
             console.print(
                 f"Note: {stat.model}: {stat.n_sentinel}/{stat.n_rows} outputs are error "
-                f"placeholders ({stat.sentinel_rate:.1%}). They are excluded from judging, "
+                f"sentinels ({stat.sentinel_rate:.1%}). They are excluded from judging, "
                 "so its rank leaves out those pages."
             )
 

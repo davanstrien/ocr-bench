@@ -153,7 +153,7 @@ class TestModelCoverage:
 
 
 class TestTruncationExposure:
-    def test_rates_leave_out_error_placeholders(self):
+    def test_rates_leave_out_error_sentinels(self):
         ds = [
             {"a": "x" * 50, "b": "[OCR ERROR]"},
             {"a": "x" * 50, "b": "x" * 50},
@@ -170,6 +170,22 @@ class TestTruncationExposure:
         ds = [{"a": "x" * 50}, {"a": "x" * 5}, {"a": "x" * 5}]
         assert not truncation_exposure(ds, {"a": "A"}, [1, 2], 20).warn
         assert truncation_exposure(ds, {"a": "A"}, [0], 20).warn
+
+    def test_sentinel_longer_than_the_cap_is_not_counted(self):
+        # Before, the sentinels counted as over the cap but not as outputs:
+        # "2 of 1 outputs (200%)".
+        ds = [{"a": "[OCR ERROR]"}, {"a": "[OCR ERROR]"}, {"a": "short"}]
+        exposure = truncation_exposure(ds, {"a": "A"}, [0, 1, 2], 10)
+        assert exposure.outputs == {"A": 1}
+        assert exposure.over_cap == {"A": 0}
+        assert not exposure.warn
+
+    def test_sentinel_padded_with_newlines_is_not_counted(self):
+        ds = [{"a": "[OCR ERROR]" + "\n" * 3000}, {"a": "a real transcription"}]
+        exposure = truncation_exposure(ds, {"a": "A"}, [0, 1])
+        assert exposure.outputs == {"A": 1}
+        assert exposure.over_cap == {"A": 0}
+        assert not exposure.warn
 
     def test_no_outputs_no_warning(self):
         exposure = truncation_exposure([{"a": "[OCR ERROR]"}], {"a": "A"}, [0], 20)

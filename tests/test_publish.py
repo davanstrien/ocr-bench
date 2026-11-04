@@ -925,6 +925,7 @@ class TestBuildReadme:
         readme = _build_readme("user/results", rows, board, meta)
         assert "## Coverage" in readme
         assert "The judged sample has 10 pages." in readme
+        assert "| Model | Ranked on | Error sentinels |" in readme
         assert "| model-b | 8 of 10 pages | 2 |" in readme
         # Same order as the leaderboard table.
         section = readme[readme.index("## Coverage"):]
