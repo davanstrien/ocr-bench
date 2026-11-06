@@ -38,7 +38,12 @@ from huggingface_hub import CommitOperationAdd, CommitOperationDelete, DatasetCa
 from huggingface_hub.errors import RepositoryNotFoundError
 
 from ocr_bench import __version__
-from ocr_bench.dataset import DatasetError, evaluation_input_fingerprints
+from ocr_bench.dataset import (
+    DatasetError,
+    evaluation_input_fingerprints,
+    fingerprint_identity_columns,
+    load_config_dataset,
+)
 from ocr_bench.elo import MIN_PAGES_TO_RESOLVE, ComparisonResult, Leaderboard, compute_elo
 from ocr_bench.judge import sample_indices
 from ocr_bench.publish import (
@@ -84,6 +89,7 @@ SLICE_BOARD_COLUMNS = (
 SETTINGS_KEYS = (
     "alias",
     "judge_models",
+    "judge_spec_hashes",
     "criteria",
     "prompt_hash",
     "judge_text_mode",
@@ -227,7 +233,13 @@ def load_slice_values(metadata: dict, slice_column: str) -> list:
             f"Column '{slice_column}' is not in the judged source config {config or 'default'}."
         )
     judged = sample_indices(len(ds), metadata.get("max_samples"), metadata.get("seed", 42))
-    found, _ = evaluation_input_fingerprints(ds, {}, judged)
+    try:
+        found, _ = evaluation_input_fingerprints(_as_judged(ds, metadata), {}, judged)
+    except Exception as exc:
+        # A fingerprint error can name a local image path, so only its type is shown.
+        raise ShareError(
+            f"Could not fingerprint the judged source pages ({type(exc).__name__})."
+        ) from exc
     if found != expected:
         raise ShareError(
             "The source pages are not the pages judge compared: their fingerprint "
@@ -235,6 +247,35 @@ def load_slice_values(metadata: dict, slice_column: str) -> list:
             "current source, or share without --slice-column."
         )
     return list(ds[slice_column])
+
+
+def _as_judged(ds, metadata: dict):
+    """The columns judge fingerprinted, from the reference config ``ds``.
+
+    Judge fingerprints the merged dataset: the reference config without its OCR
+    column, plus one column per usable config, named after the config. Usually
+    the identity columns (ids and the image) come from the reference config, so
+    reading it is enough. When a config name or an OCR column is itself an
+    identity column, judge's merge is rebuilt from every config.
+    """
+    configs = json.loads(metadata.get("source_configs") or "[]")
+    if not configs:
+        return ds
+    outputs = json.loads(metadata.get("source_output_columns") or "{}")
+    config = reference_config(metadata)
+    merged_names = [name for name in ds.column_names if name != outputs[config]]
+    merged_names = list(dict.fromkeys([*merged_names, *(c for c in configs if c in outputs)]))
+    identity = fingerprint_identity_columns(merged_names)
+    if identity and all(col in ds.column_names and col not in outputs for col in identity):
+        return ds.select_columns(identity)
+    revisions = json.loads(metadata.get("source_revisions") or "{}")
+    merged, _ = load_config_dataset(
+        metadata["source_dataset"],
+        configs,
+        split=metadata.get("source_split") or "train",
+        pr_revisions={c: r for c, r in revisions.items() if r.startswith("refs/pr/")},
+    )
+    return merged
 
 
 # --- fitting -----------------------------------------------------------------
@@ -359,13 +400,20 @@ def rankable_models(
     were never compared with each other (targeted runs judge only some pairs).
     Returns no models when the graph is not connected.
     """
-    pages: dict[str, set[int]] = {}
-    for c in comparisons:
-        pages.setdefault(c.model_a, set()).add(c.sample_idx)
-        pages.setdefault(c.model_b, set()).add(c.sample_idx)
-    kept = [m for m in models if len(pages.get(m, ())) >= MIN_SLICE_PAGES]
-    kept_set = set(kept)
-    between = [c for c in comparisons if c.model_a in kept_set and c.model_b in kept_set]
+    kept = list(models)
+    while True:
+        # Dropping a model removes pages from the models it was compared with,
+        # so the floor is applied again until nothing changes.
+        kept_set = set(kept)
+        between = [c for c in comparisons if c.model_a in kept_set and c.model_b in kept_set]
+        pages: dict[str, set[int]] = {}
+        for c in between:
+            pages.setdefault(c.model_a, set()).add(c.sample_idx)
+            pages.setdefault(c.model_b, set()).add(c.sample_idx)
+        still = [m for m in kept if len(pages.get(m, ())) >= MIN_SLICE_PAGES]
+        if still == kept:
+            break
+        kept = still
     if len(kept) < 2:
         return [], []
     neighbours: dict[str, set[str]] = {m: set() for m in kept}
@@ -382,12 +430,22 @@ def rankable_models(
     return kept, between
 
 
-def check_judged_sample(values: list, sample_ids: set[int]) -> None:
-    """Refuse when a comparison is on a row the source does not have."""
+def check_judged_sample(values: list, metadata: dict, sample_ids: set[int]) -> None:
+    """Refuse when a comparison is on a row outside the sample judge draws.
+
+    The fingerprint proves the drawn sample is the judged pages, so this binds
+    the comparisons to those pages.
+    """
     if sample_ids and max(sample_ids) >= len(values):
         raise ShareError(
             f"The source has {len(values)} rows, but a comparison is on row "
             f"{max(sample_ids)}. The source changed after judging."
+        )
+    drawn = set(sample_indices(len(values), metadata.get("max_samples"), metadata.get("seed", 42)))
+    if not sample_ids <= drawn:
+        raise ShareError(
+            "Some comparisons are on pages outside the judged sample. The comparisons "
+            "and the metadata are not from the same judge run."
         )
 
 
@@ -706,7 +764,7 @@ def plan_share(
     not_in_a_slice = 0
     if slice_column:
         values = (slice_values or load_slice_values)(metadata, slice_column)
-        check_judged_sample(values, sample_ids)
+        check_judged_sample(values, metadata, sample_ids)
         groups, not_in_a_slice = slice_groups(values, sample_ids)
         for name in sorted(groups):
             pages = groups[name]
@@ -725,9 +783,11 @@ def plan_share(
             slice_pages.append(len(pages))
 
     judge_models = json.loads(metadata.get("judge_models") or "[]")
+    judge_spec_hashes = json.loads(metadata.get("judge_spec_hashes") or "[]")
     settings = {
         "alias": alias,
         "judge_models": judge_models,
+        "judge_spec_hashes": judge_spec_hashes,
         "criteria": _public_criteria(metadata.get("criteria") or "default"),
         "prompt_hash": metadata.get("prompt_hash") or "",
         "judge_text_mode": metadata.get("judge_text_mode") or "normalized",
@@ -758,6 +818,7 @@ def plan_share(
             *STATUSES,
             *(row["params"] for row in overall_rows if row["params"]),
             *judge_models,
+            *judge_spec_hashes,
             *(v for v in settings.values() if isinstance(v, str)),
         }
     )
@@ -869,11 +930,14 @@ def push_share(
         )
     api = api or HfApi()
     existing = _destination_files(api, dest, plan.alias, replace)
+    created = existing is None
     if existing is None:
         api.create_repo(dest, repo_type="dataset", private=private, exist_ok=False)
-        revision, present = _revision(api, dest), []
-    else:
-        revision, present = existing
+        # Check the new repo too: another writer could commit before this read.
+        existing = _destination_files(api, dest, plan.alias, replace)
+        if existing is None:
+            raise ShareError(f"{dest} was not found after it was created.")
+    revision, present = existing
     operations: list[CommitOperationAdd | CommitOperationDelete] = [
         CommitOperationAdd(path_in_repo=path, path_or_fileobj=data)
         for path, data in plan.files.items()
@@ -892,4 +956,4 @@ def push_share(
     )
     is_private = bool(api.repo_info(dest, repo_type="dataset").private)
     logger.info("shared_board", repo=dest, files=sorted(plan.files), private=is_private)
-    return PushResult(repo_id=dest, created=existing is None, private=is_private)
+    return PushResult(repo_id=dest, created=created, private=is_private)

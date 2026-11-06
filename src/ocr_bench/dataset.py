@@ -59,6 +59,19 @@ def _stored_image_bytes(image: dict[str, Any], column: str) -> bytes:
         return image_file.read()
 
 
+def fingerprint_identity_columns(column_names: list[str]) -> list[str]:
+    """The columns that identify a page in :func:`evaluation_input_fingerprints`.
+
+    Stable passthrough ids when present, plus one image column. IDs detect
+    reordering; image content also catches a page replaced in place with the same id.
+    """
+    identity_columns = [key for key in ALIGNMENT_KEYS if key in column_names]
+    image_columns = [col for col in column_names if col == "image" or "image" in col.lower()]
+    if image_columns:
+        identity_columns.append("image" if "image" in image_columns else image_columns[0])
+    return identity_columns
+
+
 def evaluation_input_fingerprints(
     dataset: Dataset,
     ocr_columns: dict[str, str],
@@ -71,15 +84,7 @@ def evaluation_input_fingerprints(
     independently so adding a new model does not invalidate safe comparisons
     between unchanged existing models.
     """
-    identity_columns = [key for key in ALIGNMENT_KEYS if key in dataset.column_names]
-    image_columns = [
-        col for col in dataset.column_names if col == "image" or "image" in col.lower()
-    ]
-    if image_columns:
-        # IDs detect reordering; image content also catches a page being replaced
-        # in place while retaining the same ID.
-        image_column = "image" if "image" in image_columns else image_columns[0]
-        identity_columns.append(image_column)
+    identity_columns = fingerprint_identity_columns(dataset.column_names)
     if not identity_columns:
         raise DatasetError(
             "Cannot fingerprint evaluated pages: no stable identity or image column found"
