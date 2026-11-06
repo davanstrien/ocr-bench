@@ -9,8 +9,10 @@ import string
 import pytest
 
 from ocr_bench.screen import (
+    COUNTING_RUN,
     LOOP_MIN_CHARS,
     ScreenReport,
+    longest_counting_run,
     loop_kind,
     screen_outputs,
     visible_chars,
@@ -22,6 +24,14 @@ def _prose(n_chars: int, seed: int = 0) -> str:
     rng = random.Random(seed)
     alphabet = string.ascii_lowercase + "      "
     return "".join(rng.choice(alphabet) for _ in range(n_chars))
+
+
+_SURNAMES = [
+    "Abbott", "Baker", "Carter", "Dawson", "Ellis", "Foster", "Graham", "Hughes", "Irving",
+    "Jarvis", "Knight", "Lawson", "Mason", "Norris", "Owen", "Parker", "Quinn", "Reeves",
+    "Stone", "Turner", "Upton", "Vance", "Walker", "Young", "Zeal",
+]
+_COINS = ["Æ. Head r.", "AR. Bust l.", "Æ. Wreath.", "AR. Eagle.", "Æ. Galley.", "AV. Victory."]
 
 
 def _screen(texts: dict[str, list], cap: int = 2500) -> ScreenReport:
@@ -63,6 +73,104 @@ class TestLoopKind:
 
     def test_whitespace_run_is_not_a_character_run(self):
         assert loop_kind("Title" + " " * 300 + "end") is None
+
+    def test_counting_list_is_a_loop(self):
+        # DeepSeek-OCR's output for a near-blank Britannica page: "- 1" to "- 1656".
+        # Each line has a new number, so the tail does not compress.
+        text = "".join(f"- {n}\n" for n in range(1, 1657))
+        assert loop_kind(text) == "counting"
+
+    def test_inline_counting_is_a_loop(self):
+        text = _prose(400) + " ".join(f"{n}." for n in range(800, 1200))
+        assert loop_kind(text) == "counting"
+
+    def test_counting_run_threshold(self):
+        # The same text in every entry, so only the count decides.
+        below = _prose(300) + "".join(f"{n} Ditto\n" for n in range(1, COUNTING_RUN))
+        at = below + f"{COUNTING_RUN} Ditto\n"
+        assert len(below) >= LOOP_MIN_CHARS
+        assert loop_kind(below) is None
+        assert loop_kind(at) == "counting"
+
+    def test_padded_table_counting_is_a_loop(self):
+        # Cell padding changes with the digit count; whitespace in the gap is collapsed.
+        text = _prose(300) + "| " + " | ".join(f"{n:<5}" for n in range(950, 1100)) + " |"
+        assert loop_kind(text) == "counting"
+
+    # Real numbered lists, from a review probe. Each entry has its own text, so
+    # the gaps between the numbers differ.
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "LIST OF MEMBERS.\n"
+            + "".join(f"{i}. {_SURNAMES[i % 25]}, {'ABCDEFGHJ'[i % 9]}.\n" for i in range(1, 71)),
+            "CATALOGUE OF COINS.\n"
+            + "".join(f"{i}. {_COINS[(i * 7) % 6]}\n" for i in range(213, 281)),
+            "".join(f"{i} {_prose(25, i)}\n" for i in range(1, 80)),
+            "".join(f"{i} {_prose(50, i)}\n" for i in range(1, 80)),
+            "LIST OF PLATES.\n"
+            + "".join(f"Plate {i}. {_SURNAMES[i % 25]} Hall.\n" for i in range(1, 60)),
+            _prose(600)
+            + "\n"
+            + "".join(f"{i}. {_SURNAMES[(i * 3) % 25]}.\n" for i in range(1, 56)),
+        ],
+        ids=["membership roll", "coin catalogue", "numbered verse", "numbered long verse",
+             "list of plates", "prose then 55 names"],
+    )
+    def test_numbered_list_with_distinct_entries_is_not_a_loop(self, text):
+        assert len(text) >= LOOP_MIN_CHARS
+        assert loop_kind(text) is None
+
+    # The known false positive: 50 or more numbered entries with the same text.
+    # (Longer repeated text, such as "S. 1. Repealed." on every line, already
+    # compresses enough to be flagged as a repeat.)
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "".join(f"{i} Ditto\n" for i in range(200, 261)),
+            "".join(f"{i}\nfol.\n" for i in range(100, 170)),
+        ],
+        ids=["ditto lots", "folio numbers"],
+    )
+    def test_numbered_list_with_the_same_entry_is_flagged(self, text):
+        assert loop_kind(text) == "counting"
+
+    def test_numeric_table_is_not_a_loop(self):
+        # Digits differ on every row, but the numbers do not count up. Replacing
+        # every digit with 0 first would make this table compress like a loop.
+        rng = random.Random(3)
+        rows = [" | ".join(str(rng.randint(1, 9999)) for _ in range(8)) for _ in range(80)]
+        text = "\n".join(f"| {row} |" for row in rows)
+        assert len(text) >= LOOP_MIN_CHARS
+        assert loop_kind(text) is None
+
+
+class TestLongestCountingRun:
+    def test_counts_numbers_that_go_up_by_one(self):
+        assert longest_counting_run("- 7\n- 8\n- 9") == 3
+        assert longest_counting_run("7. 8. 9. 10.") == 4
+
+    def test_a_gap_starts_a_new_run(self):
+        assert longest_counting_run("1 2 3 5 6") == 3
+
+    def test_different_text_between_numbers_ends_the_run(self):
+        assert longest_counting_run("7. Abbott\n8. Baker\n9. Carter\n") == 2
+        # A new gap starts a run at the number before it.
+        assert longest_counting_run("1, 2, 3; 4; 5; 6") == 4
+
+    def test_whitespace_in_the_gap_is_collapsed(self):
+        assert longest_counting_run("| 998  | 999  | 1000 | 1001 |") == 4
+
+    def test_decimal_is_two_numbers(self):
+        assert longest_counting_run("1.10") == 1
+
+    def test_no_numbers(self):
+        assert longest_counting_run("no digits here") == 0
+
+    def test_very_long_digit_string_ends_the_run(self):
+        # int() refuses digit strings over 4,300 characters; such a string is
+        # not read as a number.
+        assert longest_counting_run("1 2 " + "7" * 5000 + " 3 4") == 2
 
 
 class TestScreenOutputs:
@@ -216,6 +324,14 @@ class TestScreenOutputs:
         assert models["d"].loop_rows == [0]
         assert models["d"].char_run_rows == [0]
 
+    def test_counting_rows_are_listed(self):
+        texts = {name: [_prose(400, seed)] for seed, name in enumerate("abc")}
+        texts["d"] = ["".join(f"- {n}\n" for n in range(1, 400))]
+        models = _by_name(_screen(texts))
+        assert models["d"].loop_rows == [0]
+        assert models["d"].counting_rows == [0]
+        assert models["d"].char_run_rows == []
+
     def test_to_dict_is_json(self):
         texts = {name: [_prose(400, seed), ""] for seed, name in enumerate("abc")}
         data = json.loads(json.dumps(_screen(texts).to_dict()))
@@ -224,3 +340,5 @@ class TestScreenOutputs:
         assert set(data["models"][0]) >= {"loop", "long", "text_on_blank", "peer_agreement"}
         assert data["thresholds"]["loop_tail_compression"] == 0.15
         assert data["models"][0]["loop"]["char_run_rows"] == []
+        assert data["models"][0]["loop"]["counting_rows"] == []
+        assert data["thresholds"]["counting_run"] == COUNTING_RUN
