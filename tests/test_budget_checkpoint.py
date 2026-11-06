@@ -291,9 +291,7 @@ class TestTargetedAdaptive:
             existing=existing,
             judge=FakeJudge(winner="tie"),
         )
-        pairs_with_new_model = {
-            pair for pair in judge.pairs_seen if "model-d" in pair
-        }
+        pairs_with_new_model = {pair for pair in judge.pairs_seen if "model-d" in pair}
         assert pairs_with_new_model == {
             ("model-a", "model-d"),
             ("model-b", "model-d"),
@@ -409,9 +407,7 @@ class TestBudget:
 
     def test_no_budget_judges_everything(self):
         ds, ocr = make_ds(n=10)
-        judge, m_publish, _ = _run_judge(
-            ["--no-adaptive", "--checkpoint-every", "0"], ds, ocr
-        )
+        judge, m_publish, _ = _run_judge(["--no-adaptive", "--checkpoint-every", "0"], ds, ocr)
         assert judge.judged == 30
         assert _published_metadata(m_publish).budget_exhausted is False
 
@@ -577,9 +573,7 @@ class TestCheckpointFullRejudge:
         # No explicit --checkpoint-every + --full-rejudge -> checkpointing off,
         # with an explanatory message (avoids clobbering complete published data).
         ds, ocr = make_ds(n=10)
-        _, _, m_checkpoint = _run_judge(
-            ["--no-adaptive", "--full-rejudge"], ds, ocr
-        )
+        _, _, m_checkpoint = _run_judge(["--no-adaptive", "--full-rejudge"], ds, ocr)
         m_checkpoint.assert_not_called()
         assert "Checkpointing off under --full-rejudge" in capsys.readouterr().out
 
@@ -620,9 +614,7 @@ class TestCheckpointing:
 
     def test_checkpoint_off_never_pushes(self):
         ds, ocr = make_ds(n=10)
-        _, _, m_checkpoint = _run_judge(
-            ["--no-adaptive", "--checkpoint-every", "0"], ds, ocr
-        )
+        _, _, m_checkpoint = _run_judge(["--no-adaptive", "--checkpoint-every", "0"], ds, ocr)
         m_checkpoint.assert_not_called()
 
     def test_checkpoint_failure_does_not_abort(self):
@@ -676,10 +668,7 @@ class TestCheckpointing:
             existing=[current, historical_failed],
         )
 
-        assert all(
-            historical_failed in call.args[1]
-            for call in m_checkpoint.call_args_list
-        )
+        assert all(historical_failed in call.args[1] for call in m_checkpoint.call_args_list)
         assert m_publish.call_args.kwargs["preserved_comparisons"] == [historical_failed]
         board = m_publish.call_args.args[1]
         assert "model-c" not in board.elo
@@ -738,22 +727,31 @@ class TestResume:
         ds, ocr = make_ds(n=2, models=("a", "b"))
         flags = ["--no-adaptive", "--checkpoint-every", "0"]
         _, published, _ = _run_judge(
-            flags, ds, ocr, stamp_existing_provenance=False,
+            flags,
+            ds,
+            ocr,
+            stamp_existing_provenance=False,
             config_datasets=self._configs(ds, ocr),
         )
         assert _published_metadata(published).source_output_columns == {
             column: "old_ocr" for column in ocr
         }
         configs = self._configs(
-            ds, ocr,
+            ds,
+            ocr,
             output_column="new_ocr" if change == "output_column" else "old_ocr",
             incomplete=change == "incomplete_entry",
         )
         judge = FakeJudge()
         with pytest.raises(SystemExit) if change == "output_column" else nullcontext():
             _run_judge(
-                flags, ds, ocr, existing=self._saved_results(published), judge=judge,
-                stamp_existing_provenance=False, checkpoint_resume=True,
+                flags,
+                ds,
+                ocr,
+                existing=self._saved_results(published),
+                judge=judge,
+                stamp_existing_provenance=False,
+                checkpoint_resume=True,
                 config_datasets=configs,
             )
         assert judge.judged == 0
@@ -764,13 +762,20 @@ class TestResume:
         ds, ocr = make_ds(n=2, models=("a", "b"))
         flags = ["--no-adaptive", "--checkpoint-every", "0"]
         _, published, _ = _run_judge(
-            flags, ds, ocr, stamp_existing_provenance=False,
+            flags,
+            ds,
+            ocr,
+            stamp_existing_provenance=False,
             config_datasets=self._configs(ds, ocr),
         )
         ds, ocr = make_ds(n=2, models=("a", "b", "c"))
         judge, _, _ = _run_judge(
-            flags, ds, ocr, existing=self._saved_results(published),
-            stamp_existing_provenance=False, checkpoint_resume=True,
+            flags,
+            ds,
+            ocr,
+            existing=self._saved_results(published),
+            stamp_existing_provenance=False,
+            checkpoint_resume=True,
             config_datasets=self._configs(ds, ocr),
         )
         assert judge.judged == 4
@@ -789,9 +794,7 @@ class TestResume:
             "image_dim",
         ],
     )
-    def test_changed_inputs_reject_real_checkpoint_provenance(
-        self, change, capsys, tmp_path
-    ):
+    def test_changed_inputs_reject_real_checkpoint_provenance(self, change, capsys, tmp_path):
         ds, ocr = make_ds(n=2, models=("a", "b"))
         flags = ["--no-adaptive", "--checkpoint-every", "0"]
         rubric = tmp_path / "rubric.txt"
@@ -819,8 +822,13 @@ class TestResume:
         judge = FakeJudge()
         with pytest.raises(SystemExit):
             _run_judge(
-                flags, ds, ocr, existing=self._saved_results(published), judge=judge,
-                stamp_existing_provenance=False, checkpoint_resume=True,
+                flags,
+                ds,
+                ocr,
+                existing=self._saved_results(published),
+                judge=judge,
+                stamp_existing_provenance=False,
+                checkpoint_resume=True,
             )
         assert judge.judged == 0
         assert "resume provenance mismatch" in capsys.readouterr().out
@@ -840,8 +848,13 @@ class TestResume:
         judge = FakeJudge()
         with pytest.raises(SystemExit):
             _run_judge(
-                flags, ds, ocr, existing=self._saved_results(published), judge=judge,
-                stamp_existing_provenance=False, checkpoint_resume=True,
+                flags,
+                ds,
+                ocr,
+                existing=self._saved_results(published),
+                judge=judge,
+                stamp_existing_provenance=False,
+                checkpoint_resume=True,
                 existing_meta_override=[
                     {
                         "judge_models": json.dumps([old]),
@@ -979,9 +992,7 @@ class TestResume:
         # (a,b) is topped up on samples 4-9, and (a,c)/(b,c) run on all 10.
         ds, ocr = make_ds(n=10)
         existing = [
-            ComparisonResult(
-                sample_idx=i, model_a="model-a", model_b="model-b", winner="A"
-            )
+            ComparisonResult(sample_idx=i, model_a="model-a", model_b="model-b", winner="A")
             for i in range(4)
         ]
         judge, m_publish, _ = _run_judge(
@@ -1002,9 +1013,7 @@ class TestResume:
         # A pair judged on ALL samples is skipped entirely (nothing to top up).
         ds, ocr = make_ds(n=10)
         existing = [
-            ComparisonResult(
-                sample_idx=i, model_a="model-a", model_b="model-b", winner="A"
-            )
+            ComparisonResult(sample_idx=i, model_a="model-a", model_b="model-b", winner="A")
             for i in range(10)
         ]
         judge, _, _ = _run_judge(
@@ -1017,9 +1026,7 @@ class TestResume:
     def test_full_rejudge_ignores_existing(self):
         ds, ocr = make_ds(n=10)
         existing = [
-            ComparisonResult(
-                sample_idx=i, model_a="model-a", model_b="model-b", winner="A"
-            )
+            ComparisonResult(sample_idx=i, model_a="model-a", model_b="model-b", winner="A")
             for i in range(4)
         ]
         judge, _, _ = _run_judge(
@@ -1043,9 +1050,16 @@ class TestFullRejudge:
         ds, ocr = make_ds(n=4, models=("a", "b"))
         judge = FakeJudge()
         argv = [
-            "judge", "user/ds", "--columns", *ocr.keys(),
-            "--save-results", "user/results", "--no-adaptive",
-            "--checkpoint-every", "0", *argv_extra,
+            "judge",
+            "user/ds",
+            "--columns",
+            *ocr.keys(),
+            "--save-results",
+            "user/results",
+            "--no-adaptive",
+            "--checkpoint-every",
+            "0",
+            *argv_extra,
         ]
         args = build_parser().parse_args(argv)
         for result in existing:
@@ -1068,9 +1082,7 @@ class TestFullRejudge:
 
     def _existing_one_pair(self):
         # (model-a, model-b) judged on sample 0 only.
-        return [
-            ComparisonResult(sample_idx=0, model_a="model-a", model_b="model-b", winner="A")
-        ]
+        return [ComparisonResult(sample_idx=0, model_a="model-a", model_b="model-b", winner="A")]
 
     def test_full_rejudge_bypasses_guard(self):
         # Metadata says default, run requests table-fidelity — normally blocked,

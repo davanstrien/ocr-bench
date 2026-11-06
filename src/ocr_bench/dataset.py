@@ -453,9 +453,7 @@ def discover_pr_configs(
             newest[config] = disc.num
         else:
             older, newer = sorted((newest[config], disc.num))
-            logger.warning(
-                "duplicate_pr_config", config=config, using_pr=newer, ignoring_pr=older
-            )
+            logger.warning("duplicate_pr_config", config=config, using_pr=newer, ignoring_pr=older)
             newest[config] = newer
             older_prs.setdefault(config, []).append(older)
 
@@ -571,9 +569,7 @@ def _find_image_mismatch(reference: list[str] | None, other: Dataset) -> int | N
         return None
     if sorted(reference) != sorted(fingerprints):
         return "unverified"
-    return next(
-        i for i, (a, b) in enumerate(zip(reference, fingerprints, strict=True)) if a != b
-    )
+    return next(i for i, (a, b) in enumerate(zip(reference, fingerprints, strict=True)) if a != b)
 
 
 def check_config_alignment(loaded: list[LoadedConfig]) -> AlignmentResult:

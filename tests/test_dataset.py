@@ -84,9 +84,7 @@ class TestEvaluationInputFingerprints:
             self._path_only_dataset(path), {"ocr_a": "A"}, [0]
         )
         Image.new("RGB", (2, 2), "black").save(path)
-        after, _ = evaluation_input_fingerprints(
-            self._path_only_dataset(path), {"ocr_a": "A"}, [0]
-        )
+        after, _ = evaluation_input_fingerprints(self._path_only_dataset(path), {"ocr_a": "A"}, [0])
         assert before != after
 
     def test_unreadable_path_only_image_fails_closed(self, tmp_path):
@@ -111,6 +109,7 @@ class TestEvaluationInputFingerprints:
         assert extended_page_fp == page_fp
         assert extended_column_fps["ocr_a"] == column_fps["ocr_a"]
         assert extended_column_fps["ocr_b"] == column_fps["ocr_b"]
+
 
 # ---------------------------------------------------------------------------
 # discover_ocr_columns

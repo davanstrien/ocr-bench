@@ -27,9 +27,31 @@ def _prose(n_chars: int, seed: int = 0) -> str:
 
 
 _SURNAMES = [
-    "Abbott", "Baker", "Carter", "Dawson", "Ellis", "Foster", "Graham", "Hughes", "Irving",
-    "Jarvis", "Knight", "Lawson", "Mason", "Norris", "Owen", "Parker", "Quinn", "Reeves",
-    "Stone", "Turner", "Upton", "Vance", "Walker", "Young", "Zeal",
+    "Abbott",
+    "Baker",
+    "Carter",
+    "Dawson",
+    "Ellis",
+    "Foster",
+    "Graham",
+    "Hughes",
+    "Irving",
+    "Jarvis",
+    "Knight",
+    "Lawson",
+    "Mason",
+    "Norris",
+    "Owen",
+    "Parker",
+    "Quinn",
+    "Reeves",
+    "Stone",
+    "Turner",
+    "Upton",
+    "Vance",
+    "Walker",
+    "Young",
+    "Zeal",
 ]
 _COINS = ["Æ. Head r.", "AR. Bust l.", "Æ. Wreath.", "AR. Eagle.", "Æ. Galley.", "AV. Victory."]
 
@@ -114,8 +136,14 @@ class TestLoopKind:
             + "\n"
             + "".join(f"{i}. {_SURNAMES[(i * 3) % 25]}.\n" for i in range(1, 56)),
         ],
-        ids=["membership roll", "coin catalogue", "numbered verse", "numbered long verse",
-             "list of plates", "prose then 55 names"],
+        ids=[
+            "membership roll",
+            "coin catalogue",
+            "numbered verse",
+            "numbered long verse",
+            "list of plates",
+            "prose then 55 names",
+        ],
     )
     def test_numbered_list_with_distinct_entries_is_not_a_loop(self, text):
         assert len(text) >= LOOP_MIN_CHARS

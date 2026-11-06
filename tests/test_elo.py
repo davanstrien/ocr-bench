@@ -148,16 +148,17 @@ class TestComputeElo:
 class TestBradleyTerryProperties:
     def test_order_independent(self):
         """BT-MLE produces the same ratings regardless of comparison order."""
-        results = [
-            ComparisonResult(sample_idx=i, model_a="a", model_b="b", winner="A")
-            for i in range(5)
-        ] + [
-            ComparisonResult(sample_idx=i, model_a="a", model_b="c", winner="A")
-            for i in range(5, 10)
-        ] + [
-            ComparisonResult(sample_idx=i, model_a="b", model_b="c", winner="A")
-            for i in range(10, 15)
-        ]
+        results = (
+            [ComparisonResult(sample_idx=i, model_a="a", model_b="b", winner="A") for i in range(5)]
+            + [
+                ComparisonResult(sample_idx=i, model_a="a", model_b="c", winner="A")
+                for i in range(5, 10)
+            ]
+            + [
+                ComparisonResult(sample_idx=i, model_a="b", model_b="c", winner="A")
+                for i in range(10, 15)
+            ]
+        )
 
         board1 = compute_elo(results, ["a", "b", "c"], n_bootstrap=0)
 
@@ -212,8 +213,7 @@ class TestBootstrapCI:
     def test_ci_returns_intervals(self):
         """Bootstrap should return CI for every model with lower < elo < upper."""
         results = [
-            ComparisonResult(sample_idx=i, model_a="a", model_b="b", winner="A")
-            for i in range(10)
+            ComparisonResult(sample_idx=i, model_a="a", model_b="b", winner="A") for i in range(10)
         ] + [
             ComparisonResult(sample_idx=i, model_a="b", model_b="c", winner="A")
             for i in range(10, 20)

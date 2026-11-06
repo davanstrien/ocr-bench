@@ -46,9 +46,7 @@ def load_results(repo_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any
     leaderboard_rows = [dict(row) for row in leaderboard_ds]
 
     try:
-        comparisons_ds = load_dataset(
-            repo_id, name="comparisons", split="train", revision=revision
-        )
+        comparisons_ds = load_dataset(repo_id, name="comparisons", split="train", revision=revision)
     except Exception:
         logger.warning("no_comparisons_config", repo=repo_id)
         return leaderboard_rows, []
@@ -118,9 +116,7 @@ class ImageLoader:
                 # Older metadata without revisions: rediscover open PRs.
                 from ocr_bench.dataset import discover_pr_configs
 
-                _, revisions = discover_pr_configs(
-                    self._source, only=self._source_configs or None
-                )
+                _, revisions = discover_pr_configs(self._source, only=self._source_configs or None)
                 # Prefer the run's own configs, in its order; a selected config
                 # without an open PR was loaded from main.
                 for config in self._source_configs or list(revisions):

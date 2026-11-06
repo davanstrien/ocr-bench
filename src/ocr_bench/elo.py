@@ -200,10 +200,7 @@ def _theta_to_elo(theta: dict[str, float], center: float = 1500.0) -> dict[str, 
     log_geo_mean = sum(math.log(v) for v in values) / len(values)
     geo_mean = math.exp(log_geo_mean)
 
-    return {
-        name: 400.0 * math.log10(t / geo_mean) + center
-        for name, t in theta.items()
-    }
+    return {name: 400.0 * math.log10(t / geo_mean) + center for name, t in theta.items()}
 
 
 def _bootstrap_ci(
