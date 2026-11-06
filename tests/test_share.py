@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import random
 import string
@@ -10,14 +11,15 @@ from itertools import combinations
 from types import SimpleNamespace
 
 import pytest
-from datasets import Dataset
+from datasets import Dataset, Image
 from huggingface_hub import CommitOperationAdd, CommitOperationDelete
 from huggingface_hub.errors import RepositoryNotFoundError
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from PIL import Image as PILImage
 
-from ocr_bench import cli, share
-from ocr_bench.dataset import evaluation_input_fingerprints
+from ocr_bench import cli, dataset, share
+from ocr_bench.dataset import evaluation_input_fingerprints, load_config_dataset
 from ocr_bench.elo import ComparisonResult, compute_elo
 from ocr_bench.judge import sample_indices
 from ocr_bench.publish import build_leaderboard_rows
@@ -154,6 +156,12 @@ class TestBoards:
         assert plan.settings["comparisons"] == 60
         assert (plan.settings["seed"], plan.settings["adaptive_strategy"]) == (42, "balanced")
 
+    def test_judge_spec_hashes_are_published(self):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata["judge_spec_hashes"] = json.dumps(["ef" * 32])
+        plan = _plan(evaluation)
+        assert json.loads(plan.files["board.json"])["judge_spec_hashes"] == ["ef" * 32]
+
     def test_a_board_with_other_ratings_is_refused(self):
         evaluation = _evaluation(_results(range(20)))
         evaluation.leaderboard[0]["elo"] += 40
@@ -276,6 +284,37 @@ class TestSlices:
         assert weak[0]["status"] == "degraded"
         assert all("status" not in row and "failed_outputs" not in row for row in plan.slice_rows)
 
+    def test_a_low_coverage_cascade_leaves_the_slice_out(self):
+        # good-mid share 1 page; good-weak and mid-other 9 pages each. weak and
+        # other have 9 pages and drop out; then good and mid have 1 page each.
+        models = [*MODELS, "org/model-other"]
+        cascade = _results(range(20, 21), pairs=[("org/model-good", "org/model-mid")])
+        cascade += _results(range(21, 30), pairs=[("org/model-good", "org/model-weak")])
+        cascade += _results(range(30, 39), pairs=[("org/model-mid", "org/model-other")])
+        plan = self._plan(
+            {"letters": range(0, 20), "forms": range(20, 39)},
+            results=_results(range(20), models) + cascade,
+            models=models,
+        )
+        assert plan.settings["slices"] == ["letters"]
+
+    def test_comparisons_outside_the_drawn_sample_are_refused(self):
+        drawn = sorted(sample_indices(100, 40, 42))
+        others = sorted(set(range(100)) - set(drawn))[:40]
+        values = ["letters"] * 100
+        for pages, ok in ((drawn, True), (others, False)):
+            evaluation = _evaluation(_results(pages), n_rows=100)
+            evaluation.metadata["max_samples"] = 40
+
+            def plan(evaluation=evaluation):
+                return _plan(evaluation, slice_column="doc_type", slice_values=lambda m, c: values)
+
+            if ok:
+                plan()
+            else:
+                with pytest.raises(ShareError, match="outside the judged sample"):
+                    plan()
+
     def test_a_per_page_column_is_refused(self):
         with pytest.raises(ShareError, match="per-page column"):
             self._plan({f"title {page}": [page] for page in range(60)}, n_rows=60, pages=range(60))
@@ -378,6 +417,69 @@ class TestSliceSource:
             load_slice_values(self._metadata(_source()), "doc_type")
         assert "CONFIDENTIAL" not in str(exc.value)
         assert "page-0042" not in str(exc.value)
+
+
+def _png(shade):
+    buffer = io.BytesIO()
+    PILImage.new("L", (2, 2), shade).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _config(n_rows, *, ids=True):
+    """One OCR output config: page image, label, OCR text (and page ids)."""
+    columns = {
+        "image": [{"bytes": _png(i), "path": None} for i in range(n_rows)],
+        "doc_type": ["letters" if i < n_rows // 2 else "forms" for i in range(n_rows)],
+        "markdown": [f"text of page {i}" for i in range(n_rows)],
+    }
+    if ids:
+        columns = {"id": [f"page-{i:03d}" for i in range(n_rows)], **columns}
+    return Dataset.from_dict(columns).cast_column("image", Image())
+
+
+class TestFingerprintMatchesJudge:
+    """share must reproduce the fingerprint judge stored, from judge's own merge."""
+
+    def _check(self, monkeypatch, configs, *, ids=True):
+        tables = {name: _config(30, ids=ids) for name in configs}
+
+        def fake_load_dataset(path=None, name=None, split=None, revision=None, **kwargs):
+            return tables[name]
+
+        monkeypatch.setattr(dataset, "load_dataset", fake_load_dataset)
+        monkeypatch.setattr(share, "load_dataset", fake_load_dataset)
+        outputs: dict[str, str] = {}
+        merged, _ = load_config_dataset(SOURCE, configs, source_output_columns=outputs)
+        judged = sample_indices(len(merged), 20, 42)
+        fingerprint, _ = evaluation_input_fingerprints(merged, {}, judged)
+        metadata = _metadata(
+            20,
+            source_fingerprint=fingerprint,
+            source_configs=json.dumps(configs),
+            source_output_columns=json.dumps(outputs, sort_keys=True),
+            source_revisions=json.dumps(dict.fromkeys(configs, "main")),
+        )
+        return load_slice_values(metadata, "doc_type")
+
+    def test_ids_and_images_from_the_reference_config(self, monkeypatch):
+        labels = self._check(monkeypatch, ["model-a", "model-b"])
+        assert labels[:2] == ["letters", "letters"]
+
+    def test_a_config_named_like_an_id_column(self, monkeypatch):
+        # Judge's merge adds a column named "id" (that config's OCR text), which
+        # judge fingerprints as a page id. share rebuilds the merge for this case.
+        labels = self._check(monkeypatch, ["id", "other"], ids=False)
+        assert len(labels) == 30
+
+    def test_an_unreadable_image_does_not_show_its_path(self, monkeypatch):
+        broken = _config(30).cast_column("image", Image(decode=False))
+        broken = broken.map(
+            lambda row: {"image": {"bytes": None, "path": "/tmp/CONFIDENTIAL-page.png"}}
+        )
+        monkeypatch.setattr(share, "load_dataset", lambda *a, **k: broken)
+        with pytest.raises(ShareError) as exc:
+            load_slice_values(_metadata(20), "doc_type")
+        assert "CONFIDENTIAL" not in str(exc.value)
 
 
 # ---------------------------------------------------------------------------
@@ -578,14 +680,31 @@ class TestPush:
             "repo_info",
             "create_repo",
             "repo_info",
+            "list_repo_files",
             "create_commit",
             "repo_info",
         ]
         assert api.calls[1] == ("create_repo", "me/board", False)
-        operations = api.calls[3][2]
+        operations = api.calls[4][2]
         assert sorted(op.path_in_repo for op in operations) == sorted(BOARD_FILES)
         assert all(isinstance(op, CommitOperationAdd) for op in operations)
         assert result.created and not result.private
+
+    def test_a_commit_by_another_writer_after_creation_is_refused(self, tmp_path):
+        class RacingApi(RecordingApi):
+            def create_repo(self, repo_id, repo_type=None, private=None, exist_ok=False):
+                super().create_repo(repo_id, repo_type, private, exist_ok)
+                self.repos[repo_id].update(
+                    sha="sha-other",
+                    files=[".gitattributes", "private-pages.parquet"],
+                    tmp=tmp_path,
+                    readme="",
+                )
+
+        api = RacingApi()
+        with pytest.raises(ShareError, match="did not write"):
+            self._push(api)
+        assert "create_commit" not in [call[0] for call in api.calls]
 
     def test_private_flag_creates_a_private_repo(self):
         api = RecordingApi()
