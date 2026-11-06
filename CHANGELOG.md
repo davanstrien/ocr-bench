@@ -32,6 +32,14 @@ These are reports only. Prompt hashes, comparison fingerprints and resume proven
 - `audit` and `judge` check that the dataset repo exists before they look for configs. For a missing repo, or a private repo that the token cannot read, the error is now "Dataset repo '<id>' was not found on the Hub (repo type: dataset)". Before, the error named the discussions endpoint. `audit` still exits with 2.
 - The "no HF token" error of `run` says `hf auth login`, not `hf login`.
 
+### Removed
+
+ocr-bench is experimental, so these go without a transition release.
+
+- `judge` no longer reads old metadata rows to explain a criteria or preprocessing change. Comparisons without a resume provenance hash (written by older ocr-bench versions, or by an incomplete old checkpoint) stop with the "lack resume provenance" error; run `--full-rejudge` once. Changes to criteria, text cap, text mode or image size on stamped comparisons still stop with "resume provenance mismatch".
+- Results repos no longer get a duplicate `leaderboard` config, and the README no longer declares one. Load the default config: `load_dataset("<repo>")`. Existing repos keep their old `leaderboard/` folder, which stops updating. The viewer reads the default config only.
+- The `PAIRWISE_PROMPT` alias is gone. Use `CRITERIA_PROFILES[DEFAULT_CRITERIA]`.
+
 ## [0.0.6] - 2026-11-04
 
 ### Upgrading from 0.0.5

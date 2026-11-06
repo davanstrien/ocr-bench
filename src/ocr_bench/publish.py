@@ -505,7 +505,6 @@ def publish_results(
 
     Configs:
       - (default): Leaderboard table — ``load_dataset("repo")`` returns this.
-      - ``leaderboard``: Same table, named config (backward compat for viewer).
       - ``comparisons``: Full comparison history. The board log contains the
         current model grid; ``preserved_comparisons`` may carry rows for models
         intentionally excluded from this fit so a subset run cannot erase them.
@@ -532,7 +531,7 @@ def publish_results(
         comp_ds.push_to_hub(repo_id, config_name="comparisons")
         logger.info("published_comparisons", repo=repo_id, n=len(comparison_rows))
 
-    # Leaderboard — dual push: default config + named config. Size-aware
+    # Leaderboard — the default config. Size-aware
     # preferences are derived from the final board + direct pair counts and
     # stored as annotations only; they never alter ELO or row order.
     decisions = classify_adjacent_pairs(
@@ -550,7 +549,6 @@ def publish_results(
     )
     lb_ds = Dataset.from_list(rows)
     lb_ds.push_to_hub(repo_id)
-    lb_ds.push_to_hub(repo_id, config_name="leaderboard")
     logger.info("published_leaderboard", repo=repo_id, n=len(rows))
 
     # Metadata — append-only. Align all rows to the union of keys so a newer
@@ -635,10 +633,6 @@ def _build_readme(
         "    data_files:",
         "      - split: train",
         "        path: comparisons/train-*.parquet",
-        "  - config_name: leaderboard",
-        "    data_files:",
-        "      - split: train",
-        "        path: leaderboard/train-*.parquet",
         "  - config_name: metadata",
         "    data_files:",
         "      - split: train",

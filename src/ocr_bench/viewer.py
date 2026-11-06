@@ -35,22 +35,15 @@ def load_results(repo_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any
     """Load leaderboard and comparisons from a Hub results dataset.
 
     Resolves the repo's latest revision up front and pins every load to it, so
-    a warm cache never serves stale results. Tries the default config first
-    (new repos), then falls back to the named ``leaderboard`` config (old repos).
+    a warm cache never serves stale results.
 
     Returns:
         (leaderboard_rows, comparison_rows)
     """
     revision = _latest_revision(repo_id)
 
-    try:
-        leaderboard_ds = load_dataset(repo_id, split="train", revision=revision)
-        leaderboard_rows = [dict(row) for row in leaderboard_ds]
-    except Exception:
-        leaderboard_ds = load_dataset(
-            repo_id, name="leaderboard", split="train", revision=revision
-        )
-        leaderboard_rows = [dict(row) for row in leaderboard_ds]
+    leaderboard_ds = load_dataset(repo_id, split="train", revision=revision)
+    leaderboard_rows = [dict(row) for row in leaderboard_ds]
 
     try:
         comparisons_ds = load_dataset(

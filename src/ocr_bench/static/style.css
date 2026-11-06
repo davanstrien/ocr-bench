@@ -180,22 +180,6 @@ nav a.active {
   color: #999;
 }
 
-/* Legacy reveal-row (kept for compat) */
-.reveal-row {
-  text-align: right;
-  margin: 0.25rem 0 1rem;
-  font-size: 0.8rem;
-}
-
-.reveal-row a {
-  color: #999;
-  text-decoration: none;
-}
-
-.reveal-row a:hover {
-  color: #666;
-}
-
 /* Verdict display */
 .verdict {
   margin: 1rem 0;
