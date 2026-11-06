@@ -778,11 +778,26 @@ class TestResume:
 
     @pytest.mark.parametrize(
         "change",
-        ["ocr_text", "judge", "split", "criteria", "text_cap", "text_mode", "image_dim"],
+        [
+            "ocr_text",
+            "judge",
+            "split",
+            "criteria",
+            "criteria_file",
+            "text_cap",
+            "text_mode",
+            "image_dim",
+        ],
     )
-    def test_changed_inputs_reject_real_checkpoint_provenance(self, change, capsys):
+    def test_changed_inputs_reject_real_checkpoint_provenance(
+        self, change, capsys, tmp_path
+    ):
         ds, ocr = make_ds(n=2, models=("a", "b"))
         flags = ["--no-adaptive", "--checkpoint-every", "0"]
+        rubric = tmp_path / "rubric.txt"
+        if change == "criteria_file":
+            rubric.write_text("Custom rubric. A={ocr_text_a} B={ocr_text_b}")
+            flags += ["--criteria-file", str(rubric)]
         _, published, _ = _run_judge(flags, ds, ocr, stamp_existing_provenance=False)
         if change == "ocr_text":
             ds._columns["col_a"][0] = "Changed OCR transcription for the same source page"
@@ -790,6 +805,9 @@ class TestResume:
             flags += ["--model", "different-judge"]
         elif change == "criteria":
             flags += ["--criteria", "table-fidelity"]
+        elif change == "criteria_file":
+            # Same file name, new content: the prompt hash changes.
+            rubric.write_text("A NEW rubric. A={ocr_text_a} B={ocr_text_b}")
         elif change == "text_cap":
             flags += ["--max-ocr-text-len", "5000"]
         elif change == "text_mode":
@@ -955,37 +973,6 @@ class TestResume:
         assert judge.judged == 1
         m_publish.assert_called_once()
 
-    def test_resume_discards_sentinel_comparison_and_rejudges_sample(self, capsys):
-        # Results produced before issue #46 can contain a verdict where an OCR
-        # error sentinel competed as transcription text. It must be removed from
-        # both the ELO input and the resume skip map, allowing a now-fixed output
-        # for the same pair/sample to be judged.
-        ds, ocr = make_ds(n=1, models=("a", "b"))
-        existing = [
-            ComparisonResult(
-                sample_idx=0,
-                model_a="model-a",
-                model_b="model-b",
-                winner="A",
-                text_a="OCR transcription output for model a, sample 0",
-                text_b="[OCR ERROR]",
-            )
-        ]
-
-        judge, m_publish, _ = _run_judge(
-            ["--no-adaptive", "--checkpoint-every", "0"],
-            ds,
-            ocr,
-            existing=existing,
-        )
-
-        assert judge.judged == 1
-        assert (("model-a", "model-b"), 0) in judge.pair_samples
-        board = m_publish.call_args.args[1]
-        assert len(board.comparison_log) == 1
-        assert board.comparison_log[0]["text_b"] != "[OCR ERROR]"
-        assert "Discarded 1 existing comparison" in capsys.readouterr().out
-
     def test_resume_tops_up_partial_pairs(self):
         # A prior (checkpointed) run judged (model-a, model-b) on samples 0-3
         # only. Relaunch WITHOUT --full-rejudge: (pair, sample)-level skip means
@@ -1080,8 +1067,7 @@ class TestFullRejudge:
         return judge, m_publish, exit_code
 
     def _existing_one_pair(self):
-        # (model-a, model-b) judged on sample 0 only, so a matching-criteria run
-        # still has samples 1-3 to top up (proves it proceeds to judge+publish).
+        # (model-a, model-b) judged on sample 0 only.
         return [
             ComparisonResult(sample_idx=0, model_a="model-a", model_b="model-b", winner="A")
         ]

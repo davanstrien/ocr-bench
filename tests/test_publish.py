@@ -1137,16 +1137,3 @@ class TestBuildReadme:
         readme = _build_readme("user/results", rows, board, self._metadata_with_failed({}))
         assert "## ⚠ Failed outputs" not in readme
         assert "⚠" not in readme
-
-    def test_failed_outputs_accepts_json_string(self):
-        """Stored metadata may carry failed_outputs as a JSON string."""
-        import json
-
-        from ocr_bench.publish import _build_readme
-
-        board = self._board_two_models()
-        rows = build_leaderboard_rows(board)
-        readme = _build_readme(
-            "user/results", rows, board, self._metadata_with_failed(json.dumps({"model-b": 7}))
-        )
-        assert "| model-b | 7 |" in readme

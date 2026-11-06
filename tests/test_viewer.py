@@ -8,7 +8,6 @@ from ocr_bench.viewer import (
     ImageLoader,
     _filter_comparisons,
     _load_source_metadata,
-    _winner_badge,
     load_results,
 )
 
@@ -185,17 +184,6 @@ class TestFilterComparisons:
     def test_no_matches(self):
         filtered = _filter_comparisons(SAMPLE_COMPARISONS, "A", "NonexistentModel")
         assert len(filtered) == 0
-
-
-class TestWinnerBadge:
-    def test_winner_a(self):
-        assert _winner_badge("A") == "Winner: A"
-
-    def test_winner_b(self):
-        assert _winner_badge("B") == "Winner: B"
-
-    def test_tie(self):
-        assert _winner_badge("tie") == "Tie"
 
 
 class TestImageLoaderUsesJudgedConfigs:

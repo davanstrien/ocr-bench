@@ -36,9 +36,10 @@ These are reports only. Prompt hashes, comparison fingerprints and resume proven
 
 ocr-bench is experimental, so these go without a transition release.
 
-- `judge` no longer reads old metadata rows to explain a criteria or preprocessing change. Comparisons without a resume provenance hash (written by older ocr-bench versions, or by an incomplete old checkpoint) stop with the "lack resume provenance" error; run `--full-rejudge` once. Changes to criteria, text cap, text mode or image size on stamped comparisons still stop with "resume provenance mismatch".
-- Results repos no longer get a duplicate `leaderboard` config, and the README no longer declares one. Load the default config: `load_dataset("<repo>")`. Existing repos keep their old `leaderboard/` folder, which stops updating. The viewer reads the default config only.
-- The `PAIRWISE_PROMPT` alias is gone. Use `CRITERIA_PROFILES[DEFAULT_CRITERIA]`.
+- `judge` does not read old metadata rows to explain a criteria or preprocessing change any more. If a comparison it would reuse (one between two models of this run) has no resume provenance hash, the run stops with the "lack resume provenance" error. Such rows come from older ocr-bench versions or an incomplete old checkpoint. Run `--full-rejudge` once. A change of criteria, criteria file, text cap, text mode or image size on stamped comparisons still stops with "resume provenance mismatch".
+- `judge` does not drop old comparisons that hold an OCR error placeholder any more. The judge never compares a placeholder, so only rows from older versions can hold one, and those rows have no provenance hash.
+- Results repos do not get a duplicate `leaderboard` config any more, and the README does not declare one. Load the default config: `load_dataset("<repo>")`. Existing repos keep their old `leaderboard/` folder, which stops updating. The viewer reads the default config only.
+- The `PAIRWISE_PROMPT` alias and three unused viewer helpers are gone. Use `CRITERIA_PROFILES[DEFAULT_CRITERIA]`.
 
 ## [0.0.6] - 2026-11-04
 
