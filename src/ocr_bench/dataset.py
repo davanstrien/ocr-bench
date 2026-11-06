@@ -14,6 +14,7 @@ from typing import Any, Literal
 import structlog
 from datasets import Dataset, Image, get_dataset_config_names, load_dataset
 from huggingface_hub import HfApi
+from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
 
 logger = structlog.get_logger()
 
@@ -332,6 +333,28 @@ def discover_ocr_columns(dataset: Dataset) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # PR-based config discovery
 # ---------------------------------------------------------------------------
+
+
+def require_dataset_repo(repo_id: str, api: HfApi | None = None) -> None:
+    """Raise :class:`DatasetError` if the dataset repo does not exist on the Hub.
+
+    Call this before config discovery. Otherwise the first request that fails
+    for a missing repo is the PR listing, and its error names the discussions
+    endpoint, not the repo. The Hub gives the same answer for a private repo
+    that this token cannot read, so the message says so. A gated repo exists,
+    so its error is not changed here.
+    """
+    api = api or HfApi()
+    try:
+        api.repo_info(repo_id, repo_type="dataset")
+    except GatedRepoError:
+        raise
+    except RepositoryNotFoundError as exc:
+        raise DatasetError(
+            f"Dataset repo '{repo_id}' was not found on the Hub (repo type: dataset). "
+            "Check the repo id. If the repo is private, log in with `hf auth login` "
+            "or set HF_TOKEN, using an account that can read it."
+        ) from exc
 
 
 def _last_change(api: HfApi, repo_id: str, path: str, revision: str) -> datetime | None:
@@ -904,8 +927,16 @@ def load_flat_dataset(
 
     Returns:
         Tuple of (Dataset, {column_name: model_name}).
+
+    Raises:
+        DatasetError: If the split has no rows, a requested column is missing,
+            or no OCR columns can be found.
     """
     ds = load_dataset(repo_id, split=split)
+    if len(ds) == 0:
+        raise DatasetError(
+            f"Dataset {repo_id} (split '{split}') has no rows, so it has no OCR outputs."
+        )
 
     if columns:
         # Validate columns exist

@@ -79,6 +79,16 @@ class TestComputeColumnStats:
         s = compute_column_stats("c", "m", [None, None, "text here longer"])
         assert s.n_empty == 2
 
+    @pytest.mark.parametrize("normalize", [True, False])
+    def test_values_that_are_not_strings_count_as_empty(self, normalize):
+        # A number used to crash is_sentinel (normalized mode) or len() (raw mode).
+        texts = [12, 3.5, float("nan"), ["a list"], "a real transcription here"]
+        s = compute_column_stats("c", "m", texts, normalize=normalize)
+        assert s.n_rows == 5
+        assert s.n_empty == 4
+        assert s.n_sentinel == 0
+        assert s.max_len == len("a real transcription here")
+
 
 class TestComputeModelStats:
     def test_over_dataset(self):
@@ -316,6 +326,18 @@ class TestAuditRepo:
         assert report.alignment.status == "partial"
         assert report.alignment.config_status("cfg_c") == "unverified"
         assert not report.has_problems  # partial is a caveat, not a failure
+
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_missing_repo_stops_before_discovery(self, mock_pr, mock_main, monkeypatch):
+        def missing(repo_id, api=None):
+            raise DatasetError(f"Dataset repo '{repo_id}' was not found on the Hub")
+
+        monkeypatch.setattr("ocr_bench.integrity.require_dataset_repo", missing)
+        with pytest.raises(DatasetError, match="'user/missing' was not found"):
+            audit_repo("user/missing")
+        mock_main.assert_not_called()
+        mock_pr.assert_not_called()
 
     @patch("ocr_bench.integrity.load_flat_dataset")
     @patch("ocr_bench.integrity.discover_configs")

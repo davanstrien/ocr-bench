@@ -137,6 +137,14 @@ class TestScreenOutputs:
         assert models["b"].peer_pages == 1
         assert models["b"].pages == 2
 
+    def test_number_cells_count_as_empty_output(self):
+        # A number in an OCR column used to crash is_sentinel.
+        texts = {name: [_prose(400, seed)] for seed, name in enumerate("abc")}
+        texts["d"] = [12345]
+        models = _by_name(_screen(texts))
+        assert models["d"].pages == 1
+        assert models["d"].empty_on_text_rows == [0]
+
     def test_peer_agreement_orders_models(self):
         page = _prose(500, 1)
         texts = {"a": [page], "b": [page], "c": [page + " extra"], "d": [_prose(500, 2)]}

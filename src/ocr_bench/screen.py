@@ -34,7 +34,7 @@ from dataclasses import asdict, dataclass, field
 from rapidfuzz.distance import Levenshtein
 from rapidfuzz.process import cdist
 
-from ocr_bench.judge import is_sentinel, normalize_for_judge
+from ocr_bench.judge import is_sentinel, normalize_for_judge, ocr_text
 
 # A loop sits at the end of an output, so only the tail is compressed. Text
 # shorter than LOOP_MIN_CHARS is too short to measure this way.
@@ -245,7 +245,7 @@ def screen_outputs(
     for name in names:
         column: list[str | None] = []
         for value in texts[name]:
-            raw = value or ""
+            raw = ocr_text(value)  # a value that is not a string counts as empty
             if is_sentinel(raw):
                 column.append(None)
             else:

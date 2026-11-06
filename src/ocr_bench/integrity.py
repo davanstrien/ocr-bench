@@ -21,8 +21,9 @@ from ocr_bench.dataset import (
     discover_configs,
     discover_pr_configs,
     load_flat_dataset,
+    require_dataset_repo,
 )
-from ocr_bench.judge import MAX_OCR_TEXT_LENGTH, is_sentinel, normalize_for_judge
+from ocr_bench.judge import MAX_OCR_TEXT_LENGTH, is_sentinel, normalize_for_judge, ocr_text
 from ocr_bench.screen import MIN_MODELS, ScreenReport, screen_outputs
 
 # A model with more than this fraction of error sentinels is flagged: the run
@@ -94,13 +95,15 @@ def compute_column_stats(
     """Compute :class:`ColumnStats` for one column's OCR values.
 
     Rows are partitioned into empty / sentinel / short / normal (non-overlapping).
-    Length statistics use the same normalized-or-raw representation that the
-    judge caps, so audit truncation exposure matches the selected text mode.
+    A value that is not a string counts as empty, as in the judge (see
+    :func:`ocr_bench.judge.ocr_text`). Length statistics use the same
+    normalized-or-raw representation that the judge caps, so audit truncation
+    exposure matches the selected text mode.
     """
     n_empty = n_sentinel = n_short = 0
     lengths: list[int] = []
     for t in texts:
-        s = t or ""
+        s = ocr_text(t)
         measured = normalize_for_judge(s) if normalize else s
         lengths.append(len(measured))
         stripped = measured.strip()
@@ -332,6 +335,7 @@ def audit_repo(
     if judge_text_mode not in {"normalized", "raw"}:
         raise ValueError("judge_text_mode must be 'normalized' or 'raw'")
     normalize = judge_text_mode == "normalized"
+    require_dataset_repo(repo_id, api=api)
 
     duplicate_prs: dict[str, list[int]] = {}
     superseded_prs: dict[str, list[int]] = {}

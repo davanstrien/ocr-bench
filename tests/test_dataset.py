@@ -5,11 +5,13 @@ from __future__ import annotations
 import io
 import json
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from datasets import Dataset
 from datasets import Image as HFImage
+from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
 from PIL import Image
 
 from ocr_bench.dataset import (
@@ -24,6 +26,7 @@ from ocr_bench.dataset import (
     find_alignment_mismatch,
     load_config_dataset,
     load_flat_dataset,
+    require_dataset_repo,
     shared_alignment_keys,
 )
 
@@ -922,6 +925,45 @@ class TestLoadFlatDataset:
 
         with pytest.raises(DatasetError, match="Column 'missing' not found"):
             load_flat_dataset("repo/id", columns=["missing"])
+
+    @patch("ocr_bench.dataset.load_dataset")
+    def test_empty_split_raises_a_clear_error(self, mock_load):
+        # Before, discover_ocr_columns raised IndexError on inference_info[0].
+        info = json.dumps({"column_name": "ocr_out", "model_id": "model-x"})
+        empty = Dataset.from_dict({"image": [None], "ocr_out": ["t"], "inference_info": [info]})
+        mock_load.return_value = empty.select([])
+
+        with pytest.raises(DatasetError, match=r"repo/id \(split 'test'\) has no rows"):
+            load_flat_dataset("repo/id", split="test")
+
+
+def _hub_error(error_class, repo_id):
+    response = SimpleNamespace(status_code=404, headers={}, request=None)
+    return error_class(f"{repo_id} not found", response=response)
+
+
+class TestRequireDatasetRepo:
+    def test_existing_repo_passes(self):
+        api = MagicMock()
+        require_dataset_repo("user/data", api=api)
+        api.repo_info.assert_called_once_with("user/data", repo_type="dataset")
+
+    def test_missing_repo_names_the_repo_and_its_type(self):
+        api = MagicMock()
+        api.repo_info.side_effect = _hub_error(RepositoryNotFoundError, "user/missing")
+        with pytest.raises(DatasetError) as exc_info:
+            require_dataset_repo("user/missing", api=api)
+        message = str(exc_info.value)
+        assert "Dataset repo 'user/missing' was not found on the Hub" in message
+        assert "repo type: dataset" in message
+        assert "hf auth login" in message
+        assert "discussions" not in message
+
+    def test_gated_repo_error_is_not_reported_as_missing(self):
+        api = MagicMock()
+        api.repo_info.side_effect = _hub_error(GatedRepoError, "user/gated")
+        with pytest.raises(GatedRepoError):
+            require_dataset_repo("user/gated", api=api)
 
 
 def test_discover_pr_configs_reports_ignored_duplicates():

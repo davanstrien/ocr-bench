@@ -334,7 +334,7 @@ def launch_ocr_jobs(
 
     token = get_token()
     if not token:
-        raise RuntimeError("No HF token found. Log in with `hf login` or set HF_TOKEN.")
+        raise RuntimeError("No HF token found. Log in with `hf auth login` or set HF_TOKEN.")
 
     selected = models or DEFAULT_MODELS
     for slug in selected:
