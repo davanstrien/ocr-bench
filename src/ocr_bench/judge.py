@@ -222,8 +222,6 @@ CRITERIA_PROFILES: dict[str, str] = {
     "table-fidelity": _TABLE_FIDELITY_PROMPT,
     "body-text": _BODY_TEXT_PROMPT,
 }
-# Backward-compatible name for callers that imported the original single prompt.
-PAIRWISE_PROMPT = CRITERIA_PROFILES[DEFAULT_CRITERIA]
 
 
 def prompt_hash(prompt_template: str) -> str:
@@ -490,7 +488,7 @@ def _truncation_note(label: str) -> str:
 
 
 # Anchor for inserting the note(s): the fixed response-format instruction that
-# closes PAIRWISE_PROMPT. Inserting before it places the note(s) after both
+# closes the built-in criteria prompts. Inserting before it places the note(s) after both
 # output blocks and keeps the JSON instruction last, without editing the
 # (byte-stable) prompt constant.
 _JSON_INSTRUCTION_ANCHOR = "Respond with JSON only (no markdown fences"

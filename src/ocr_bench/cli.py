@@ -60,7 +60,6 @@ from ocr_bench.judge import (
     Comparison,
     _normalize_pair,
     build_comparisons,
-    is_sentinel,
     prompt_hash,
     sample_indices,
     validate_prompt_template,
@@ -944,21 +943,6 @@ def _previous_judge_hint(existing_meta_rows: list[dict], requested_models: list[
     )
 
 
-def _filter_existing_sentinel_comparisons(
-    results: list[ComparisonResult],
-) -> tuple[list[ComparisonResult], int]:
-    """Remove historical comparisons where an error sentinel competed as OCR.
-
-    Results repos created before issue #46 was fixed can contain verdicts for
-    strings such as ``[OCR ERROR]``. Reusing those rows would preserve the
-    poisoned ELO and add their pair/sample keys to the resume skip map, so the
-    corrected comparison builder would never get a chance to reconsider them.
-    Filter them before either operation and report how many were discarded.
-    """
-    kept = [r for r in results if not (is_sentinel(r.text_a) or is_sentinel(r.text_b))]
-    return kept, len(results) - len(kept)
-
-
 def _refresh_viewer_space(results_repo: str) -> None:
     """Keep the deployed ``{results}-viewer`` Space in sync after a judge run.
 
@@ -1085,38 +1069,6 @@ def _resolve_criteria(args: argparse.Namespace) -> tuple[str, str, str]:
     name = criteria or DEFAULT_CRITERIA
     template = CRITERIA_PROFILES[name]
     return name, template, prompt_hash(template)
-
-
-def _existing_criteria_provenance(meta_rows: list[dict]) -> tuple[str, str]:
-    """The (criteria profile, prompt hash) the existing comparisons were judged under.
-
-    Reads the LAST metadata row. Pre-#44 rows lack these columns (or carry None
-    after schema alignment); treat them as the ``default`` profile — historically
-    accurate, since the default profile's prompt is byte-identical to the
-    pre-#44 hardcoded prompt. Used to block mixing criteria rubrics on one board.
-    """
-    default_hash = prompt_hash(CRITERIA_PROFILES[DEFAULT_CRITERIA])
-    if not meta_rows:
-        return DEFAULT_CRITERIA, default_hash
-    last = meta_rows[-1]
-    return (last.get("criteria") or DEFAULT_CRITERIA, last.get("prompt_hash") or default_hash)
-
-
-def _existing_preprocessing_provenance(meta_rows: list[dict]) -> tuple[str, int, int]:
-    """Return text mode, text cap, and image cap used by existing comparisons.
-
-    Results written before #45 used raw text with the original fixed caps. Treat
-    missing metadata as that legacy configuration so the new normalized default
-    cannot silently mix old raw verdicts with newly normalized ones.
-    """
-    if not meta_rows:
-        return "raw", MAX_OCR_TEXT_LENGTH, MAX_IMAGE_DIM
-    last = meta_rows[-1]
-    return (
-        last.get("judge_text_mode") or "raw",
-        int(last.get("max_ocr_text_len") or MAX_OCR_TEXT_LENGTH),
-        int(last.get("judge_image_dim") or MAX_IMAGE_DIM),
-    )
 
 
 def _print_passed_over_prs(
@@ -1495,10 +1447,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
         # adaptive runs, where a checkpoint can persist a pair at (say) 3/50
         # samples — a pair-level skip would freeze it there forever.
         # --full-rejudge forces a clean re-run (ignores all existing).
-        loaded_existing = load_existing_comparisons(results_repo)
-        existing_results, discarded_sentinels = _filter_existing_sentinel_comparisons(
-            loaded_existing
-        )
+        existing_results = load_existing_comparisons(results_repo)
         # Comparisons outside the rankable current grid cannot enter this ELO
         # fit, but remain part of the durable Hub history and are re-published
         # alongside current-grid rows.
@@ -1513,21 +1462,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
             if result.model_a in current_models and result.model_b in current_models
         ]
 
-        # Preserve the append-only metadata history even when integrity filtering
-        # removes every old comparison.
+        # The metadata config is an append-only run history.
         existing_meta_rows = load_existing_metadata(results_repo)
 
-        if discarded_sentinels:
-            console.print(
-                f"\n[bold yellow]Discarded {discarded_sentinels} existing comparison(s) "
-                "containing OCR error sentinels.[/bold yellow] They will not affect "
-                "ELO or the resume skip map."
-            )
-            logger.warning(
-                "discarded_existing_sentinel_comparisons",
-                repo=results_repo,
-                n=discarded_sentinels,
-            )
         if preserved_out_of_grid_results:
             console.print(
                 f"[yellow]Preserving {len(preserved_out_of_grid_results)} historical "
@@ -1541,63 +1478,12 @@ def cmd_judge(args: argparse.Namespace) -> None:
             )
 
         if existing_results or preserved_out_of_grid_results:
-            # Provenance-stamped comparison rows are authoritative. This matters
-            # after a changed --full-rejudge checkpoints but dies before it can
-            # append matching metadata: the latest metadata row still describes
-            # the preceding completed run. Apply the narrower metadata diagnostics
-            # only to legacy unstamped comparisons.
-            existing_hashes = {result.provenance_hash for result in existing_results}
-            if "" in existing_hashes and existing_meta_rows:
-                prev_criteria, prev_hash = _existing_criteria_provenance(existing_meta_rows)
-                if prev_hash != criteria_prompt_hash:
-                    if prev_criteria.startswith("custom:"):
-                        match_hint = (
-                            f"re-supply the same custom prompt file (recorded as "
-                            f"'{prev_criteria}', prompt {prev_hash})"
-                        )
-                    else:
-                        match_hint = f"re-run with [bold]--criteria {prev_criteria}[/bold]"
-                    console.print(
-                        f"[red]Error:[/red] criteria mismatch — "
-                        f"[bold]{results_repo}[/bold] was judged under criteria "
-                        f"'[bold]{prev_criteria}[/bold]' (prompt {prev_hash}), but "
-                        f"this run requested '[bold]{criteria}[/bold]' "
-                        f"(prompt {criteria_prompt_hash}). Mixing rubrics on one "
-                        f"leaderboard would produce meaningless rankings and "
-                        f"mislabeled metadata.\nTo match the existing results, "
-                        f"{match_hint}; or use [bold]--full-rejudge[/bold] to "
-                        f"discard them and re-judge everything under '{criteria}'."
-                    )
-                    sys.exit(1)
-
-                previous_preprocessing = _existing_preprocessing_provenance(
-                    existing_meta_rows
-                )
-                requested_preprocessing = (
-                    args.judge_text_mode,
-                    args.max_ocr_text_len,
-                    args.judge_image_dim,
-                )
-                if previous_preprocessing != requested_preprocessing:
-                    prev_mode, prev_text_cap, prev_image_cap = previous_preprocessing
-                    console.print(
-                        f"[red]Error:[/red] judge preprocessing mismatch — "
-                        f"[bold]{results_repo}[/bold] was judged with "
-                        f"text_mode={prev_mode}, max_ocr_text_len={prev_text_cap}, "
-                        f"judge_image_dim={prev_image_cap}, but this run requested "
-                        f"text_mode={args.judge_text_mode}, "
-                        f"max_ocr_text_len={args.max_ocr_text_len}, "
-                        f"judge_image_dim={args.judge_image_dim}. Mixing these "
-                        "verdicts would make the leaderboard incomparable. Re-run "
-                        "with matching settings, or use "
-                        "[bold]--full-rejudge[/bold]."
-                    )
-                    sys.exit(1)
-
             # Every reused row must have been produced under the exact same
             # source/config/split/fingerprint, judge or jury, sample selection,
             # prompt, and preprocessing. Checkpoint rows carry this hash too,
             # so an interrupted first run can resume before final metadata exists.
+            # Rows without a hash cannot be checked, so they need --full-rejudge.
+            existing_hashes = {result.provenance_hash for result in existing_results}
             if "" in existing_hashes:
                 console.print(
                     f"[red]Error:[/red] existing comparisons in "
@@ -1648,11 +1534,6 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     "\nNo existing comparisons match the current model grid; "
                     "starting its judge run while preserving out-of-grid history."
                 )
-        elif discarded_sentinels:
-            console.print(
-                "\nNo reusable existing comparisons remain after integrity filtering — "
-                "rebuilding from the current OCR outputs."
-            )
         else:
             console.print("\nNo existing comparisons found — full judge run.")
 

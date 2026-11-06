@@ -505,7 +505,6 @@ def publish_results(
 
     Configs:
       - (default): Leaderboard table — ``load_dataset("repo")`` returns this.
-      - ``leaderboard``: Same table, named config (backward compat for viewer).
       - ``comparisons``: Full comparison history. The board log contains the
         current model grid; ``preserved_comparisons`` may carry rows for models
         intentionally excluded from this fit so a subset run cannot erase them.
@@ -532,7 +531,7 @@ def publish_results(
         comp_ds.push_to_hub(repo_id, config_name="comparisons")
         logger.info("published_comparisons", repo=repo_id, n=len(comparison_rows))
 
-    # Leaderboard — dual push: default config + named config. Size-aware
+    # Leaderboard — the default config. Size-aware
     # preferences are derived from the final board + direct pair counts and
     # stored as annotations only; they never alter ELO or row order.
     decisions = classify_adjacent_pairs(
@@ -550,7 +549,6 @@ def publish_results(
     )
     lb_ds = Dataset.from_list(rows)
     lb_ds.push_to_hub(repo_id)
-    lb_ds.push_to_hub(repo_id, config_name="leaderboard")
     logger.info("published_leaderboard", repo=repo_id, n=len(rows))
 
     # Metadata — append-only. Align all rows to the union of keys so a newer
@@ -583,11 +581,7 @@ def _build_readme(
     """Build a dataset card README with the leaderboard table."""
     has_ci = bool(board.elo_ci)
     source_short = metadata.source_dataset.split("/")[-1]
-    judges = json.loads(
-        metadata.judge_models
-        if isinstance(metadata.judge_models, str)
-        else json.dumps(metadata.judge_models)
-    )
+    judges = list(metadata.judge_models)
     judge_str = ", ".join(j.split("/")[-1] for j in judges) if judges else "N/A"
     # Break the leaderboard's comparison log down by how each verdict was
     # reached: judged pairs vs identical-output auto-ties (agreement "auto").
@@ -602,16 +596,10 @@ def _build_readme(
     # Models that emitted error sentinels instead of transcriptions. These
     # outputs were excluded from judging, so a high count means the run failed
     # on this corpus — the card must not let it read as "ranked low" (issue #46).
-    failed = metadata.failed_outputs
-    if isinstance(failed, str):
-        failed = json.loads(failed) if failed else {}
     failed_outputs: dict[str, int] = {
-        model: count for model, count in (failed or {}).items() if count
+        model: count for model, count in (metadata.failed_outputs or {}).items() if count
     }
-    failed_model_values = metadata.failed_models
-    if isinstance(failed_model_values, str):
-        failed_model_values = json.loads(failed_model_values) if failed_model_values else []
-    failed_models = set(failed_model_values or [])
+    failed_models = set(metadata.failed_models or [])
 
     # The card license describes the published results DATA (which embeds
     # OCR text derived from the source dataset), not this tool — so there is
@@ -635,10 +623,6 @@ def _build_readme(
         "    data_files:",
         "      - split: train",
         "        path: comparisons/train-*.parquet",
-        "  - config_name: leaderboard",
-        "    data_files:",
-        "      - split: train",
-        "        path: leaderboard/train-*.parquet",
         "  - config_name: metadata",
         "    data_files:",
         "      - split: train",
@@ -743,8 +727,6 @@ def _build_readme(
             lines.append(f"| {safe_model} | {count} |")
 
     coverage = metadata.model_coverage
-    if isinstance(coverage, str):
-        coverage = json.loads(coverage) if coverage else {}
     if coverage:
         sampled = max(entry.get("sampled_pages", 0) for entry in coverage.values())
         short_pages = (

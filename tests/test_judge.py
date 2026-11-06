@@ -8,7 +8,6 @@ from PIL import Image
 from ocr_bench.judge import (
     CRITERIA_PROFILES,
     DEFAULT_CRITERIA,
-    PAIRWISE_PROMPT,
     Comparison,
     build_comparisons,
     build_messages,
@@ -401,11 +400,12 @@ class TestBuildPrompt:
         assert "Output B above was truncated" in prompt
         assert "Output A above was truncated" not in prompt
 
-    def test_pairwise_prompt_constant_unmodified(self):
+    def test_default_prompt_constant_unmodified(self):
         # The note is composed after .format(); the prompt constant stays
         # byte-stable (no truncation machinery leaked into it).
-        assert "Evaluator note" not in PAIRWISE_PROMPT
-        assert "truncated" not in PAIRWISE_PROMPT
+        default_prompt = CRITERIA_PROFILES[DEFAULT_CRITERIA]
+        assert "Evaluator note" not in default_prompt
+        assert "truncated" not in default_prompt
 
     def test_truncation_flags_track_original_order_when_swapped(self):
         # A is long (truncated), B is short. Even when displayed swapped, the

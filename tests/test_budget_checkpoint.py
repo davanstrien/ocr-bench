@@ -776,15 +776,44 @@ class TestResume:
         assert judge.judged == 4
         assert all("model-c" in pair for pair in judge.pairs_seen)
 
-    @pytest.mark.parametrize("change", ["ocr_text", "judge", "split"])
-    def test_changed_inputs_reject_real_checkpoint_provenance(self, change, capsys):
+    @pytest.mark.parametrize(
+        "change",
+        [
+            "ocr_text",
+            "judge",
+            "split",
+            "criteria",
+            "criteria_file",
+            "text_cap",
+            "text_mode",
+            "image_dim",
+        ],
+    )
+    def test_changed_inputs_reject_real_checkpoint_provenance(
+        self, change, capsys, tmp_path
+    ):
         ds, ocr = make_ds(n=2, models=("a", "b"))
         flags = ["--no-adaptive", "--checkpoint-every", "0"]
+        rubric = tmp_path / "rubric.txt"
+        if change == "criteria_file":
+            rubric.write_text("Custom rubric. A={ocr_text_a} B={ocr_text_b}")
+            flags += ["--criteria-file", str(rubric)]
         _, published, _ = _run_judge(flags, ds, ocr, stamp_existing_provenance=False)
         if change == "ocr_text":
             ds._columns["col_a"][0] = "Changed OCR transcription for the same source page"
         elif change == "judge":
             flags += ["--model", "different-judge"]
+        elif change == "criteria":
+            flags += ["--criteria", "table-fidelity"]
+        elif change == "criteria_file":
+            # Same file name, new content: the prompt hash changes.
+            rubric.write_text("A NEW rubric. A={ocr_text_a} B={ocr_text_b}")
+        elif change == "text_cap":
+            flags += ["--max-ocr-text-len", "5000"]
+        elif change == "text_mode":
+            flags += ["--judge-text-mode", "raw"]
+        elif change == "image_dim":
+            flags += ["--judge-image-dim", "2048"]
         else:
             flags += ["--split", "validation"]
         judge = FakeJudge()
@@ -944,37 +973,6 @@ class TestResume:
         assert judge.judged == 1
         m_publish.assert_called_once()
 
-    def test_resume_discards_sentinel_comparison_and_rejudges_sample(self, capsys):
-        # Results produced before issue #46 can contain a verdict where an OCR
-        # error sentinel competed as transcription text. It must be removed from
-        # both the ELO input and the resume skip map, allowing a now-fixed output
-        # for the same pair/sample to be judged.
-        ds, ocr = make_ds(n=1, models=("a", "b"))
-        existing = [
-            ComparisonResult(
-                sample_idx=0,
-                model_a="model-a",
-                model_b="model-b",
-                winner="A",
-                text_a="OCR transcription output for model a, sample 0",
-                text_b="[OCR ERROR]",
-            )
-        ]
-
-        judge, m_publish, _ = _run_judge(
-            ["--no-adaptive", "--checkpoint-every", "0"],
-            ds,
-            ocr,
-            existing=existing,
-        )
-
-        assert judge.judged == 1
-        assert (("model-a", "model-b"), 0) in judge.pair_samples
-        board = m_publish.call_args.args[1]
-        assert len(board.comparison_log) == 1
-        assert board.comparison_log[0]["text_b"] != "[OCR ERROR]"
-        assert "Discarded 1 existing comparison" in capsys.readouterr().out
-
     def test_resume_tops_up_partial_pairs(self):
         # A prior (checkpointed) run judged (model-a, model-b) on samples 0-3
         # only. Relaunch WITHOUT --full-rejudge: (pair, sample)-level skip means
@@ -1035,19 +1033,12 @@ class TestResume:
         assert ("model-a", "model-b") in judge.pairs_seen
 
 
-class TestCriteriaProvenanceGuard:
-    """cmd_judge must refuse to mix criteria rubrics on one results repo (#44 review).
-
-    Judging an existing results repo under a different --criteria than its
-    comparisons were scored with would merge incompatible rubrics into one ELO
-    board and mislabel the metadata. The guard exits before judging/publishing;
-    --full-rejudge (which discards existing results) is the only safe rubric swap.
-    """
+class TestFullRejudge:
+    """--full-rejudge never loads existing results, so changed settings run."""
 
     _DEFAULT_HASH = prompt_hash(CRITERIA_PROFILES["default"])
-    _TABLE_HASH = prompt_hash(CRITERIA_PROFILES["table-fidelity"])
 
-    def _run(self, argv_extra, *, existing, existing_meta, legacy_preprocessing=False):
+    def _run(self, argv_extra, *, existing, existing_meta):
         """Drive cmd_judge with a 2-model dataset, catching a guard SystemExit."""
         ds, ocr = make_ds(n=4, models=("a", "b"))
         judge = FakeJudge()
@@ -1060,16 +1051,6 @@ class TestCriteriaProvenanceGuard:
         for result in existing:
             result.col_a = result.col_a or "col_a"
             result.col_b = result.col_b or "col_b"
-        if not legacy_preprocessing:
-            existing_meta = [
-                {
-                    "judge_text_mode": "normalized",
-                    "max_ocr_text_len": 2500,
-                    "judge_image_dim": 1024,
-                    **row,
-                }
-                for row in existing_meta
-            ]
         exit_code: int | str | None = None
         with (
             patch.object(cli, "load_flat_dataset", return_value=(ds, ocr)),
@@ -1086,74 +1067,10 @@ class TestCriteriaProvenanceGuard:
         return judge, m_publish, exit_code
 
     def _existing_one_pair(self):
-        # (model-a, model-b) judged on sample 0 only, so a matching-criteria run
-        # still has samples 1-3 to top up (proves it proceeds to judge+publish).
+        # (model-a, model-b) judged on sample 0 only.
         return [
             ComparisonResult(sample_idx=0, model_a="model-a", model_b="model-b", winner="A")
         ]
-
-    def test_legacy_raw_results_block_normalized_incremental_run(self):
-        judge, m_publish, code = self._run(
-            [],
-            existing=self._existing_one_pair(),
-            existing_meta=[{"criteria": "default", "prompt_hash": self._DEFAULT_HASH}],
-            legacy_preprocessing=True,
-        )
-        assert code == 1
-        assert judge.judged == 0
-        m_publish.assert_not_called()
-
-    def test_legacy_raw_results_still_require_one_full_rejudge(self):
-        judge, m_publish, code = self._run(
-            ["--judge-text-mode", "raw"],
-            existing=self._existing_one_pair(),
-            existing_meta=[{"criteria": "default", "prompt_hash": self._DEFAULT_HASH}],
-            legacy_preprocessing=True,
-        )
-        assert code == 1
-        assert judge.judged == 0
-        m_publish.assert_not_called()
-
-    def test_changed_text_cap_blocks_incremental_run(self):
-        judge, m_publish, code = self._run(
-            ["--max-ocr-text-len", "5000"],
-            existing=self._existing_one_pair(),
-            existing_meta=[{"criteria": "default", "prompt_hash": self._DEFAULT_HASH}],
-        )
-        assert code == 1
-        assert judge.judged == 0
-        m_publish.assert_not_called()
-
-    def test_mismatch_exits_without_judging_or_publishing(self):
-        judge, m_publish, code = self._run(
-            ["--criteria", "table-fidelity"],
-            existing=self._existing_one_pair(),
-            existing_meta=[{"criteria": "default", "prompt_hash": self._DEFAULT_HASH}],
-        )
-        assert code == 1
-        assert judge.judged == 0  # exited before any judge call
-        m_publish.assert_not_called()
-
-    def test_pre_44_none_rows_require_one_full_rejudge(self):
-        # Matching legacy metadata is insufficient to prove source identity.
-        judge, m_publish, code = self._run(
-            [],  # no --criteria → default
-            existing=self._existing_one_pair(),
-            existing_meta=[{"source_dataset": "user/ds"}],
-        )
-        assert code == 1
-        assert judge.judged == 0
-        m_publish.assert_not_called()
-
-    def test_matching_legacy_criteria_still_require_one_full_rejudge(self):
-        judge, m_publish, code = self._run(
-            ["--criteria", "table-fidelity"],
-            existing=self._existing_one_pair(),
-            existing_meta=[{"criteria": "table-fidelity", "prompt_hash": self._TABLE_HASH}],
-        )
-        assert code == 1
-        assert judge.judged == 0
-        m_publish.assert_not_called()
 
     def test_full_rejudge_bypasses_guard(self):
         # Metadata says default, run requests table-fidelity — normally blocked,
@@ -1166,33 +1083,3 @@ class TestCriteriaProvenanceGuard:
         assert code is None
         m_publish.assert_called_once()
         assert m_publish.call_args.args[2].criteria == "table-fidelity"
-
-    def test_same_custom_file_still_requires_one_full_rejudge(self, tmp_path):
-        # The matching prompt gives a useful legacy diagnostic, but it cannot
-        # establish source identity without comparison-row provenance.
-        f = tmp_path / "rubric.txt"
-        f.write_text("Custom rubric. A={ocr_text_a} B={ocr_text_b}")
-        file_hash = prompt_hash(f.read_text())
-        judge, m_publish, code = self._run(
-            ["--criteria-file", str(f)],
-            existing=self._existing_one_pair(),
-            existing_meta=[{"criteria": "custom:rubric.txt", "prompt_hash": file_hash}],
-        )
-        assert code == 1
-        assert judge.judged == 0
-        m_publish.assert_not_called()
-
-    def test_different_custom_content_blocks(self, tmp_path, capsys):
-        # Same basename, DIFFERENT content → different hash → blocked, and the
-        # error tells the user to re-supply the same file (not a --criteria name).
-        f = tmp_path / "rubric.txt"
-        f.write_text("A NEW rubric. A={ocr_text_a} B={ocr_text_b}")
-        judge, m_publish, code = self._run(
-            ["--criteria-file", str(f)],
-            existing=self._existing_one_pair(),
-            existing_meta=[{"criteria": "custom:rubric.txt", "prompt_hash": "0badc0ffee00"}],
-        )
-        assert code == 1
-        assert judge.judged == 0
-        m_publish.assert_not_called()
-        assert "custom prompt file" in capsys.readouterr().out

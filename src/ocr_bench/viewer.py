@@ -35,22 +35,15 @@ def load_results(repo_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any
     """Load leaderboard and comparisons from a Hub results dataset.
 
     Resolves the repo's latest revision up front and pins every load to it, so
-    a warm cache never serves stale results. Tries the default config first
-    (new repos), then falls back to the named ``leaderboard`` config (old repos).
+    a warm cache never serves stale results.
 
     Returns:
         (leaderboard_rows, comparison_rows)
     """
     revision = _latest_revision(repo_id)
 
-    try:
-        leaderboard_ds = load_dataset(repo_id, split="train", revision=revision)
-        leaderboard_rows = [dict(row) for row in leaderboard_ds]
-    except Exception:
-        leaderboard_ds = load_dataset(
-            repo_id, name="leaderboard", split="train", revision=revision
-        )
-        leaderboard_rows = [dict(row) for row in leaderboard_ds]
+    leaderboard_ds = load_dataset(repo_id, split="train", revision=revision)
+    leaderboard_rows = [dict(row) for row in leaderboard_ds]
 
     try:
         comparisons_ds = load_dataset(
@@ -197,60 +190,3 @@ def _filter_comparisons(
             if c.get("model_a") == model_filter or c.get("model_b") == model_filter
         ]
     return filtered
-
-
-def _winner_badge(winner: str) -> str:
-    """Return a badge string for the winner."""
-    if winner == "A":
-        return "Winner: A"
-    elif winner == "B":
-        return "Winner: B"
-    else:
-        return "Tie"
-
-
-def _model_label(model: str, col: str) -> str:
-    """Format model name with optional column name. Avoids empty parens."""
-    if col:
-        return f"{model} ({col})"
-    return model
-
-
-def _build_pair_summary(comparisons: list[dict[str, Any]]) -> str:
-    """Build a win/loss summary string for each model pair."""
-    from collections import Counter
-
-    pair_counts: dict[tuple[str, str], Counter[str]] = {}
-    for c in comparisons:
-        ma = c.get("model_a", "")
-        mb = c.get("model_b", "")
-        winner = c.get("winner", "tie")
-        key = (ma, mb) if ma <= mb else (mb, ma)
-        if key not in pair_counts:
-            pair_counts[key] = Counter()
-        # Track from perspective of first model in sorted pair
-        if winner == "A":
-            actual_winner = ma
-        elif winner == "B":
-            actual_winner = mb
-        else:
-            actual_winner = "tie"
-
-        if actual_winner == key[0]:
-            pair_counts[key]["W"] += 1
-        elif actual_winner == key[1]:
-            pair_counts[key]["L"] += 1
-        else:
-            pair_counts[key]["T"] += 1
-
-    if not pair_counts:
-        return ""
-
-    parts = []
-    for (ma, mb), counts in sorted(pair_counts.items()):
-        short_a = ma.split("/")[-1] if "/" in ma else ma
-        short_b = mb.split("/")[-1] if "/" in mb else mb
-        wins, losses, ties = counts["W"], counts["L"], counts["T"]
-        parts.append(f"**{short_a}** vs **{short_b}**: {wins}W {losses}L {ties}T")
-    return " | ".join(parts)
-

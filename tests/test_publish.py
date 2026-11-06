@@ -598,7 +598,7 @@ class TestPublishCheckpoint:
 class TestPublishResults:
     @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.Dataset")
-    def test_publishes_four_configs(self, mock_ds_cls, mock_api_cls):
+    def test_publishes_three_configs(self, mock_ds_cls, mock_api_cls):
         mock_ds = mock_ds_cls.from_list.return_value
         board = _make_board()
         meta = EvalMetadata(
@@ -611,17 +611,15 @@ class TestPublishResults:
         )
         publish_results("user/results", board, meta)
 
-        # 4 pushes: comparisons, default leaderboard, named leaderboard, metadata
-        assert mock_ds.push_to_hub.call_count == 4
+        # 3 pushes: comparisons, default leaderboard, metadata
+        assert mock_ds.push_to_hub.call_count == 3
         calls = mock_ds.push_to_hub.call_args_list
         # comparisons
         assert calls[0].kwargs["config_name"] == "comparisons"
         # default leaderboard (no config_name kwarg)
         assert calls[1] == (("user/results",),)
-        # named leaderboard
-        assert calls[2].kwargs["config_name"] == "leaderboard"
         # metadata
-        assert calls[3].kwargs["config_name"] == "metadata"
+        assert calls[2].kwargs["config_name"] == "metadata"
         # README uploaded
         mock_api_cls.return_value.upload_file.assert_called_once()
 
@@ -704,8 +702,8 @@ class TestPublishResults:
         )
         publish_results("user/results", board, meta)
 
-        # default leaderboard + named leaderboard + metadata = 3
-        assert mock_ds_cls.from_list.return_value.push_to_hub.call_count == 3
+        # default leaderboard + metadata = 2
+        assert mock_ds_cls.from_list.return_value.push_to_hub.call_count == 2
 
     @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.Dataset")
@@ -1139,16 +1137,3 @@ class TestBuildReadme:
         readme = _build_readme("user/results", rows, board, self._metadata_with_failed({}))
         assert "## ⚠ Failed outputs" not in readme
         assert "⚠" not in readme
-
-    def test_failed_outputs_accepts_json_string(self):
-        """Stored metadata may carry failed_outputs as a JSON string."""
-        import json
-
-        from ocr_bench.publish import _build_readme
-
-        board = self._board_two_models()
-        rows = build_leaderboard_rows(board)
-        readme = _build_readme(
-            "user/results", rows, board, self._metadata_with_failed(json.dumps({"model-b": 7}))
-        )
-        assert "| model-b | 7 |" in readme

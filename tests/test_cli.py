@@ -13,8 +13,6 @@ from openai import OpenAIError
 from ocr_bench import cli
 from ocr_bench.cli import (
     _convert_results,
-    _existing_criteria_provenance,
-    _existing_preprocessing_provenance,
     _merge_auto_ties,
     _refresh_viewer_space,
     _resolve_criteria,
@@ -25,7 +23,7 @@ from ocr_bench.cli import (
 from ocr_bench.dataset import AlignmentResult, DatasetError
 from ocr_bench.elo import compute_elo
 from ocr_bench.integrity import AuditReport, ColumnStats, ConfigAudit
-from ocr_bench.judge import CRITERIA_PROFILES, DEFAULT_CRITERIA, Comparison, prompt_hash
+from ocr_bench.judge import CRITERIA_PROFILES, Comparison, prompt_hash
 from ocr_bench.screen import ModelScreen, ScreenReport
 
 
@@ -650,59 +648,6 @@ class TestResolveResultsRepo:
     def test_no_publish_overrides_explicit(self):
         result = _resolve_results_repo("user/my-dataset", "user/custom", True)
         assert result is None
-
-
-class TestExistingPreprocessingProvenance:
-    def test_missing_metadata_is_legacy_raw(self):
-        assert _existing_preprocessing_provenance([]) == ("raw", 2500, 1024)
-        assert _existing_preprocessing_provenance([{"source_dataset": "d"}]) == (
-            "raw",
-            2500,
-            1024,
-        )
-
-    def test_reads_latest_recorded_settings(self):
-        rows = [
-            {"judge_text_mode": "raw", "max_ocr_text_len": 2500, "judge_image_dim": 1024},
-            {
-                "judge_text_mode": "normalized",
-                "max_ocr_text_len": 5000,
-                "judge_image_dim": 2048,
-            },
-        ]
-        assert _existing_preprocessing_provenance(rows) == ("normalized", 5000, 2048)
-
-    def test_aligned_none_values_use_legacy_defaults(self):
-        rows = [
-            {"judge_text_mode": None, "max_ocr_text_len": None, "judge_image_dim": None}
-        ]
-        assert _existing_preprocessing_provenance(rows) == ("raw", 2500, 1024)
-
-
-class TestExistingCriteriaProvenance:
-    """Reads the criteria/prompt_hash the existing comparisons were judged under."""
-
-    _DEFAULT_HASH = prompt_hash(CRITERIA_PROFILES[DEFAULT_CRITERIA])
-
-    def test_no_rows_is_default(self):
-        assert _existing_criteria_provenance([]) == (DEFAULT_CRITERIA, self._DEFAULT_HASH)
-
-    def test_reads_last_row(self):
-        rows = [
-            {"criteria": "default", "prompt_hash": self._DEFAULT_HASH},
-            {"criteria": "table-fidelity", "prompt_hash": "fe138e71ecc3"},
-        ]
-        assert _existing_criteria_provenance(rows) == ("table-fidelity", "fe138e71ecc3")
-
-    def test_none_values_treated_as_default(self):
-        # Post-alignment old rows carry explicit None for the new columns.
-        rows = [{"criteria": None, "prompt_hash": None}]
-        assert _existing_criteria_provenance(rows) == (DEFAULT_CRITERIA, self._DEFAULT_HASH)
-
-    def test_missing_keys_treated_as_default(self):
-        # Genuinely pre-#44 rows lack the columns entirely.
-        rows = [{"source_dataset": "d", "judge_models": "[]"}]
-        assert _existing_criteria_provenance(rows) == (DEFAULT_CRITERIA, self._DEFAULT_HASH)
 
 
 _AUTO_TIE = {"winner": "tie", "reason": "identical outputs — auto-tie", "agreement": "auto"}
