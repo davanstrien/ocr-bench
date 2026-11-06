@@ -5,19 +5,23 @@ both OCR outputs and the judge's reason. ``share`` reads that repo and writes
 ratings only to a different dataset repo. It never changes the visibility of
 an existing repo.
 
-Two checks run on the final file contents, before any Hub call:
+Three checks run on the final file contents, before any Hub call:
 
-1. Structure. Each file is one that ``share`` writes, each row has exactly the
-   allowed columns, and each string value is one the board is meant to show:
-   a model name, a slice name, a status or a setting.
-2. Page text. No aligned 32-character chunk of a compared output or a judge
-   reason occurs in any file. A copied fragment of 63 or more characters always
-   holds such a chunk, so it is always found. A chunk with fewer than 4 distinct
-   letters or digits is skipped: it is markup or layout (a markdown or HTML table
-   rule, dot leaders, a run of spaces), not page text, and the board's own tables
-   use the same markup.
+1. Structure. Each file is one that ``share`` writes. Each row has exactly the
+   allowed columns, and each string value is one the board is meant to show: a
+   model name, a slice label, a status or a setting. The README must be exactly
+   the card rendered from those checked rows and settings.
+2. Repo ids. No file names the results repo or the source dataset.
+3. Page text. No aligned 32-character chunk of a compared output or a judge
+   reason occurs in any file. A copied fragment of 63 or more characters holds
+   such a chunk. A chunk with fewer than 4 distinct letters or digits is skipped:
+   it is markup or layout (a markdown or HTML table rule, dot leaders, a run of
+   spaces), and the board's own tables use the same markup.
 
 If a check fails, :class:`PrivacyError` is raised and nothing is written.
+
+Slice labels and the alias are published as they are. Choose a slice column of
+labels that may be public (a document type, a decade).
 """
 
 from __future__ import annotations
@@ -30,11 +34,11 @@ from pathlib import Path
 
 import structlog
 from datasets import load_dataset
-from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
+from huggingface_hub import CommitOperationAdd, CommitOperationDelete, DatasetCard, HfApi
 from huggingface_hub.errors import RepositoryNotFoundError
 
 from ocr_bench import __version__
-from ocr_bench.dataset import DatasetError
+from ocr_bench.dataset import DatasetError, evaluation_input_fingerprints
 from ocr_bench.elo import MIN_PAGES_TO_RESOLVE, ComparisonResult, Leaderboard, compute_elo
 from ocr_bench.judge import sample_indices
 from ocr_bench.publish import (
@@ -61,7 +65,22 @@ BOARD_COLUMNS = (
     "status",
     "failed_outputs",
 )
-SLICE_BOARD_COLUMNS = ("slice", *BOARD_COLUMNS)
+# Error-placeholder counts are known per model for the whole sample only, so a
+# slice board does not repeat them. Its Pages column shows the pages it rests on.
+SLICE_BOARD_COLUMNS = (
+    "slice",
+    "rank",
+    "model",
+    "params",
+    "elo",
+    "elo_low",
+    "elo_high",
+    "pages",
+    "wins",
+    "losses",
+    "ties",
+    "win_pct",
+)
 SETTINGS_KEYS = (
     "alias",
     "judge_models",
@@ -72,10 +91,14 @@ SETTINGS_KEYS = (
     "judge_image_dim",
     "min_chars",
     "pages",
+    "seed",
+    "max_samples",
+    "adaptive_strategy",
     "comparisons",
     "auto_tied",
     "slice_column",
     "slices",
+    "slice_pages",
     "pages_not_in_a_slice_board",
     "method",
     "source_fingerprint",
@@ -87,7 +110,7 @@ SHARE_FILES = ("README.md", "overall.jsonl", "slices.jsonl", "board.json")
 STATUSES = ("ranked", "degraded", "failed")
 
 # A slice board needs as many pages as a resolved ranking does. A smaller slice
-# is left out, which also keeps a per-page column (a title) from being published.
+# is left out, which also keeps a per-page column (a page id) from being published.
 MIN_SLICE_PAGES = MIN_PAGES_TO_RESOLVE
 MAX_SLICES = 50
 MAX_LABEL_LENGTH = 64
@@ -120,7 +143,7 @@ class PrivateEvaluation:
 
 @dataclass
 class SharePlan:
-    """The files to publish, plus the private texts they are checked against."""
+    """The files to publish, plus the private values they are checked against."""
 
     alias: str
     files: dict[str, bytes]
@@ -129,6 +152,7 @@ class SharePlan:
     settings: dict
     allowed_strings: frozenset[str]
     source_dataset: str
+    private_ids: list[str] = field(repr=False, default_factory=list)
     private_texts: list[str] = field(repr=False, default_factory=list)
 
 
@@ -140,9 +164,10 @@ def load_private_evaluation(results_repo: str) -> PrivateEvaluation:
     try:
         leaderboard = [dict(row) for row in load_dataset(results_repo, split="train")]
     except Exception as exc:
+        # The loader's message can quote file contents, so only its type is shown.
         raise ShareError(
-            f"Could not read the leaderboard of {results_repo}. Is it a results repo "
-            f"written by `ocr-bench judge`? ({exc})"
+            f"Could not read the leaderboard of {results_repo} ({type(exc).__name__}). "
+            "Is it a results repo written by `ocr-bench judge`?"
         ) from exc
     comparisons = load_existing_comparisons(results_repo)
     if not comparisons:
@@ -153,47 +178,77 @@ def load_private_evaluation(results_repo: str) -> PrivateEvaluation:
     return PrivateEvaluation(leaderboard, comparisons, metadata_rows[-1])
 
 
-def load_slice_values(metadata: dict, slice_column: str) -> list:
-    """Read one column of the judged source dataset, in row order.
+def reference_config(metadata: dict) -> str | None:
+    """The source config whose rows judge numbered, or None for a flat dataset.
 
-    ``sample_idx`` in a comparison is a row position in the first loaded
-    source config, and every config has the same rows in the same order (judge
-    checks this). So the column is read from the first config that has it.
+    Judge merges configs by position and keeps the rows of the first config that
+    has an OCR text column. ``source_output_columns`` lists those configs.
     """
+    configs = json.loads(metadata.get("source_configs") or "[]")
+    if not configs:
+        return None
+    usable = json.loads(metadata.get("source_output_columns") or "{}")
+    for config in configs:
+        if config in usable:
+            return config
+    raise ShareError("The results metadata names no source config with OCR output.")
+
+
+def load_slice_values(metadata: dict, slice_column: str) -> list:
+    """Read a column of the judged source rows, after proving they are the judged pages.
+
+    ``sample_idx`` in a comparison is a row position in the reference config.
+    The page fingerprint that judge stored covers the row ids and image bytes of
+    the judged sample, so recomputing it on the reference config shows that row
+    i is still the page judge compared. This reads every column of one config,
+    images included.
+    """
+    expected = metadata.get("source_fingerprint") or ""
+    if not expected:
+        raise ShareError(
+            "The results repo has no source fingerprint, so share cannot check that "
+            "slice labels are on the judged pages. Judge again with this version."
+        )
     source = metadata["source_dataset"]
     split = metadata.get("source_split") or "train"
-    configs = json.loads(metadata.get("source_configs") or "[]")
-    revisions = json.loads(metadata.get("source_revisions") or "{}")
-    errors = []
-    for config in configs or [None]:
-        try:
-            ds = load_dataset(
-                source,
-                name=config,
-                split=split,
-                revision=revisions.get(config, "main") if config else None,
-                columns=[slice_column],
-            )
-        except Exception as exc:
-            errors.append(f"{config or 'default'}: {exc}")
-            continue
-        if slice_column in ds.column_names:
-            return list(ds[slice_column])
-    raise ShareError(
-        f"Column '{slice_column}' was not found in {source} (split {split}). " + "; ".join(errors)
-    )
+    config = reference_config(metadata)
+    revision = json.loads(metadata.get("source_revisions") or "{}").get(config, "main")
+    try:
+        if config is None:
+            ds = load_dataset(source, split=split)
+        else:
+            ds = load_dataset(source, name=config, split=split, revision=revision)
+    except Exception as exc:
+        raise ShareError(
+            f"Could not read the judged source config {config or 'default'} ({type(exc).__name__})."
+        ) from exc
+    if slice_column not in ds.column_names:
+        raise ShareError(
+            f"Column '{slice_column}' is not in the judged source config {config or 'default'}."
+        )
+    judged = sample_indices(len(ds), metadata.get("max_samples"), metadata.get("seed", 42))
+    found, _ = evaluation_input_fingerprints(ds, {}, judged)
+    if found != expected:
+        raise ShareError(
+            "The source pages are not the pages judge compared: their fingerprint "
+            "changed. Slice labels could be on the wrong pages. Judge again on the "
+            "current source, or share without --slice-column."
+        )
+    return list(ds[slice_column])
 
 
 # --- fitting -----------------------------------------------------------------
 
 
-def board_models(leaderboard: list[dict]) -> list[str]:
-    """Every model of the judged grid, failed ones included, as judge fitted them."""
-    return [row["model"] for row in leaderboard]
+def split_models(leaderboard: list[dict]) -> tuple[list[str], list[str]]:
+    """(models judge fitted, failed models). Judge fits the board without failed models."""
+    fitted = [row["model"] for row in leaderboard if row.get("status") != "failed"]
+    failed = [row["model"] for row in leaderboard if row.get("status") == "failed"]
+    return fitted, failed
 
 
 def in_grid(comparisons: list[ComparisonResult], models: Iterable[str]) -> list[ComparisonResult]:
-    """Comparisons between two models of the grid. Out-of-grid rows are history only."""
+    """Comparisons between two fitted models. Other rows are history only."""
     grid = set(models)
     return [c for c in comparisons if c.model_a in grid and c.model_b in grid]
 
@@ -201,37 +256,60 @@ def in_grid(comparisons: list[ComparisonResult], models: Iterable[str]) -> list[
 def check_board_matches(board: Leaderboard, leaderboard: list[dict], results_repo: str) -> None:
     """Refuse to share when a refit of the comparisons differs from the published board.
 
-    This happens when a later judge run stopped after a checkpoint, so the
-    comparisons hold verdicts the leaderboard does not include yet.
+    Wins, losses and ties must be equal and ratings must agree to within rounding.
+    They differ when a later judge run stopped after a checkpoint, so the
+    comparisons hold verdicts that the leaderboard does not include.
     """
     for row in leaderboard:
-        if row.get("elo") is None:
+        if row.get("status") == "failed":
             continue
-        refit = board.elo.get(row["model"])
-        if refit is None or abs(round(refit) - row["elo"]) > ELO_TOLERANCE:
+        model = row["model"]
+        refit = board.elo.get(model)
+        counts = (board.wins.get(model), board.losses.get(model), board.ties.get(model))
+        if (
+            refit is None
+            or abs(round(refit) - row["elo"]) > ELO_TOLERANCE
+            or counts != (row["wins"], row["losses"], row["ties"])
+        ):
             raise ShareError(
                 f"The leaderboard of {results_repo} does not match its comparisons "
-                f"({row['model']}: board {row['elo']}, refit "
-                f"{'none' if refit is None else round(refit)}). A judge run probably "
-                "stopped after a checkpoint. Run judge again to completion, then share."
+                f"({model}). A judge run probably stopped after a checkpoint. Run judge "
+                "again to completion, then share."
             )
 
 
-def _public_rows(
-    board: Leaderboard,
-    *,
-    failed_models: list[str],
-    failed_outputs: dict[str, int],
-    slice_name: str | None = None,
-) -> list[dict]:
+def _overall_rows(board: Leaderboard, failed_models: list[str], failed_outputs: dict) -> list[dict]:
     rows = []
     rank = 0
     for row in build_leaderboard_rows(board, failed_models, failed_outputs):
         failed = row["status"] == "failed"
         if not failed:
             rank += 1
-        public = {
-            "rank": None if failed else rank,
+        rows.append(
+            {
+                "rank": None if failed else rank,
+                "model": row["model"],
+                "params": row["params"] or None,
+                "elo": row["elo"],
+                "elo_low": row.get("elo_low"),
+                "elo_high": row.get("elo_high"),
+                "pages": board.pages_by_model.get(row["model"], 0),
+                "wins": row["wins"],
+                "losses": row["losses"],
+                "ties": row["ties"],
+                "win_pct": row["win_pct"],
+                "status": row["status"],
+                "failed_outputs": row["failed_outputs"],
+            }
+        )
+    return rows
+
+
+def _slice_rows(board: Leaderboard, slice_name: str) -> list[dict]:
+    return [
+        {
+            "slice": slice_name,
+            "rank": rank,
             "model": row["model"],
             "params": row["params"] or None,
             "elo": row["elo"],
@@ -242,13 +320,9 @@ def _public_rows(
             "losses": row["losses"],
             "ties": row["ties"],
             "win_pct": row["win_pct"],
-            "status": row["status"],
-            "failed_outputs": row["failed_outputs"],
         }
-        if slice_name is not None:
-            public = {"slice": slice_name, **public}
-        rows.append(public)
-    return rows
+        for rank, row in enumerate(build_leaderboard_rows(board), start=1)
+    ]
 
 
 def slice_groups(values: list, sample_ids: Iterable[int]) -> tuple[dict[str, set[int]], int]:
@@ -267,29 +341,53 @@ def slice_groups(values: list, sample_ids: Iterable[int]) -> tuple[dict[str, set
             f"The slice column has {len(groups)} different values on the judged pages "
             f"(at most {MAX_SLICES}). Is it a per-page column?"
         )
-    too_long = [label for label in groups if len(label) > MAX_LABEL_LENGTH]
-    if too_long:
+    if any(len(label) > MAX_LABEL_LENGTH or "\n" in label for label in groups):
         raise ShareError(
-            f"{len(too_long)} slice labels are longer than {MAX_LABEL_LENGTH} characters. "
+            f"Slice labels must be {MAX_LABEL_LENGTH} characters or fewer, on one line. "
             "Use a column of short labels."
         )
     return groups, unlabelled
 
 
-def check_judged_sample(values: list, metadata: dict, sample_ids: set[int]) -> None:
-    """Refuse when the source rows differ from the rows judge sampled."""
-    n_rows = len(values)
-    if sample_ids and max(sample_ids) >= n_rows:
+def rankable_models(
+    comparisons: list[ComparisonResult], models: list[str]
+) -> tuple[list[str], list[ComparisonResult]]:
+    """Models a slice board can rank, and the comparisons between them.
+
+    A model needs MIN_SLICE_PAGES pages in the slice. The models left must form
+    one connected comparison graph: Bradley-Terry cannot order two groups that
+    were never compared with each other (targeted runs judge only some pairs).
+    Returns no models when the graph is not connected.
+    """
+    pages: dict[str, set[int]] = {}
+    for c in comparisons:
+        pages.setdefault(c.model_a, set()).add(c.sample_idx)
+        pages.setdefault(c.model_b, set()).add(c.sample_idx)
+    kept = [m for m in models if len(pages.get(m, ())) >= MIN_SLICE_PAGES]
+    kept_set = set(kept)
+    between = [c for c in comparisons if c.model_a in kept_set and c.model_b in kept_set]
+    if len(kept) < 2:
+        return [], []
+    neighbours: dict[str, set[str]] = {m: set() for m in kept}
+    for c in between:
+        neighbours[c.model_a].add(c.model_b)
+        neighbours[c.model_b].add(c.model_a)
+    reached, todo = {kept[0]}, [kept[0]]
+    while todo:
+        for other in neighbours[todo.pop()] - reached:
+            reached.add(other)
+            todo.append(other)
+    if reached != kept_set:
+        return [], []
+    return kept, between
+
+
+def check_judged_sample(values: list, sample_ids: set[int]) -> None:
+    """Refuse when a comparison is on a row the source does not have."""
+    if sample_ids and max(sample_ids) >= len(values):
         raise ShareError(
-            f"The source dataset has {n_rows} rows, but a comparison is on row "
+            f"The source has {len(values)} rows, but a comparison is on row "
             f"{max(sample_ids)}. The source changed after judging."
-        )
-    expected = set(sample_indices(n_rows, metadata.get("max_samples"), metadata.get("seed", 42)))
-    if not sample_ids <= expected:
-        raise ShareError(
-            "The judged pages are not the sample that judge draws from the source "
-            "dataset now. The source changed after judging, so slice labels could be "
-            "on the wrong pages."
         )
 
 
@@ -310,13 +408,14 @@ def _table(rows: list[dict]) -> list[str]:
         "|---|---|---|---|---|---|---|---|---|",
     ]
     for row in rows:
-        if row["status"] == "failed":
+        status = row.get("status", "ranked")
+        if status == "failed":
             lines.append(
                 f"| — | {_md(row['model'])} | {row['params'] or ''} | FAILED | — | — | — | — | — |"
             )
             continue
         ci = f"{row['elo_low']}–{row['elo_high']}" if row.get("elo_low") is not None else "—"
-        mark = " ⚠" if row["status"] == "degraded" else ""
+        mark = " ⚠" if status == "degraded" else ""
         lines.append(
             f"| {row['rank']} | {_md(row['model'])}{mark} | {row['params'] or ''} "
             f"| {row['elo']} | {ci} | {row['pages']} | {row['wins']} | {row['losses']} "
@@ -326,8 +425,7 @@ def _table(rows: list[dict]) -> list[str]:
 
 
 def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict]) -> str:
-    """The README of the share repo. Built only from checked rows and settings."""
-    alias = settings["alias"]
+    """The README of the share repo, rendered only from the checked rows and settings."""
     lines = [
         "---",
         "tags:",
@@ -343,7 +441,7 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
     lines += [
         "---",
         "",
-        f"# OCR board: {_md(alias)}",
+        f"# OCR board: {_md(settings['alias'])}",
         "",
         "Pairwise VLM-as-judge ranking of OCR models on a private evaluation set. "
         "This repo holds scores only: the pages, the OCR outputs and the judge's "
@@ -360,17 +458,23 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
             "not judged for it, so its rank leaves them out.",
         ]
     if slice_rows:
-        lines += ["", f"## By {_md(settings['slice_column'])}"]
-        for name in settings["slices"]:
+        lines += [
+            "",
+            f"## By {_md(settings['slice_column'])}",
+            "",
+            "Each board is fitted on the pages of one label only. Pages shows on how "
+            f"many of them each model is ranked. A model with fewer than {MIN_SLICE_PAGES} "
+            "pages in a slice is left out of its board.",
+        ]
+        for name, pages in zip(settings["slices"], settings["slice_pages"], strict=True):
             rows = [row for row in slice_rows if row["slice"] == name]
-            pages = max(row["pages"] for row in rows)
             lines += ["", f"### {_md(name)} ({pages} pages)", "", *_table(rows)]
         if settings["pages_not_in_a_slice_board"]:
             lines += [
                 "",
                 f"{settings['pages_not_in_a_slice_board']} judged pages are in no slice "
-                f"board: they have no label, or their slice has fewer than "
-                f"{MIN_SLICE_PAGES} judged pages.",
+                f"board: they have no label, their label has fewer than {MIN_SLICE_PAGES} "
+                "judged pages, or the models on them were not compared enough to rank.",
             ]
     judges = ", ".join(_md(name) for name in settings["judge_models"]) or "not recorded"
     lines += [
@@ -383,11 +487,14 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         f"- **Judge text mode**: {settings['judge_text_mode']}",
         f"- **OCR text cap**: {settings['max_ocr_text_len']} characters per output",
         f"- **Judge image cap**: {settings['judge_image_dim']} px on the longer side",
+        f"- **Sample**: {settings['pages']} pages with comparisons "
+        f"(seed {settings['seed']}, at most {settings['max_samples']} pages)",
         f"- **Comparisons**: {settings['comparisons']} "
-        f"({settings['auto_tied']} identical-output ties)",
+        f"({settings['auto_tied']} identical-output ties); adaptive strategy "
+        f"{settings['adaptive_strategy']}",
         f"- **Method**: {settings['method']}",
         f"- **Source fingerprint**: `{settings['source_fingerprint'] or 'not recorded'}` "
-        "(identifies the exact evaluation data without publishing it)",
+        "(identifies the exact evaluation pages without publishing them)",
         f"- **Judged**: {settings['judged_at']}; **shared**: {settings['shared_at']}",
         "",
         "`load_dataset(repo)` gives the overall board"
@@ -400,15 +507,17 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
     return "\n".join(lines) + "\n"
 
 
+def _settings_json(settings: dict) -> bytes:
+    return (json.dumps(settings, indent=2, ensure_ascii=False, sort_keys=True) + "\n").encode()
+
+
 def build_share_files(
     settings: dict, overall_rows: list[dict], slice_rows: list[dict]
 ) -> dict[str, bytes]:
     files = {
         "README.md": build_card(settings, overall_rows, slice_rows).encode(),
         "overall.jsonl": _jsonl(overall_rows),
-        "board.json": (
-            json.dumps(settings, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
-        ).encode(),
+        "board.json": _settings_json(settings),
     }
     if slice_rows:
         files["slices.jsonl"] = _jsonl(slice_rows)
@@ -436,35 +545,61 @@ def _check_value(path: str, key: str, value: object, allowed: frozenset[str]) ->
         return
     if isinstance(value, str) and value in allowed:
         return
-    if isinstance(value, list) and all(isinstance(v, str) and v in allowed for v in value):
+    if isinstance(value, list) and all(
+        (isinstance(v, str) and v in allowed) or (isinstance(v, int) and not isinstance(v, bool))
+        for v in value
+    ):
         return
     raise PrivacyError(
         f"{path}: the value of '{key}' is not one the board is meant to show. Nothing was written."
     )
 
 
+def _rows(files: dict[str, bytes], path: str, columns: tuple[str, ...], allowed) -> list[dict]:
+    rows = []
+    for line in files.get(path, b"").decode().splitlines():
+        row = json.loads(line)
+        if tuple(row) != columns:
+            raise PrivacyError(
+                f"{path}: a row has columns {sorted(row)}, not the allowed columns. "
+                "Nothing was written."
+            )
+        for key, value in row.items():
+            _check_value(path, key, value, allowed)
+        rows.append(row)
+    return rows
+
+
 def check_structure(files: dict[str, bytes], allowed: frozenset[str]) -> None:
-    """Allow-list check: known files, exact columns, only allowed string values."""
+    """Allow-list check: known files, exact columns, allowed values, and a README
+    that is exactly the card rendered from them."""
     unknown = sorted(set(files) - set(SHARE_FILES))
     if unknown:
         raise PrivacyError(f"Unexpected files {unknown}. Nothing was written.")
-    for path, columns in (("overall.jsonl", BOARD_COLUMNS), ("slices.jsonl", SLICE_BOARD_COLUMNS)):
-        if path not in files:
-            continue
-        for line in files[path].decode().splitlines():
-            row = json.loads(line)
-            if tuple(row) != columns:
-                raise PrivacyError(
-                    f"{path}: a row has columns {sorted(row)}, not the allowed columns. "
-                    "Nothing was written."
-                )
-            for key, value in row.items():
-                _check_value(path, key, value, allowed)
+    overall = _rows(files, "overall.jsonl", BOARD_COLUMNS, allowed)
+    slices = _rows(files, "slices.jsonl", SLICE_BOARD_COLUMNS, allowed)
     settings = json.loads(files["board.json"].decode())
     if sorted(settings) != sorted(SETTINGS_KEYS):
         raise PrivacyError("board.json: unexpected keys. Nothing was written.")
     for key, value in settings.items():
         _check_value("board.json", key, value, allowed)
+    if files["board.json"] != _settings_json(settings):
+        raise PrivacyError("board.json is not in the form share writes. Nothing was written.")
+    if files["README.md"] != build_card(settings, overall, slices).encode():
+        raise PrivacyError(
+            "README.md is not the card rendered from the checked boards. Nothing was written."
+        )
+
+
+def check_no_private_ids(files: dict[str, bytes], private_ids: Iterable[str]) -> None:
+    """Refuse when any file names the results repo or the source dataset."""
+    ids = [repo_id.lower() for repo_id in private_ids if repo_id]
+    for path, data in files.items():
+        for view in _file_views(path, data):
+            if any(repo_id in view.lower() for repo_id in ids):
+                raise PrivacyError(
+                    f"{path} names the results repo or the source dataset. Nothing was written."
+                )
 
 
 def _chunks(text: str) -> Iterator[str]:
@@ -521,8 +656,9 @@ def private_texts(comparisons: Iterable[ComparisonResult]) -> list[str]:
 
 
 def check_plan(plan: SharePlan) -> None:
-    """Both privacy checks, on the exact bytes that would be written."""
+    """All privacy checks, on the exact bytes that would be written."""
     check_structure(plan.files, plan.allowed_strings)
+    check_no_private_ids(plan.files, plan.private_ids)
     check_no_page_text(plan.files, plan.private_texts)
 
 
@@ -536,70 +672,77 @@ def _check_alias(alias: str) -> str:
     return alias
 
 
+def _public_criteria(criteria: str) -> str:
+    """A --criteria-file run is recorded as ``custom:<file name>``; publish ``custom``."""
+    return "custom" if criteria.startswith("custom:") else criteria
+
+
 def plan_share(
     evaluation: PrivateEvaluation,
     *,
     results_repo: str,
     alias: str,
     slice_column: str | None = None,
-    slice_values: Callable[[dict, str], list] = load_slice_values,
+    slice_values: Callable[[dict, str], list] | None = None,
     now: str | None = None,
 ) -> SharePlan:
     """Fit the boards, build the files and check them. Makes no Hub writes."""
     alias = _check_alias(alias)
     metadata = evaluation.metadata
-    models = board_models(evaluation.leaderboard)
+    models, failed_models = split_models(evaluation.leaderboard)
     comparisons = in_grid(evaluation.comparisons, models)
     if not comparisons:
         raise ShareError(f"{results_repo} has no comparisons between its leaderboard models.")
-    failed_models = json.loads(metadata.get("failed_models") or "[]")
     failed_outputs = json.loads(metadata.get("failed_outputs") or "{}")
 
     board = compute_elo(comparisons, models, n_bootstrap=N_BOOTSTRAP)
     check_board_matches(board, evaluation.leaderboard, results_repo)
-    overall_rows = _public_rows(board, failed_models=failed_models, failed_outputs=failed_outputs)
+    overall_rows = _overall_rows(board, failed_models, failed_outputs)
     sample_ids = {c.sample_idx for c in comparisons}
 
     slice_rows: list[dict] = []
     slice_names: list[str] = []
+    slice_pages: list[int] = []
     not_in_a_slice = 0
     if slice_column:
-        values = slice_values(metadata, slice_column)
-        check_judged_sample(values, metadata, sample_ids)
+        values = (slice_values or load_slice_values)(metadata, slice_column)
+        check_judged_sample(values, sample_ids)
         groups, not_in_a_slice = slice_groups(values, sample_ids)
         for name in sorted(groups):
             pages = groups[name]
             if len(pages) < MIN_SLICE_PAGES:
                 not_in_a_slice += len(pages)
                 continue
-            slice_comparisons = [c for c in comparisons if c.sample_idx in pages]
-            slice_models = [
-                m for m in models if any(m in (c.model_a, c.model_b) for c in slice_comparisons)
-            ]
-            slice_board = compute_elo(slice_comparisons, slice_models, n_bootstrap=N_BOOTSTRAP)
-            slice_rows += _public_rows(
-                slice_board,
-                failed_models=[],
-                failed_outputs=failed_outputs,
-                slice_name=name,
+            slice_models, slice_comparisons = rankable_models(
+                [c for c in comparisons if c.sample_idx in pages], models
             )
+            if not slice_models:
+                not_in_a_slice += len(pages)
+                continue
+            slice_board = compute_elo(slice_comparisons, slice_models, n_bootstrap=N_BOOTSTRAP)
+            slice_rows += _slice_rows(slice_board, name)
             slice_names.append(name)
+            slice_pages.append(len(pages))
 
     judge_models = json.loads(metadata.get("judge_models") or "[]")
     settings = {
         "alias": alias,
         "judge_models": judge_models,
-        "criteria": metadata.get("criteria") or "default",
+        "criteria": _public_criteria(metadata.get("criteria") or "default"),
         "prompt_hash": metadata.get("prompt_hash") or "",
         "judge_text_mode": metadata.get("judge_text_mode") or "normalized",
         "max_ocr_text_len": metadata.get("max_ocr_text_len"),
         "judge_image_dim": metadata.get("judge_image_dim"),
         "min_chars": metadata.get("min_chars"),
         "pages": len(sample_ids),
+        "seed": metadata.get("seed"),
+        "max_samples": metadata.get("max_samples"),
+        "adaptive_strategy": metadata.get("adaptive_strategy") or "balanced",
         "comparisons": len(comparisons),
         "auto_tied": sum(1 for c in comparisons if c.agreement == "auto"),
         "slice_column": slice_column,
         "slices": slice_names,
+        "slice_pages": slice_pages,
         "pages_not_in_a_slice_board": not_in_a_slice if slice_column else 0,
         "method": METHOD,
         "source_fingerprint": metadata.get("source_fingerprint") or "",
@@ -610,6 +753,7 @@ def plan_share(
     allowed = frozenset(
         {
             *models,
+            *failed_models,
             *slice_names,
             *STATUSES,
             *(row["params"] for row in overall_rows if row["params"]),
@@ -617,15 +761,15 @@ def plan_share(
             *(v for v in settings.values() if isinstance(v, str)),
         }
     )
-    files = build_share_files(settings, overall_rows, slice_rows)
     plan = SharePlan(
         alias=alias,
-        files=files,
+        files=build_share_files(settings, overall_rows, slice_rows),
         overall_rows=overall_rows,
         slice_rows=slice_rows,
         settings=settings,
         allowed_strings=allowed,
         source_dataset=metadata.get("source_dataset", ""),
+        private_ids=[results_repo, metadata.get("source_dataset", "")],
         private_texts=private_texts(evaluation.comparisons),
     )
     check_plan(plan)
@@ -651,23 +795,56 @@ class PushResult:
     private: bool
 
 
-def _check_destination(api: HfApi, dest: str) -> bool:
-    """Return whether dest exists. Refuse a repo that share did not write."""
+def _is_share_card(readme: str) -> bool:
     try:
-        files = api.list_repo_files(dest, repo_type="dataset")
-    except RepositoryNotFoundError:
+        tags = DatasetCard(readme).data.to_dict().get("tags") or []
+    except Exception:
         return False
-    if not set(files) - {".gitattributes"}:
-        return True
+    return isinstance(tags, list) and SHARE_TAG in tags
+
+
+def _revision(api: HfApi, dest: str) -> str:
+    revision = api.repo_info(dest, repo_type="dataset").sha
+    if not revision:
+        raise ShareError(f"Could not read the current revision of {dest}.")
+    return revision
+
+
+def _destination_files(
+    api: HfApi, dest: str, alias: str, replace: bool
+) -> tuple[str, list[str]] | None:
+    """(revision, files) of an existing destination, or None when it is missing.
+
+    Refuses a repo with files that share does not write, or whose card lacks the
+    ``ocr-bench-share`` tag. Refuses a board of another alias unless ``replace``.
+    """
+    try:
+        revision = _revision(api, dest)
+    except RepositoryNotFoundError:
+        return None
+    files = api.list_repo_files(dest, repo_type="dataset", revision=revision)
+    content = [path for path in files if path != ".gitattributes"]
+    if not content:
+        return revision, files
+    foreign = sorted(set(content) - set(SHARE_FILES))
     readme = ""
-    if "README.md" in files:
-        readme = Path(api.hf_hub_download(dest, "README.md", repo_type="dataset")).read_text()
-    if f"- {SHARE_TAG}" not in readme:
+    if "README.md" in content:
+        readme = Path(
+            api.hf_hub_download(dest, "README.md", repo_type="dataset", revision=revision)
+        ).read_text()
+    if foreign or not _is_share_card(readme):
         raise ShareError(
-            f"{dest} already has files and was not written by `ocr-bench share`. "
-            "Choose a new or empty repo."
+            f"{dest} has files that `ocr-bench share` did not write. Choose a new or empty repo."
         )
-    return True
+    if "board.json" in content and not replace:
+        path = api.hf_hub_download(dest, "board.json", repo_type="dataset", revision=revision)
+        current = json.loads(Path(path).read_text()).get("alias")
+        if current != alias:
+            raise ShareError(
+                f"{dest} holds the board of '{current}'. Pass --replace to replace it "
+                f"with '{alias}', or choose another repo."
+            )
+    return revision, files
 
 
 def push_share(
@@ -676,37 +853,43 @@ def push_share(
     *,
     results_repo: str,
     private: bool = False,
+    replace: bool = False,
     api: HfApi | None = None,
 ) -> PushResult:
     """Check the files again, then write them to ``dest`` in one commit.
 
     A missing ``dest`` is created (public unless ``private``). An existing one
-    keeps its visibility. ``dest`` must not be the results repo or the source.
+    keeps its visibility. The commit names the revision that was checked as its
+    parent, so it fails if another writer changed the repo in between.
     """
     check_plan(plan)
-    if dest in (results_repo, plan.source_dataset):
+    if dest.lower() in (results_repo.lower(), plan.source_dataset.lower()):
         raise ShareError(
             f"{dest} is the results repo or the source dataset. Share to a separate repo."
         )
     api = api or HfApi()
-    existed = _check_destination(api, dest)
-    if not existed:
+    existing = _destination_files(api, dest, plan.alias, replace)
+    if existing is None:
         api.create_repo(dest, repo_type="dataset", private=private, exist_ok=False)
-    stale = []
-    if existed:
-        present = set(api.list_repo_files(dest, repo_type="dataset"))
-        stale = [path for path in SHARE_FILES if path in present and path not in plan.files]
+        revision, present = _revision(api, dest), []
+    else:
+        revision, present = existing
     operations: list[CommitOperationAdd | CommitOperationDelete] = [
         CommitOperationAdd(path_in_repo=path, path_or_fileobj=data)
         for path, data in plan.files.items()
     ]
-    operations += [CommitOperationDelete(path_in_repo=path) for path in stale]
+    operations += [
+        CommitOperationDelete(path_in_repo=path)
+        for path in SHARE_FILES
+        if path in present and path not in plan.files
+    ]
     api.create_commit(
         dest,
         repo_type="dataset",
         operations=operations,
         commit_message=f"ocr-bench share: {plan.alias}",
+        parent_commit=revision,
     )
-    info = api.repo_info(dest, repo_type="dataset")
-    logger.info("shared_board", repo=dest, files=sorted(plan.files), private=bool(info.private))
-    return PushResult(repo_id=dest, created=not existed, private=bool(info.private))
+    is_private = bool(api.repo_info(dest, repo_type="dataset").private)
+    logger.info("shared_board", repo=dest, files=sorted(plan.files), private=is_private)
+    return PushResult(repo_id=dest, created=existing is None, private=is_private)

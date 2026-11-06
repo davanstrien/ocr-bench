@@ -456,6 +456,11 @@ def build_parser() -> argparse.ArgumentParser:
     share.add_argument(
         "--private", action="store_true", help="Create a missing destination repo private"
     )
+    share.add_argument(
+        "--replace",
+        action="store_true",
+        help="Replace a board of another alias in the destination repo",
+    )
 
     # --- bench subcommand (run → judge → view in one shot) ---
     bench = sub.add_parser(
@@ -2239,7 +2244,7 @@ def _print_share_board(title: str, rows: list[dict]) -> None:
             str(row["elo"] if row["elo"] is not None else "—"),
             ci,
             str(row["pages"]),
-            row["status"],
+            row.get("status", ""),
         )
     console.print(table)
 
@@ -2272,14 +2277,17 @@ def cmd_share(args: argparse.Namespace) -> None:
     )
 
     if args.dry_run:
-        out_dir = Path(args.output_dir or f"ocr-bench-share-{plan.alias}")
+        slug = "".join(c if c.isalnum() or c in "._-" else "-" for c in plan.alias).strip(".")
+        out_dir = Path(args.output_dir or f"ocr-bench-share-{slug or 'board'}")
         written = write_local(plan, out_dir)
         console.print(
             f"Dry run: wrote {len(written)} files to [bold]{out_dir}[/bold]. Nothing was pushed."
         )
         return
 
-    result = push_share(plan, args.dest, results_repo=args.results, private=args.private)
+    result = push_share(
+        plan, args.dest, results_repo=args.results, private=args.private, replace=args.replace
+    )
     state = "created" if result.created else "updated"
     visibility = "private" if result.private else "public"
     console.print(f"Board {state}: https://huggingface.co/datasets/{result.repo_id} ({visibility})")
