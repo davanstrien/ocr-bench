@@ -13,8 +13,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+      - name: uv.lock holds no settings from a local uv config
+        run: |
+          set -euo pipefail
+          registries="$(grep -oE 'registry = "[^"]+"' uv.lock | sort -u)"
+          if [ "$registries" != 'registry = "https://pypi.org/simple"' ]; then
+            echo "uv.lock must resolve from https://pypi.org/simple only. Found:"
+            echo "$registries"
+            echo "Relock with: uv lock --no-config"
+            exit 1
+          fi
+          if grep -qE '^exclude-newer' uv.lock; then
+            echo "uv.lock records an exclude-newer setting, probably from a local uv config."
+            echo "Relock with: uv lock --no-config"
+            exit 1
+          fi
       - run: uv python install 3.13
       - run: uv sync --locked --dev --extra viewer
       - run: uv run ruff check src/ tests/
+      - run: uv run ruff format --check src/ tests/
       - run: uv run ty check src/
       - run: uv run pytest tests/ -x -q

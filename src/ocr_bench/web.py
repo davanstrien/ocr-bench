@@ -116,9 +116,7 @@ def _build_filtered_indices(
     """Map nav indices to validation_comps indices, respecting filters."""
     filtered_comps = _filter_comparisons(state.comparison_rows, winner_filter, model_filter)
     # Build a lookup from (sample_idx, model_a, model_b) -> validation comp index
-    filtered_sample_keys = {
-        (c["sample_idx"], c["model_a"], c["model_b"]) for c in filtered_comps
-    }
+    filtered_sample_keys = {(c["sample_idx"], c["model_a"], c["model_b"]) for c in filtered_comps}
     return [
         i
         for i, vc in enumerate(state.validation_comps)
@@ -177,9 +175,7 @@ def create_app(
             from_prs=from_prs,
             source_split=source_split,
             source_configs=[c for c in source_configs if isinstance(c, str)],
-            source_revisions={
-                k: v for k, v in source_revisions.items() if isinstance(v, str)
-            },
+            source_revisions={k: v for k, v in source_revisions.items() if isinstance(v, str)},
         )
 
     validation_comps = build_validation_comparisons(
@@ -373,24 +369,26 @@ def create_app(
                 wp = human_board.win_pct(model)
                 human_win_pct = f"{wp:.0f}" if wp is not None else None
 
-            rows.append({
-                "rank": rank if status != "failed" else None,
-                "model": model,
-                "model_short": short,
-                "params": row.get("params") or sizes.get(model, ""),
-                "elo": round(elo_value) if elo_value is not None else None,
-                "elo_low": row.get("elo_low"),
-                "elo_high": row.get("elo_high"),
-                "wins": row.get("wins", 0),
-                "losses": row.get("losses", 0),
-                "ties": row.get("ties", 0),
-                "win_pct": row.get("win_pct"),
-                "status": status,
-                "failed_outputs": row.get("failed_outputs", 0),
-                "preferred_over": row.get("preferred_over", ""),
-                "human_elo": human_elo,
-                "human_win_pct": human_win_pct,
-            })
+            rows.append(
+                {
+                    "rank": rank if status != "failed" else None,
+                    "model": model,
+                    "model_short": short,
+                    "params": row.get("params") or sizes.get(model, ""),
+                    "elo": round(elo_value) if elo_value is not None else None,
+                    "elo_low": row.get("elo_low"),
+                    "elo_high": row.get("elo_high"),
+                    "wins": row.get("wins", 0),
+                    "losses": row.get("losses", 0),
+                    "ties": row.get("ties", 0),
+                    "win_pct": row.get("win_pct"),
+                    "status": status,
+                    "failed_outputs": row.get("failed_outputs", 0),
+                    "preferred_over": row.get("preferred_over", ""),
+                    "human_elo": human_elo,
+                    "human_win_pct": human_win_pct,
+                }
+            )
 
         has_ci = any(r.get("elo_low") is not None for r in rows)
 
@@ -405,23 +403,29 @@ def create_app(
                     params_num = float(params_str.rstrip("B"))
                 except ValueError:
                     continue
-                chart_points.append({
-                    "name": r["model_short"],
-                    "params": params_num,
-                    "win_pct": r["win_pct"],
-                    "elo": r["elo"],
-                    "elo_low": r.get("elo_low"),
-                    "elo_high": r.get("elo_high"),
-                })
+                chart_points.append(
+                    {
+                        "name": r["model_short"],
+                        "params": params_num,
+                        "win_pct": r["win_pct"],
+                        "elo": r["elo"],
+                        "elo_low": r.get("elo_low"),
+                        "elo_high": r.get("elo_high"),
+                    }
+                )
 
-        return templates.TemplateResponse(request, "leaderboard.html", {
-            "active_tab": "leaderboard",
-            "repo_id": state.repo_id,
-            "rows": rows,
-            "has_ci": has_ci,
-            "has_human_elo": human_board is not None,
-            "chart_points": chart_points,
-        })
+        return templates.TemplateResponse(
+            request,
+            "leaderboard.html",
+            {
+                "active_tab": "leaderboard",
+                "repo_id": state.repo_id,
+                "rows": rows,
+                "has_ci": has_ci,
+                "has_human_elo": human_board is not None,
+                "chart_points": chart_points,
+            },
+        )
 
     @app.get("/comparisons", response_class=HTMLResponse)
     async def comparisons_page(request: Request):
@@ -429,15 +433,19 @@ def create_app(
         pair_summary = _build_pair_summary_html(state.comparison_rows)
         ctx = _get_comp_context(0)
         stats = _stats_context()
-        return templates.TemplateResponse(request, "comparisons.html", {
-            "active_tab": "comparisons",
-            "models": state.models,
-            "pair_summary": pair_summary,
-            "winner_filter": "All",
-            "model_filter": "All",
-            **ctx,
-            **stats,
-        })
+        return templates.TemplateResponse(
+            request,
+            "comparisons.html",
+            {
+                "active_tab": "comparisons",
+                "models": state.models,
+                "pair_summary": pair_summary,
+                "winner_filter": "All",
+                "model_filter": "All",
+                **ctx,
+                **stats,
+            },
+        )
 
     @app.get("/comparisons/filter", response_class=HTMLResponse)
     async def comparisons_filter(

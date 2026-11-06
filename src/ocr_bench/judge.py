@@ -309,33 +309,122 @@ _CELL_DELIM = " | "
 _KNOWN_HTML_TAGS = frozenset(
     {
         # tables
-        "table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption",
-        "colgroup", "col",
+        "table",
+        "thead",
+        "tbody",
+        "tfoot",
+        "tr",
+        "td",
+        "th",
+        "caption",
+        "colgroup",
+        "col",
         # blocks
-        "p", "div", "span", "br", "hr", "pre", "code", "blockquote",
-        "figure", "figcaption", "section", "article", "header", "footer",
-        "nav", "aside", "main", "address",
+        "p",
+        "div",
+        "span",
+        "br",
+        "hr",
+        "pre",
+        "code",
+        "blockquote",
+        "figure",
+        "figcaption",
+        "section",
+        "article",
+        "header",
+        "footer",
+        "nav",
+        "aside",
+        "main",
+        "address",
         # lists
-        "ul", "ol", "li", "dl", "dt", "dd",
+        "ul",
+        "ol",
+        "li",
+        "dl",
+        "dt",
+        "dd",
         # headings
-        "h1", "h2", "h3", "h4", "h5", "h6",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
         # inline
-        "b", "i", "u", "s", "em", "strong", "small", "sub", "sup", "mark",
-        "del", "ins", "a", "img", "abbr", "cite", "q", "label", "font",
-        "center", "wbr", "big", "tt",
+        "b",
+        "i",
+        "u",
+        "s",
+        "em",
+        "strong",
+        "small",
+        "sub",
+        "sup",
+        "mark",
+        "del",
+        "ins",
+        "a",
+        "img",
+        "abbr",
+        "cite",
+        "q",
+        "label",
+        "font",
+        "center",
+        "wbr",
+        "big",
+        "tt",
         # document / non-visible
-        "html", "head", "body", "script", "style", "template", "title",
-        "meta", "link",
+        "html",
+        "head",
+        "body",
+        "script",
+        "style",
+        "template",
+        "title",
+        "meta",
+        "link",
     }
 )
 
 # Tags whose boundaries start a new line in the flattened text.
 _BLOCK_TAGS = frozenset(
     {
-        "p", "div", "tr", "li", "br", "table", "thead", "tbody", "tfoot",
-        "ul", "ol", "dl", "dt", "dd", "section", "article", "header", "footer",
-        "nav", "aside", "main", "blockquote", "pre", "figure", "figcaption",
-        "hr", "caption", "h1", "h2", "h3", "h4", "h5", "h6",
+        "p",
+        "div",
+        "tr",
+        "li",
+        "br",
+        "table",
+        "thead",
+        "tbody",
+        "tfoot",
+        "ul",
+        "ol",
+        "dl",
+        "dt",
+        "dd",
+        "section",
+        "article",
+        "header",
+        "footer",
+        "nav",
+        "aside",
+        "main",
+        "blockquote",
+        "pre",
+        "figure",
+        "figcaption",
+        "hr",
+        "caption",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
     }
 )
 
@@ -610,9 +699,7 @@ def _normalize_pair(a: str, b: str) -> tuple[str, str]:
     return (a, b) if a <= b else (b, a)
 
 
-def sample_indices(
-    dataset_len: int, max_samples: int | None = None, seed: int = 42
-) -> list[int]:
+def sample_indices(dataset_len: int, max_samples: int | None = None, seed: int = 42) -> list[int]:
     """Compute shuffled sample indices (cheap — no image loading).
 
     Args:
@@ -717,8 +804,7 @@ def build_comparisons(
         needed_pairs = [
             (i, j)
             for i, j in pairs
-            if idx
-            not in normalized_skip.get(_normalize_pair(model_names[i], model_names[j]), ())
+            if idx not in normalized_skip.get(_normalize_pair(model_names[i], model_names[j]), ())
         ]
         if not needed_pairs:
             continue  # Skip image encoding entirely
@@ -761,9 +847,7 @@ def build_comparisons(
         # rows whose pairs are all auto-ties skip the image entirely.
         needs_judge = any(auto is None for (_, _, _, _, auto) in valid_pairs)
         image_b64 = (
-            image_to_base64(dataset[idx]["image"], max_dim=judge_image_dim)
-            if needs_judge
-            else ""
+            image_to_base64(dataset[idx]["image"], max_dim=judge_image_dim) if needs_judge else ""
         )
 
         for i, j, text_a, text_b, auto in valid_pairs:

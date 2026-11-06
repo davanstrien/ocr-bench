@@ -77,9 +77,7 @@ class TestBuildParser:
         parser = build_parser()
         args = parser.parse_args(["bench", "user/imgs", "user/out"])
         assert args.judge_text_mode == "normalized"
-        args = parser.parse_args(
-            ["bench", "user/imgs", "user/out", "--judge-text-mode", "raw"]
-        )
+        args = parser.parse_args(["bench", "user/imgs", "user/out", "--judge-text-mode", "raw"])
         assert args.judge_text_mode == "raw"
 
     def test_multiple_models(self):
@@ -372,9 +370,7 @@ class TestCmdAudit:
         assert exc_info.value.code == 1
 
     def test_misalignment_exit_one(self, monkeypatch):
-        monkeypatch.setattr(
-            cli, "audit_repo", lambda *a, **k: _audit_report(status="misaligned")
-        )
+        monkeypatch.setattr(cli, "audit_repo", lambda *a, **k: _audit_report(status="misaligned"))
         args = build_parser().parse_args(["audit", "user/data"])
         with pytest.raises(SystemExit) as exc_info:
             cli.cmd_audit(args)
@@ -542,7 +538,7 @@ class TestCmdAuditJsonAndScreen:
         assert "1/10" in out  # cfg's loops
         assert "--max-ocr-text-len 3500" in out
         # The screen table keeps the configs' order.
-        screen_part = out[out.index("Screen"):]
+        screen_part = out[out.index("Screen") :]
         assert screen_part.index("cfg2") > screen_part.index("1/10")
 
     def test_screen_skip_reason_is_printed(self, monkeypatch, capsys):
@@ -612,9 +608,7 @@ class TestMainErrorHandling:
             raise exc
 
         monkeypatch.setattr(cli, "cmd_judge", boom)
-        monkeypatch.setattr(
-            sys, "argv", ["ocr-bench", "judge", "user/dataset", "--no-publish"]
-        )
+        monkeypatch.setattr(sys, "argv", ["ocr-bench", "judge", "user/dataset", "--no-publish"])
         with pytest.raises(SystemExit) as exc_info:
             cli.main()
         return exc_info.value.code
@@ -745,9 +739,7 @@ class TestRefreshViewerSpace:
 
         _refresh_viewer_space("user/x-results")
 
-        api.restart_space.assert_called_once_with(
-            "user/x-results-viewer", factory_reboot=True
-        )
+        api.restart_space.assert_called_once_with("user/x-results-viewer", factory_reboot=True)
 
     @patch("huggingface_hub.HfApi")
     def test_restarts_when_repos_unset(self, mock_api_cls):
@@ -758,9 +750,7 @@ class TestRefreshViewerSpace:
 
         _refresh_viewer_space("user/x-results")
 
-        api.restart_space.assert_called_once_with(
-            "user/x-results-viewer", factory_reboot=True
-        )
+        api.restart_space.assert_called_once_with("user/x-results-viewer", factory_reboot=True)
 
     @patch("huggingface_hub.HfApi")
     def test_warns_and_skips_on_repos_mismatch(self, mock_api_cls):
@@ -791,6 +781,7 @@ class TestRefreshViewerSpace:
         _refresh_viewer_space("user/x-results")  # must not raise
 
         api.restart_space.assert_not_called()
+
     def test_auto_tie_kept_as_tie(self):
         """An auto-tie verdict is a real tie, not a failure — it must survive."""
         results = _convert_results([_auto_comparison()], [dict(_AUTO_TIE)])
@@ -1064,8 +1055,7 @@ class TestCmdBench:
         """bench --criteria + --criteria-file fails fast (before launching jobs)."""
         calls = self._patch(monkeypatch)
         args = build_parser().parse_args(
-            ["bench", "user/imgs", "user/out", "--criteria", "default",
-             "--criteria-file", "r.txt"]
+            ["bench", "user/imgs", "user/out", "--criteria", "default", "--criteria-file", "r.txt"]
         )
         with pytest.raises(DatasetError, match="mutually exclusive"):
             cli.cmd_bench(args)
@@ -1132,15 +1122,14 @@ class TestCmdRun:
         from ocr_bench.run import JobRun
 
         launched = [
-            JobRun(slug, f"j{i}", f"u{i}")
-            for i, slug in enumerate(["glm-ocr", "dots-ocr"])
+            JobRun(slug, f"j{i}", f"u{i}") for i, slug in enumerate(["glm-ocr", "dots-ocr"])
         ]
 
         def fake_launch(*a, **k):
             return launched
 
         def fake_poll(jobs, **k):
-            for job, status in zip(jobs, statuses):
+            for job, status in zip(jobs, statuses, strict=True):
                 job.status = status
             return jobs
 
@@ -1172,10 +1161,7 @@ class TestCmdJudgeEmptyGuard:
         it must print the no-comparisons message, not an all-1500 board."""
         from PIL import Image
 
-        ds = [
-            {"image": Image.new("RGB", (20, 20)), "a": "x", "b": "y"}
-            for _ in range(4)
-        ]
+        ds = [{"image": Image.new("RGB", (20, 20)), "a": "x", "b": "y"} for _ in range(4)]
 
         def fake_flat(dataset, split="train", columns=None):
             return ds, {"a": "ModelA", "b": "ModelB"}

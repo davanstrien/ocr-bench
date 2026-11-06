@@ -578,9 +578,7 @@ def audit_repo(
             columns[col] = (model, values)
             audits.append(
                 ConfigAudit(
-                    compute_column_stats(
-                        col, model, values, max_ocr_text_len, normalize=normalize
-                    )
+                    compute_column_stats(col, model, values, max_ocr_text_len, normalize=normalize)
                 )
             )
 
