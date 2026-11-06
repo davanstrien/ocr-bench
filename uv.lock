@@ -1130,7 +1130,7 @@ provides-extras = ["viewer"]
 dev = [
     { name = "hypothesis", specifier = ">=6.156.1" },
     { name = "pytest", specifier = ">=9.0.2" },
-    { name = "ruff", specifier = ">=0.11" },
+    { name = "ruff", specifier = "==0.15.4" },
     { name = "ty", specifier = "==0.0.97" },
 ]
 
