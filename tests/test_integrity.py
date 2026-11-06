@@ -9,11 +9,15 @@ import pytest
 from datasets import Dataset
 
 from ocr_bench.dataset import DatasetError, LoadedConfig
+from ocr_bench.elo import ComparisonResult
 from ocr_bench.integrity import (
     audit_repo,
     compute_column_stats,
     compute_model_stats,
     failed_output_counts,
+    model_coverage,
+    suggest_text_cap,
+    truncation_exposure,
 )
 
 
@@ -122,6 +126,89 @@ class TestFailedOutputCounts:
         )
         stats = compute_model_stats(ds, {"cfg_a": "model-a", "cfg_b": "model-b"})
         assert failed_output_counts(stats) == {"model-a": 1}
+
+
+class TestModelCoverage:
+    def test_counts_pages_per_model_within_the_sample(self):
+        ds = Dataset.from_dict(
+            {
+                "cfg_a": ["text a0", "text a1", "text a2", "text a3"],
+                "cfg_b": ["text b0", "[OCR ERROR]", "text b2", "[OCR ERROR]"],
+                "cfg_c": ["text c0", "text c1", "text c2", "text c3"],
+            }
+        )
+        ocr = {"cfg_a": "A", "cfg_b": "B", "cfg_c": "C"}
+        results = [
+            ComparisonResult(sample_idx=0, model_a="A", model_b="B", winner="A"),
+            ComparisonResult(sample_idx=1, model_a="A", model_b="C", winner="tie"),
+            ComparisonResult(sample_idx=2, model_a="B", model_b="C", winner="B"),
+            ComparisonResult(sample_idx=3, model_a="A", model_b="C", winner="A"),  # not sampled
+        ]
+        coverage = model_coverage(ds, ocr, [0, 1, 2], results)
+        assert {m: c.to_dict() for m, c in coverage.items()} == {
+            "A": {"sampled_pages": 3, "ranked_pages": 2, "sentinel_pages": 0},
+            "B": {"sampled_pages": 3, "ranked_pages": 2, "sentinel_pages": 1},
+            "C": {"sampled_pages": 3, "ranked_pages": 2, "sentinel_pages": 0},
+        }
+
+
+class TestTruncationExposure:
+    def test_rates_leave_out_error_sentinels(self):
+        ds = [
+            {"a": "x" * 50, "b": "[OCR ERROR]"},
+            {"a": "x" * 50, "b": "x" * 50},
+            {"a": "x" * 5, "b": "x" * 5},
+        ]
+        exposure = truncation_exposure(ds, {"a": "A", "b": "B"}, [0, 1, 2], 20)
+        assert exposure.outputs == {"A": 3, "B": 2}
+        assert exposure.over_cap == {"A": 2, "B": 1}
+        assert exposure.overall_rate == 3 / 5
+        assert exposure.models_over_warn_rate == ["A"]
+        assert exposure.warn
+
+    def test_only_the_sampled_rows_count(self):
+        ds = [{"a": "x" * 50}, {"a": "x" * 5}, {"a": "x" * 5}]
+        assert not truncation_exposure(ds, {"a": "A"}, [1, 2], 20).warn
+        assert truncation_exposure(ds, {"a": "A"}, [0], 20).warn
+
+    def test_sentinel_longer_than_the_cap_is_not_counted(self):
+        # Before, the sentinels counted as over the cap but not as outputs:
+        # "2 of 1 outputs (200%)".
+        ds = [{"a": "[OCR ERROR]"}, {"a": "[OCR ERROR]"}, {"a": "short"}]
+        exposure = truncation_exposure(ds, {"a": "A"}, [0, 1, 2], 10)
+        assert exposure.outputs == {"A": 1}
+        assert exposure.over_cap == {"A": 0}
+        assert not exposure.warn
+
+    def test_sentinel_padded_with_newlines_is_not_counted(self):
+        ds = [{"a": "[OCR ERROR]" + "\n" * 3000}, {"a": "a real transcription"}]
+        exposure = truncation_exposure(ds, {"a": "A"}, [0, 1])
+        assert exposure.outputs == {"A": 1}
+        assert exposure.over_cap == {"A": 0}
+        assert not exposure.warn
+
+    def test_no_outputs_no_warning(self):
+        exposure = truncation_exposure([{"a": "[OCR ERROR]"}], {"a": "A"}, [0], 20)
+        assert exposure.overall_rate == 0.0
+        assert not exposure.warn
+
+
+class TestSuggestTextCap:
+    def test_needs_three_models_with_output(self):
+        ds = [{"a": "x y " * 100, "b": "a b " * 100, "c": ""}]
+        assert suggest_text_cap(ds, {"a": "A", "b": "B", "c": "C"}, [0], 100) is None
+
+    def test_uses_the_screen_suggestion(self):
+        import random
+
+        def prose(seed):
+            rng = random.Random(seed)
+            return "".join(rng.choice("abcdefgh  ") for _ in range(700))
+
+        ds = [{"a": prose(1), "b": prose(2), "c": prose(3)}]
+        screen = suggest_text_cap(ds, {"a": "A", "b": "B", "c": "C"}, [0], 100)
+        assert screen is not None
+        assert screen.suggested_max_ocr_text_len == 1000
 
 
 def _loaded_config(name, model, texts, extra=None):

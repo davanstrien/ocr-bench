@@ -79,6 +79,10 @@ class EvalMetadata:
     # All-sentinel models. They remain visible in the published data but must
     # not receive an ordinary ELO or leaderboard rank.
     failed_models: list[str] = field(default_factory=list)
+    # model → {"sampled_pages", "ranked_pages", "sentinel_pages"}: how many pages
+    # of the judged sample its rating rests on (see integrity.ModelCoverage).
+    # Reporting only; not part of the resume provenance.
+    model_coverage: dict[str, dict[str, int]] = field(default_factory=dict)
     # Judge prompt provenance: which criteria profile (--criteria) was used and a
     # stable hash of the exact prompt template. Two boards judged under different
     # prompts share a judge model but differ here, so they stay distinguishable.
@@ -428,6 +432,7 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
         "from_prs": metadata.from_prs,
         "failed_outputs": json.dumps(metadata.failed_outputs),
         "failed_models": json.dumps(metadata.failed_models),
+        "model_coverage": json.dumps(metadata.model_coverage, sort_keys=True),
         "criteria": metadata.criteria,
         "prompt_hash": metadata.prompt_hash,
         "timestamp": metadata.timestamp,
@@ -736,6 +741,39 @@ def _build_readme(
         for model, count in sorted(failed_outputs.items(), key=lambda kv: -kv[1]):
             safe_model = str(model).replace("|", "\\|")
             lines.append(f"| {safe_model} | {count} |")
+
+    coverage = metadata.model_coverage
+    if isinstance(coverage, str):
+        coverage = json.loads(coverage) if coverage else {}
+    if coverage:
+        sampled = max(entry.get("sampled_pages", 0) for entry in coverage.values())
+        short_pages = (
+            f"all outputs on it are shorter than {metadata.min_chars} characters, or when "
+            if metadata.min_chars > 0
+            else ""
+        )
+        lines += [
+            "",
+            "## Coverage",
+            "",
+            f"The judged sample has {sampled} pages. Each model is ranked on the pages "
+            "where it took part in at least one judged or auto-tied comparison. A page "
+            "is left out for a model when its output is an error sentinel. A page is "
+            f"left out for every model when {short_pages}adaptive stopping or the "
+            "comparison budget ended the run first.",
+            "",
+            "| Model | Ranked on | Error sentinels |",
+            "|-------|-----------|-----------------|",
+        ]
+        listed = [row["model"] for row in rows if row["model"] in coverage]
+        listed += sorted(model for model in coverage if model not in listed)
+        for model in listed:
+            entry = coverage[model]
+            safe_model = str(model).replace("|", "\\|")
+            lines.append(
+                f"| {safe_model} | {entry.get('ranked_pages', 0)} of "
+                f"{entry.get('sampled_pages', 0)} pages | {entry.get('sentinel_pages', 0)} |"
+            )
 
     lines += [
         "",

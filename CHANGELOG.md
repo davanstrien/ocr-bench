@@ -17,6 +17,14 @@ current behaviour.
   - On 2,230 outputs from seven public ocr-bench collections, the test flags 15 more outputs. All 15 are counting lists. No real transcription had a run longer than 23 numbers.
   - Replacing every digit with 0 before the compression test also finds these lists, but it flagged 16 numeric tables on the same outputs, so it is not used.
 
+### New
+
+- `judge` and `bench` report on how many pages each model is ranked. The leaderboard has a Pages column, N/M: M is the number of pages in the judged sample (`--max-samples`, or every row), and N is the number of those pages where the model took part in at least one judged or auto-tied comparison. A footnote names each model with error sentinels (placeholders such as `[OCR ERROR]`) in the sample. The results card has a Coverage section, and each new `metadata` row has `model_coverage` (JSON: `sampled_pages`, `ranked_pages` and `sentinel_pages` per model).
+- `judge` prints a note when a model has error sentinels at a rate of 10% or less: they are excluded from judging, so its rank leaves out those pages. Before, only rates over 10% were reported. The threshold and the exclusion do not change.
+- Before judging, `judge` and `bench` warn when `--max-ocr-text-len` truncates more than half of the outputs in the judged sample, overall or for any one model. The warning suggests a cap from the `audit --screen` checks (a cap that fits every output that no check flags), when 3 or more models have output. The default cap does not change.
+
+These are reports only. Prompt hashes, comparison fingerprints and resume provenance do not change, so results repos from 0.0.6 can resume.
+
 ### Fixes
 
 - An OCR output cell that is not a string (a number, a NaN, a list) is read as an empty output by `judge`, `audit` and `audit --screen`. Before, such a cell crashed them. The cell is not converted with `str()`, so the judge never sees text such as `nan`. In the audit, the cell counts as empty, and a column with no string values has no judgeable rows.

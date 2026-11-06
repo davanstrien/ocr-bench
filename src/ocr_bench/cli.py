@@ -43,9 +43,13 @@ from ocr_bench.dataset import (
 from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo
 from ocr_bench.integrity import (
     SENTINEL_FLAG_RATE,
+    ModelCoverage,
     audit_repo,
     compute_model_stats,
     failed_output_counts,
+    model_coverage,
+    suggest_text_cap,
+    truncation_exposure,
 )
 from ocr_bench.judge import (
     CRITERIA_PROFILES,
@@ -584,8 +588,13 @@ def print_leaderboard(
     *,
     size_tie_ratio: float | None = None,
     size_tie_min_samples: int = 10,
+    coverage: dict[str, ModelCoverage] | None = None,
 ) -> None:
-    """Print leaderboard as a Rich table, leaving failed runs unranked."""
+    """Print leaderboard as a Rich table, leaving failed runs unranked.
+
+    With ``coverage``, a Pages column shows on how many pages of the judged
+    sample each model is ranked (see :class:`ocr_bench.integrity.ModelCoverage`).
+    """
     from ocr_bench.publish import _get_model_sizes
 
     sizes = _get_model_sizes()
@@ -612,6 +621,16 @@ def print_leaderboard(
     table.add_column("Losses", justify="right")
     table.add_column("Ties", justify="right")
     table.add_column("Win%", justify="right")
+    if coverage:
+        table.add_column("Pages", justify="right")
+
+    def pages_cell(model: str) -> list[str]:
+        if not coverage:
+            return []
+        entry = coverage.get(model)
+        if entry is None:
+            return ["-"]
+        return [f"{entry.ranked_pages}/{entry.sampled_pages}"]
 
     failed = set(failed_models or [])
     rank = 0
@@ -640,6 +659,7 @@ def print_leaderboard(
             str(board.losses[model]),
             str(board.ties[model]),
             pct_str,
+            *pages_cell(model),
         )
 
     for model in sorted(failed):
@@ -652,9 +672,12 @@ def print_leaderboard(
             "-",
             "-",
             "-",
+            *pages_cell(model),
         )
 
     console.print(table)
+    if coverage:
+        _print_coverage_note(coverage)
     if preferences:
         console.print(
             "[dim]★ Parameter-efficient practical preference: adjacent 95% CIs overlap, "
@@ -668,6 +691,78 @@ def print_leaderboard(
                     f"{decision.size_ratio:.1f}× fewer parameters after "
                     f"{decision.direct_comparisons} direct comparisons[/dim]"
                 )
+
+
+def _print_coverage_note(coverage: dict[str, ModelCoverage]) -> None:
+    """Explain the Pages column, and name the models whose rank leaves out sentinel pages."""
+    sampled = max(entry.sampled_pages for entry in coverage.values())
+    console.print(
+        f"[dim]Pages: ranked on N of the {sampled} sampled pages, the pages with at least "
+        "one judged or auto-tied comparison for the model. Pages where all outputs are "
+        "under --min-chars are not judged. Adaptive stopping or --max-comparisons can "
+        "stop the run before every page is judged.[/dim]"
+    )
+    for model, entry in coverage.items():
+        if entry.sentinel_pages:
+            console.print(
+                f"  {model}: ranked on {entry.ranked_pages} of {entry.sampled_pages} "
+                f"pages; {entry.sentinel_pages} error sentinel(s) left out."
+            )
+
+
+def _warn_text_cap(
+    ds: object,
+    ocr_columns: dict[str, str],
+    indices: list[int],
+    max_ocr_text_len: int,
+    normalize: bool,
+) -> None:
+    """Warn before judging when the text cap truncates over half the sampled outputs.
+
+    The suggested cap comes from the ``audit --screen`` checks, run on the
+    judged sample. This only prints; the run keeps ``max_ocr_text_len``.
+    """
+    exposure = truncation_exposure(
+        ds, ocr_columns, indices, max_ocr_text_len, normalize=normalize
+    )
+    if not exposure.warn:
+        return
+    console.print(
+        f"[yellow]⚠ Text cap:[/yellow] --max-ocr-text-len {max_ocr_text_len} truncates "
+        f"{exposure.total_over_cap} of {exposure.total_outputs} outputs "
+        f"({exposure.overall_rate:.0%}) in the judged sample. The judge sees the first "
+        f"{max_ocr_text_len} characters of each, with a note that the output was cut."
+    )
+    over_half = exposure.models_over_warn_rate
+    if over_half:
+        listed = ", ".join(f"{model} ({exposure.rate(model):.0%})" for model in over_half)
+        console.print(f"  Over half are truncated for: {listed}.")
+    screen = suggest_text_cap(ds, ocr_columns, indices, max_ocr_text_len, normalize=normalize)
+    if screen is None:
+        console.print(
+            "  No cap is suggested: the screen checks need outputs from 3 or more models. "
+            "`ocr-bench audit` shows the output lengths."
+        )
+        return
+    suggested = screen.suggested_max_ocr_text_len
+    if suggested is None:
+        # The screen's flags are leads: a flagged output can still be a complete
+        # transcription (for example the one long output on a page where the
+        # other models stopped early), so do not say that a higher cap cannot help.
+        console.print(
+            f"  --max-ocr-text-len {max_ocr_text_len} fits every output that the "
+            "`audit --screen` checks do not flag. Every output over the cap is flagged "
+            "(for example as a loop, or as over 5x the others' length). Inspect them "
+            "before you choose a cap: `ocr-bench audit --screen --json` lists the "
+            "flagged rows."
+        )
+        return
+    console.print(
+        f"  --max-ocr-text-len {suggested} fits every output that the `audit --screen` "
+        "checks do not flag. A higher cap makes each judge call longer. To use it, pass "
+        f"it to `ocr-bench judge`; a results repo judged with another cap needs "
+        f"--full-rejudge. This run keeps {max_ocr_text_len}."
+    )
 
 
 def _merge_auto_ties(
@@ -1304,6 +1399,18 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 f"error sentinels ({stat.sentinel_rate:.0%}) — excluded from judging; "
                 f"{consequence}.[/yellow]"
             )
+        elif stat.n_sentinel:
+            # Under the warning rate, but its rank still rests on fewer pages.
+            console.print(
+                f"Note: {stat.model}: {stat.n_sentinel}/{stat.n_rows} outputs are error "
+                f"sentinels ({stat.sentinel_rate:.1%}). They are excluded from judging, "
+                "so its rank leaves out those pages."
+            )
+
+    # The judged sample, for the text-cap warning and the coverage report.
+    # sample_indices is deterministic, so this matches the rows judged below.
+    judged_sample = sample_indices(len(ds), args.max_samples, args.seed)
+    _warn_text_cap(ds, ocr_columns, judged_sample, args.max_ocr_text_len, normalize)
 
     # Stable ordering matters when ELOs tie: adjacency drives targeted sampling.
     model_names = sorted(set(ocr_columns.values()) - set(failed_models))
@@ -1843,6 +1950,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
         if not comparisons:
             console.print("[green]All pairs already judged — refitting leaderboard.[/green]")
             board = compute_elo(existing_results, model_names)
+            coverage = model_coverage(ds, ocr_columns, judged_sample, existing_results)
             console.print()
             print_leaderboard(
                 board,
@@ -1850,6 +1958,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 failed_outputs,
                 size_tie_ratio=args.size_tie_ratio,
                 size_tie_min_samples=args.size_tie_min_samples,
+                coverage=coverage,
             )
             if results_repo:
                 metadata = EvalMetadata(
@@ -1872,6 +1981,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     from_prs=from_prs,
                     failed_outputs=failed_outputs,
                     failed_models=failed_models,
+                    model_coverage={m: c.to_dict() for m, c in coverage.items()},
                     criteria=criteria,
                     prompt_hash=criteria_prompt_hash,
                     max_ocr_text_len=args.max_ocr_text_len,
@@ -1957,6 +2067,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
     # --- Merge existing + new, compute ELO ---
     all_results = existing_results + new_results
     board = compute_elo(all_results, model_names)
+    coverage = model_coverage(ds, ocr_columns, judged_sample, all_results)
     console.print()
     print_leaderboard(
         board,
@@ -1964,6 +2075,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
         failed_outputs,
         size_tie_ratio=args.size_tie_ratio,
         size_tie_min_samples=args.size_tie_min_samples,
+        coverage=coverage,
     )
 
     # A budget-capped run may stop before the ranking is statistically settled —
@@ -2009,6 +2121,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             from_prs=from_prs,
             failed_outputs=failed_outputs,
             failed_models=failed_models,
+            model_coverage={m: c.to_dict() for m, c in coverage.items()},
             criteria=criteria,
             prompt_hash=criteria_prompt_hash,
             max_ocr_text_len=args.max_ocr_text_len,
