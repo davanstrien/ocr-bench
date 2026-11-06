@@ -415,6 +415,48 @@ def build_parser() -> argparse.ArgumentParser:
     publish.add_argument("--space", default=None, help="Space repo id (default: {results}-viewer)")
     publish.add_argument("--private", action="store_true", help="Make the Space private")
 
+    # --- share subcommand ---
+    share = sub.add_parser(
+        "share",
+        help="Write a scores-only board from a results repo to a separate repo",
+        description=(
+            "Read a results repo written by judge (it may be private) and write "
+            "ratings only to a separate dataset repo: no page text, OCR outputs or "
+            "judge reasons. A missing destination is created public unless --private "
+            "is set. An existing one keeps its visibility."
+        ),
+    )
+    share.add_argument("results", help="Results repo written by `ocr-bench judge`")
+    share.add_argument(
+        "dest", help="Dataset repo for the board; not the results repo or the source"
+    )
+    share.add_argument(
+        "--alias",
+        required=True,
+        help="Public name of the evaluation set. The source repo id is not published.",
+    )
+    share.add_argument(
+        "--slice-column",
+        default=None,
+        help=(
+            "Source dataset column that labels each page (for example a document "
+            "type). Adds one board per label with 10 or more judged pages."
+        ),
+    )
+    share.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Write the files to a local folder (--output-dir) and push nothing",
+    )
+    share.add_argument(
+        "--output-dir",
+        default=None,
+        help="Folder for --dry-run (default: ./ocr-bench-share-<alias>)",
+    )
+    share.add_argument(
+        "--private", action="store_true", help="Create a missing destination repo private"
+    )
+
     # --- bench subcommand (run → judge → view in one shot) ---
     bench = sub.add_parser(
         "bench", help="Run → judge → view in one command (the 'just try it' path)"
@@ -2185,6 +2227,66 @@ def cmd_view(args: argparse.Namespace) -> None:
     uvicorn.run(app, host=args.host, port=args.port)
 
 
+def _print_share_board(title: str, rows: list[dict]) -> None:
+    table = Table(title=title)
+    for column in ("Rank", "Model", "ELO", "95% CI", "Pages", "Status"):
+        table.add_column(column)
+    for row in rows:
+        ci = f"{row['elo_low']}–{row['elo_high']}" if row.get("elo_low") is not None else "—"
+        table.add_row(
+            str(row["rank"] or "—"),
+            row["model"],
+            str(row["elo"] if row["elo"] is not None else "—"),
+            ci,
+            str(row["pages"]),
+            row["status"],
+        )
+    console.print(table)
+
+
+def cmd_share(args: argparse.Namespace) -> None:
+    """Write a scores-only board from a results repo to a separate repo."""
+    from ocr_bench.share import load_private_evaluation, plan_share, push_share, write_local
+
+    console.print(f"Reading [bold]{args.results}[/bold]...")
+    evaluation = load_private_evaluation(args.results)
+    plan = plan_share(
+        evaluation,
+        results_repo=args.results,
+        alias=args.alias,
+        slice_column=args.slice_column,
+    )
+    _print_share_board(f"{plan.alias}: overall ({plan.settings['pages']} pages)", plan.overall_rows)
+    for name in plan.settings["slices"]:
+        _print_share_board(
+            f"{plan.alias}: {name}", [row for row in plan.slice_rows if row["slice"] == name]
+        )
+    if args.slice_column:
+        console.print(
+            f"{len(plan.settings['slices'])} slice boards; "
+            f"{plan.settings['pages_not_in_a_slice_board']} judged pages are in none."
+        )
+    console.print(
+        "[green]Privacy checks passed[/green]: allowed columns and values only, "
+        "no page text or judge reasons."
+    )
+
+    if args.dry_run:
+        out_dir = Path(args.output_dir or f"ocr-bench-share-{plan.alias}")
+        written = write_local(plan, out_dir)
+        console.print(
+            f"Dry run: wrote {len(written)} files to [bold]{out_dir}[/bold]. Nothing was pushed."
+        )
+        return
+
+    result = push_share(plan, args.dest, results_repo=args.results, private=args.private)
+    state = "created" if result.created else "updated"
+    visibility = "private" if result.private else "public"
+    console.print(f"Board {state}: https://huggingface.co/datasets/{result.repo_id} ({visibility})")
+    if result.private:
+        console.print("The repo is private. Make it public on the Hub when you are ready.")
+
+
 SPACE_TEMPLATE = "davanstrien/ocr-bench-space-template"
 
 
@@ -2597,6 +2699,8 @@ def main() -> None:
             cmd_bench(args)
         elif args.command == "audit":
             cmd_audit(args)
+        elif args.command == "share":
+            cmd_share(args)
     except DatasetError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(1)

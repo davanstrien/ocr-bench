@@ -117,6 +117,18 @@ Before judging, `judge` and `bench` warn when `--max-ocr-text-len` truncates mor
 
 **`ocr-bench view`** serves a local web viewer with a leaderboard, comparison browser, and human validation. Vote on comparisons to cross-check the automated judge with human judgement.
 
+**`ocr-bench share`** publishes a scores-only board from a results repo that must stay private. A results repo holds page text: each comparison row has both OCR outputs and the judge's reason. `share` reads it and writes ratings only to a separate dataset repo, under a public name (`--alias`) in place of the source repo id:
+
+```bash
+ocr-bench share <results-repo> <board-repo> --alias gov-scans-v1 --slice-column doc_type --dry-run
+```
+
+- The board has the overall ranking (ELO, 95% CI, pages, wins, losses and ties per model) and the judge settings (judge, criteria, prompt hash, text and image caps). It does not have page text, OCR outputs, judge reasons, page ids or the source repo id. It has the source fingerprint, which identifies the exact evaluation data without publishing it.
+- `--slice-column` names a source dataset column that labels each page, for example a document type or a decade. `share` adds one board per label with 10 or more judged pages. A label on fewer pages is not published.
+- Two checks run on the final files before any Hub call. Each row must have exactly the allowed columns, with values that are model names, slice labels, statuses or settings. No 32-character chunk of a compared output or judge reason can occur in any file, so a copied fragment of 63 or more characters is always found. If a check fails, nothing is written.
+- `share` refuses a destination that is the results repo or the source, or that has files it did not write. It refuses when the leaderboard does not match its comparisons, for example after a judge run that stopped after a checkpoint. With `--slice-column`, it also refuses when the source rows are no longer the judged sample.
+- A missing destination is created public, or private with `--private`. An existing destination keeps its visibility. `--dry-run` writes the files to a local folder and pushes nothing.
+
 ## Available models
 
 ocr-bench ships with 16 registered OCR models. Five form the default set:
