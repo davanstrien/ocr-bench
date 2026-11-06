@@ -35,8 +35,12 @@ Inspired by [Datalab's Benchmarks + Evals](https://www.datalab.to/blog/datalab-b
 ```bash
 uv sync --dev --extra viewer
 uv run ruff check src/ tests/
+uv run ruff format src/ tests/
+uv run ty check src/
 uv run pytest tests/ -x -q
 ```
+
+CI also checks `ruff format --check` and that `uv.lock` resolves from https://pypi.org/simple only. If your uv config points at another index, relock with `uv lock --default-index https://pypi.org/simple`.
 
 Branch protection is on — all changes go through PRs with CI checks.
 

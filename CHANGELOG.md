@@ -41,6 +41,11 @@ ocr-bench is experimental, so these go without a transition release.
 - Results repos do not get a duplicate `leaderboard` config any more, and the README does not declare one. Load the default config: `load_dataset("<repo>")`. Existing repos keep their old `leaderboard/` folder, which stops updating. The viewer reads the default config only.
 - The `PAIRWISE_PROMPT` alias and three unused viewer helpers are gone. Use `CRITERIA_PROFILES[DEFAULT_CRITERIA]`.
 
+### Other
+
+- Code that pairs lists that must have the same length now uses `zip(..., strict=True)`, so a mismatch raises an error instead of dropping rows silently. This covers judge results and comparisons, jury votes, fingerprints and alignment columns.
+- Development: `ty` is pinned to 0.0.97, ruff also checks the `B` rules, and all files are formatted with `ruff format`. CI checks formatting and that `uv.lock` resolves from https://pypi.org/simple only.
+
 ## [0.0.6] - 2026-11-04
 
 ### Upgrading from 0.0.5
