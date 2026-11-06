@@ -10,13 +10,16 @@ from itertools import combinations
 from types import SimpleNamespace
 
 import pytest
+from datasets import Dataset
 from huggingface_hub import CommitOperationAdd, CommitOperationDelete
 from huggingface_hub.errors import RepositoryNotFoundError
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from ocr_bench import cli, share
+from ocr_bench.dataset import evaluation_input_fingerprints
 from ocr_bench.elo import ComparisonResult, compute_elo
+from ocr_bench.judge import sample_indices
 from ocr_bench.publish import build_leaderboard_rows
 from ocr_bench.share import (
     CHUNK,
@@ -33,20 +36,22 @@ from ocr_bench.share import (
 MODELS = ["org/model-good", "org/model-mid", "org/model-weak"]
 STRENGTH = {"org/model-good": 0.8, "org/model-mid": 0.5, "org/model-weak": 0.2}
 NOW = "2026-11-06T23:00:00+00:00"
+RESULTS = "me/private-results"
+SOURCE = "me/private-source"
 
 
 @pytest.fixture(autouse=True)
 def _few_bootstrap_resamples(monkeypatch):
-    # Each resample is a scipy fit. Ratings do not depend on the resamples.
+    # Each resample is a scipy fit. Ratings and counts do not depend on the resamples.
     monkeypatch.setattr(share, "N_BOOTSTRAP", 20)
 
 
-def _results(pages, models=MODELS, *, text=None, reason=None, seed=0):
+def _results(pages, models=MODELS, *, pairs=None, text=None, reason=None, seed=0):
     """One comparison per model pair per page. Stronger models win more often."""
     rng = random.Random(seed)
     results = []
     for page in pages:
-        for a, b in combinations(models, 2):
+        for a, b in pairs or combinations(models, 2):
             p_a = STRENGTH.get(a, 0.5) / (STRENGTH.get(a, 0.5) + STRENGTH.get(b, 0.5))
             roll = rng.random()
             winner = "A" if roll < p_a - 0.05 else "B" if roll > p_a + 0.05 else "tie"
@@ -67,13 +72,15 @@ def _results(pages, models=MODELS, *, text=None, reason=None, seed=0):
 
 def _metadata(n_rows, **overrides):
     metadata = {
-        "source_dataset": "me/private-source",
+        "source_dataset": SOURCE,
         "source_split": "train",
         "source_configs": json.dumps([]),
         "source_revisions": "{}",
+        "source_output_columns": "{}",
         "judge_models": json.dumps(["novita:Qwen/Qwen3.8-27B"]),
         "seed": 42,
         "max_samples": n_rows,
+        "adaptive_strategy": "balanced",
         "failed_models": "[]",
         "failed_outputs": "{}",
         "criteria": "body-text",
@@ -90,10 +97,15 @@ def _metadata(n_rows, **overrides):
 
 
 def _evaluation(results, models=MODELS, *, n_rows=None, failed_models=(), failed_outputs=None):
-    """A results repo as judge publishes it: the board fitted on the grid."""
-    grid = set(models)
+    """A results repo as judge publishes it.
+
+    Judge fits the board without failed models and appends them as FAILED rows.
+    Comparisons with a model outside the fit stay in the repo as history.
+    """
+    fitted = [m for m in models if m not in failed_models]
+    grid = set(fitted)
     board = compute_elo(
-        [r for r in results if r.model_a in grid and r.model_b in grid], models, n_bootstrap=0
+        [r for r in results if r.model_a in grid and r.model_b in grid], fitted, n_bootstrap=0
     )
     rows = build_leaderboard_rows(board, list(failed_models), failed_outputs or {})
     n_rows = n_rows or max(r.sample_idx for r in results) + 1
@@ -107,7 +119,7 @@ def _evaluation(results, models=MODELS, *, n_rows=None, failed_models=(), failed
 
 def _plan(evaluation, **kwargs):
     kwargs.setdefault("alias", "gov-scans-v1")
-    return plan_share(evaluation, results_repo="me/private-results", now=NOW, **kwargs)
+    return plan_share(evaluation, results_repo=RESULTS, now=NOW, **kwargs)
 
 
 def _labels(n_rows, groups):
@@ -117,6 +129,12 @@ def _labels(n_rows, groups):
         for row in rows:
             values[row] = label
     return values
+
+
+def _rewrite_rows(plan, path, change):
+    rows = [json.loads(line) for line in plan.files[path].decode().splitlines()]
+    change(rows)
+    plan.files[path] = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows).encode()
 
 
 # ---------------------------------------------------------------------------
@@ -134,57 +152,63 @@ class TestBoards:
         assert all(row["pages"] == 20 for row in plan.overall_rows)
         assert plan.settings["pages"] == 20
         assert plan.settings["comparisons"] == 60
+        assert (plan.settings["seed"], plan.settings["adaptive_strategy"]) == (42, "balanced")
 
-    def test_a_board_that_differs_from_its_comparisons_is_refused(self):
+    def test_a_board_with_other_ratings_is_refused(self):
         evaluation = _evaluation(_results(range(20)))
-        evaluation.leaderboard[0]["elo"] += 40  # e.g. a later run stopped after a checkpoint
+        evaluation.leaderboard[0]["elo"] += 40
         with pytest.raises(ShareError, match="does not match its comparisons"):
             _plan(evaluation)
 
-    def test_out_of_grid_history_is_not_ranked_but_is_still_scanned(self):
-        grid = _results(range(20))
-        history = _results(range(20), ["org/model-good", "org/old-model"], seed=1)
-        for result in history:
-            result.text_b = f"OLD MODEL TRANSCRIPT of page {result.sample_idx}: " + "Qx7" * 30
-        evaluation = _evaluation(grid + history)
-        plan = _plan(evaluation)
-        assert "org/old-model" not in {row["model"] for row in plan.overall_rows}
-        assert history[0].text_b in plan.private_texts
+    def test_extra_verdicts_with_the_same_ratings_are_refused(self):
+        # A checkpoint can add pages whose outcomes keep every rating the same.
+        evaluation = _evaluation(_results(range(20)))
+        for result in _results(range(20)):
+            result.sample_idx += 20
+            evaluation.comparisons.append(result)
+        refit = _evaluation(evaluation.comparisons).leaderboard
+        assert [r["elo"] for r in refit] == [r["elo"] for r in evaluation.leaderboard]
+        with pytest.raises(ShareError, match="does not match its comparisons"):
+            _plan(evaluation)
 
-    def test_failed_model_is_listed_without_a_rank(self):
+    def test_failed_model_history_stays_out_of_the_fit(self):
+        """Judge fits without a failed model; its older comparisons remain as history."""
         models = [*MODELS, "org/model-broken"]
+        history = _results(range(20), ["org/model-good", "org/model-broken"], seed=1)
         evaluation = _evaluation(
-            _results(range(20)),
+            _results(range(20)) + history,
             models,
             failed_models=["org/model-broken"],
             failed_outputs={"org/model-broken": 20},
         )
         plan = _plan(evaluation)
-        failed = [row for row in plan.overall_rows if row["model"] == "org/model-broken"]
-        assert failed == [
-            {
-                "rank": None,
-                "model": "org/model-broken",
-                "params": None,
-                "elo": None,
-                "elo_low": None,
-                "elo_high": None,
-                "pages": 0,
-                "wins": 0,
-                "losses": 0,
-                "ties": 0,
-                "win_pct": None,
-                "status": "failed",
-                "failed_outputs": 20,
-            }
-        ]
+        failed = plan.overall_rows[-1]
+        assert failed["model"] == "org/model-broken"
+        assert (failed["rank"], failed["elo"], failed["status"]) == (None, None, "failed")
+        assert failed["failed_outputs"] == 20
+        assert history[0].text_b in plan.private_texts
         assert "FAILED" in plan.files["README.md"].decode()
+
+    def test_out_of_grid_history_is_not_ranked_but_is_still_scanned(self):
+        history = _results(range(20), ["org/model-good", "org/old-model"], seed=1)
+        for result in history:
+            result.text_b = f"OLD MODEL TRANSCRIPT of page {result.sample_idx}: " + "Qx7" * 30
+        plan = _plan(_evaluation(_results(range(20)) + history))
+        assert "org/old-model" not in {row["model"] for row in plan.overall_rows}
+        assert history[0].text_b in plan.private_texts
 
     def test_no_slices_without_a_slice_column(self):
         plan = _plan(_evaluation(_results(range(20))))
         assert plan.slice_rows == []
         assert "slices.jsonl" not in plan.files
         assert "config_name: slices" not in plan.files["README.md"].decode()
+
+    def test_a_custom_criteria_file_name_is_not_published(self):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata["criteria"] = "custom:idl-drug-rubric.txt"
+        plan = _plan(evaluation)
+        assert plan.settings["criteria"] == "custom"
+        assert "rubric" not in b"".join(plan.files.values()).decode()
 
     @pytest.mark.parametrize("alias", ["", "   ", "x" * 65, "two\nlines"])
     def test_alias_must_be_a_short_single_line(self, alias):
@@ -193,90 +217,167 @@ class TestBoards:
 
 
 class TestSlices:
-    def _plan(self, groups, n_rows=40, pages=None):
+    def _plan(self, groups, n_rows=40, pages=None, results=None, **kwargs):
         values = _labels(n_rows, groups)
-        evaluation = _evaluation(_results(pages or range(40)), n_rows=n_rows)
-        return _plan(
-            evaluation, slice_column="doc_type", slice_values=lambda metadata, column: values
-        )
+        results = results or _results(pages or range(40))
+        evaluation = _evaluation(results, n_rows=n_rows, **kwargs)
+        return _plan(evaluation, slice_column="doc_type", slice_values=lambda m, c: values)
 
-    def test_one_board_per_slice_with_enough_pages(self):
+    def test_one_board_per_label_with_enough_pages(self):
         plan = self._plan({"letters": range(0, 15), "forms": range(15, 30), "maps": range(30, 33)})
         assert plan.settings["slices"] == ["forms", "letters"]
+        assert plan.settings["slice_pages"] == [15, 15]
         # 3 pages of maps (too few) and 7 pages with no label.
         assert plan.settings["pages_not_in_a_slice_board"] == 10
         assert {row["slice"] for row in plan.slice_rows} == {"forms", "letters"}
-        letters = [row for row in plan.slice_rows if row["slice"] == "letters"]
-        assert {row["pages"] for row in letters} == {15}
-        assert "maps" not in plan.files["README.md"].decode()
-        assert "maps" not in plan.files["slices.jsonl"].decode()
+        assert "maps" not in b"".join(plan.files.values()).decode()
 
-    def test_slice_board_is_the_fit_on_that_slice_only(self):
+    def test_slice_board_is_the_fit_on_that_label_only(self):
         plan = self._plan({"letters": range(0, 15), "forms": range(15, 40)})
-        evaluation = _evaluation(_results(range(40)), n_rows=40)
-        letters = [r for r in evaluation.comparisons if r.sample_idx < 15]
+        letters = [r for r in _results(range(40)) if r.sample_idx < 15]
         expected = compute_elo(letters, MODELS, n_bootstrap=0)
         got = {row["model"]: row["elo"] for row in plan.slice_rows if row["slice"] == "letters"}
         assert got == {model: round(elo) for model, elo in expected.elo.items()}
+
+    def test_a_slice_whose_models_were_never_compared_across_is_left_out(self):
+        # Targeted runs judge only some pairs. On these pages good-vs-mid and
+        # weak-vs-other were judged, but the two pairs were never linked.
+        models = [*MODELS, "org/model-other"]
+        linked = _results(range(20), models)
+        split = _results(
+            range(20, 40),
+            pairs=[("org/model-good", "org/model-mid"), ("org/model-weak", "org/model-other")],
+        )
+        plan = self._plan(
+            {"letters": range(0, 20), "forms": range(20, 40)},
+            results=linked + split,
+            models=models,
+        )
+        assert plan.settings["slices"] == ["letters"]
+        assert plan.settings["pages_not_in_a_slice_board"] == 20
+
+    def test_a_model_with_few_pages_in_a_slice_is_left_out_of_its_board(self):
+        few = _results(range(5), ["org/model-good", "org/model-new"], seed=2)
+        plan = self._plan(
+            {"letters": range(0, 20), "forms": range(20, 40)},
+            results=_results(range(40)) + few,
+            models=[*MODELS, "org/model-new"],
+        )
+        assert "org/model-new" in {row["model"] for row in plan.overall_rows}
+        letters = {row["model"] for row in plan.slice_rows if row["slice"] == "letters"}
+        assert letters == set(MODELS)
+
+    def test_slice_rows_do_not_repeat_whole_sample_failure_counts(self):
+        plan = self._plan(
+            {"letters": range(0, 20), "forms": range(20, 40)},
+            failed_outputs={"org/model-weak": 5},
+        )
+        weak = [row for row in plan.overall_rows if row["model"] == "org/model-weak"]
+        assert weak[0]["status"] == "degraded"
+        assert all("status" not in row and "failed_outputs" not in row for row in plan.slice_rows)
 
     def test_a_per_page_column_is_refused(self):
         with pytest.raises(ShareError, match="per-page column"):
             self._plan({f"title {page}": [page] for page in range(60)}, n_rows=60, pages=range(60))
 
     def test_long_labels_are_refused(self):
-        with pytest.raises(ShareError, match="longer than"):
+        with pytest.raises(ShareError, match="64 characters or fewer"):
             self._plan({"x" * 65: range(40)})
 
     def test_a_source_with_fewer_rows_is_refused(self):
         with pytest.raises(ShareError, match="source changed"):
             self._plan({"letters": range(30)}, n_rows=30, pages=range(40))
 
-    def test_a_source_whose_sample_moved_is_refused(self):
-        # Judged 40 of 100 rows; the source now has 120 rows, so seed 42 picks other rows.
-        pages = sorted(share.sample_indices(100, 40, 42))
-        values = ["letters"] * 120
-        evaluation = _evaluation(_results(pages), n_rows=100)
-        evaluation.metadata["max_samples"] = 40
-        with pytest.raises(ShareError, match="not the sample"):
-            _plan(evaluation, slice_column="doc_type", slice_values=lambda m, c: values)
+    def test_a_label_that_names_the_source_repo_is_refused(self):
+        with pytest.raises(PrivacyError, match="names the results repo or the source"):
+            self._plan({SOURCE: range(0, 20), "forms": range(20, 40)})
 
-    def test_the_slice_column_is_read_from_the_first_config_that_has_it(self, monkeypatch):
+
+def _source(n_rows=30, order=None, labels=None):
+    """A flat source with page ids and slice labels; order permutes the rows."""
+    order = order or list(range(n_rows))
+    return Dataset.from_dict(
+        {
+            "id": [f"page-{i:03d}" for i in order],
+            "doc_type": [(labels or {}).get(i, "letters" if i < 15 else "forms") for i in order],
+            "markdown": [f"text {i}" for i in order],
+        }
+    )
+
+
+class TestSliceSource:
+    """The slice column is read only after proving the rows are the judged pages."""
+
+    def _metadata(self, judged_source, max_samples=20, **overrides):
+        judged = sample_indices(len(judged_source), max_samples, 42)
+        fingerprint, _ = evaluation_input_fingerprints(judged_source, {}, judged)
+        return _metadata(max_samples, source_fingerprint=fingerprint, **overrides)
+
+    def _loader(self, monkeypatch, dataset, calls=None):
+        def fake_load_dataset(repo, name=None, split=None, revision=None):
+            if calls is not None:
+                calls.append((repo, name, split, revision))
+            return dataset
+
+        monkeypatch.setattr(share, "load_dataset", fake_load_dataset)
+
+    def test_unchanged_source_gives_the_labels(self, monkeypatch):
+        source = _source()
+        self._loader(monkeypatch, source)
+        assert load_slice_values(self._metadata(source), "doc_type") == source["doc_type"]
+
+    @pytest.mark.parametrize(
+        "changed",
+        [
+            _source(order=[*range(15, 30), *range(15)]),  # same rows, other order
+            _source(order=[*range(29), 99]),  # one page replaced
+            _source(n_rows=31),  # one page added
+        ],
+    )
+    def test_a_changed_source_is_refused(self, monkeypatch, changed):
+        metadata = self._metadata(_source())
+        self._loader(monkeypatch, changed)
+        with pytest.raises(ShareError, match="not the pages judge compared"):
+            load_slice_values(metadata, "doc_type")
+
+    def test_relabelled_pages_give_the_new_labels(self, monkeypatch):
+        metadata = self._metadata(_source())
+        self._loader(monkeypatch, _source(labels={0: "maps"}))
+        assert load_slice_values(metadata, "doc_type")[0] == "maps"
+
+    def test_the_reference_config_and_its_revision_are_read(self, monkeypatch):
+        source = _source()
         calls = []
-
-        def fake_load_dataset(repo, name=None, split=None, revision=None, columns=None):
-            calls.append((repo, name, split, revision, columns))
-            if name == "model-a":
-                raise ValueError("no such column")
-            return _Col({"doc_type": ["letters", "forms"]})
-
-        monkeypatch.setattr(share, "load_dataset", fake_load_dataset)
-        metadata = _metadata(
-            2,
-            source_configs=json.dumps(["model-a", "model-b"]),
-            source_revisions=json.dumps({"model-a": "main", "model-b": "refs/pr/3"}),
+        self._loader(monkeypatch, source, calls)
+        metadata = self._metadata(
+            source,
+            source_configs=json.dumps(["no-text", "model-b", "model-a"]),
+            source_output_columns=json.dumps({"model-a": "markdown", "model-b": "markdown"}),
+            source_revisions=json.dumps({"model-b": "refs/pr/3", "model-a": "main"}),
         )
-        assert load_slice_values(metadata, "doc_type") == ["letters", "forms"]
-        assert calls == [
-            ("me/private-source", "model-a", "train", "main", ["doc_type"]),
-            ("me/private-source", "model-b", "train", "refs/pr/3", ["doc_type"]),
-        ]
+        load_slice_values(metadata, "doc_type")
+        assert calls == [(SOURCE, "model-b", "train", "refs/pr/3")]
 
-    def test_a_missing_slice_column_is_an_error(self, monkeypatch):
-        def fake_load_dataset(*args, **kwargs):
-            raise ValueError("no such column")
+    def test_a_missing_column_is_an_error(self, monkeypatch):
+        source = _source()
+        self._loader(monkeypatch, source)
+        with pytest.raises(ShareError, match="'decade' is not in the judged source"):
+            load_slice_values(self._metadata(source), "decade")
 
-        monkeypatch.setattr(share, "load_dataset", fake_load_dataset)
-        with pytest.raises(ShareError, match="'doc_type' was not found"):
-            load_slice_values(_metadata(2), "doc_type")
+    def test_no_fingerprint_is_an_error(self, monkeypatch):
+        self._loader(monkeypatch, _source())
+        with pytest.raises(ShareError, match="no source fingerprint"):
+            load_slice_values(_metadata(20, source_fingerprint=""), "doc_type")
 
+    def test_a_read_error_does_not_repeat_the_loader_message(self, monkeypatch):
+        def failing(*args, **kwargs):
+            raise OSError("page-0042: CONFIDENTIAL memo text")
 
-class _Col:
-    def __init__(self, columns):
-        self.columns = columns
-        self.column_names = list(columns)
-
-    def __getitem__(self, key):
-        return self.columns[key]
+        monkeypatch.setattr(share, "load_dataset", failing)
+        with pytest.raises(ShareError) as exc:
+            load_slice_values(self._metadata(_source()), "doc_type")
+        assert "CONFIDENTIAL" not in str(exc.value)
+        assert "page-0042" not in str(exc.value)
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +388,7 @@ SECRET = st.text(alphabet=string.ascii_letters + string.digits, min_size=16, max
 
 
 def _all_text(files):
-    """Raw file text plus every decoded JSON string, as check_no_page_text sees it."""
+    """Raw file text plus every decoded JSON string, as the checks see it."""
     return "\n".join("\n".join(share._file_views(path, data)) for path, data in files.items())
 
 
@@ -298,27 +399,26 @@ class TestPrivacy:
         """Whatever the outputs and reasons hold, no file holds them."""
         filler = data.draw(st.text(min_size=0, max_size=40))
         results = _results(
-            range(12),
+            range(24),
             text=lambda page, model: f"{filler}{secret}\n{page}{model}{secret[::-1]}",
             reason=lambda page: f'Output A keeps "{secret}"; B drops it\n{filler}',
         )
         values = ["letters" if page % 2 else "forms" for page in range(24)]
-        evaluation = _evaluation(results, n_rows=24)
-        evaluation.metadata["max_samples"] = 24
         plan = _plan(
-            evaluation,
+            _evaluation(results, n_rows=24),
             slice_column="doc_type",
             slice_values=lambda metadata, column: values,
-        )  # plan_share runs both checks: no false alarm on any of these texts
+        )  # plan_share runs every check, so this also shows there is no false alarm
         everything = _all_text(plan.files)
         assert secret not in everything
         assert secret[::-1] not in everything
-        assert "me/private-source" not in everything
-        assert "me/private-results" not in everything
+        assert SOURCE not in everything
+        assert RESULTS not in everything
 
     @given(seed=st.integers(0, 2**32 - 1), length=st.integers(63, 200), data=st.data())
     @settings(max_examples=60, deadline=None)
-    def test_any_copied_fragment_of_63_characters_is_found(self, seed, length, data):
+    def test_a_copied_fragment_of_63_characters_is_found(self, seed, length, data):
+        """Holds for page text: every aligned chunk has 4 or more distinct letters."""
         rng = random.Random(seed)
         text = "".join(rng.choice(string.ascii_letters + " \n") for _ in range(400))
         start = data.draw(st.integers(0, len(text) - length))
@@ -340,30 +440,36 @@ class TestPrivacy:
         page = "".join("x" * shift + "\n" + table for shift in range(CHUNK))
         page += "Contents" + "." * 64 + "3\n" + "-" * 64 + " " * 64
         page += "<tr><td></td><td></td><td></td><td></td><td></td></tr>" * 3
-        board = plan_share(
-            _evaluation(_results(range(20), text=lambda page_id, model: page)),
-            results_repo="me/private-results",
-            alias="v1",
-            now=NOW,
-        )
-        files = dict(board.files)
+        plan = _plan(_evaluation(_results(range(20), text=lambda page_id, model: page)))
+        files = dict(plan.files)
         files["README.md"] += ("." * 80 + "\n" + "-" * 80 + " " * 80).encode()
         check_no_page_text(files, [page])
 
     def test_an_extra_column_is_refused(self):
         plan = _plan(_evaluation(_results(range(20))))
-        rows = [json.loads(line) for line in plan.files["overall.jsonl"].decode().splitlines()]
-        rows[0]["reason"] = "Output A"
-        plan.files["overall.jsonl"] = "".join(json.dumps(r) + "\n" for r in rows).encode()
+        _rewrite_rows(plan, "overall.jsonl", lambda rows: rows[0].update(reason="Output A"))
         with pytest.raises(PrivacyError, match="not the allowed columns"):
             check_plan(plan)
 
     def test_a_value_that_is_not_board_content_is_refused(self):
         plan = _plan(_evaluation(_results(range(20))))
-        rows = [json.loads(line) for line in plan.files["overall.jsonl"].decode().splitlines()]
-        rows[1]["model"] = "a line from a page"
-        plan.files["overall.jsonl"] = "".join(json.dumps(r) + "\n" for r in rows).encode()
+        _rewrite_rows(plan, "overall.jsonl", lambda rows: rows[1].update(model="a page line"))
         with pytest.raises(PrivacyError, match="'model'"):
+            check_plan(plan)
+
+    def test_a_readme_that_is_not_the_rendered_card_is_refused(self):
+        # Short ids and short text escape the chunk scan, so the card is rendered again.
+        plan = _plan(_evaluation(_results(range(20))))
+        plan.files["README.md"] += b"Private page id: manuscript-0042\n"
+        with pytest.raises(PrivacyError, match="README.md is not the card"):
+            check_plan(plan)
+
+    def test_extra_settings_text_is_refused(self):
+        plan = _plan(_evaluation(_results(range(20))))
+        plan.files["board.json"] = plan.files["board.json"].replace(
+            b'"alias"', b'"note": "box 12",\n  "alias"'
+        )
+        with pytest.raises(PrivacyError, match="unexpected keys"):
             check_plan(plan)
 
     def test_an_unknown_file_is_refused(self):
@@ -372,7 +478,11 @@ class TestPrivacy:
         with pytest.raises(PrivacyError, match="Unexpected files"):
             check_plan(plan)
 
-    def test_settings_never_name_the_source_or_results_repo(self):
+    def test_an_alias_that_names_the_results_repo_is_refused(self):
+        with pytest.raises(PrivacyError, match="names the results repo or the source"):
+            _plan(_evaluation(_results(range(20))), alias=f"board of {RESULTS}")
+
+    def test_the_files_never_name_the_source_or_results_repo(self):
         plan = _plan(_evaluation(_results(range(20))))
         everything = _all_text(plan.files)
         assert "private-source" not in everything
@@ -384,6 +494,8 @@ class TestPrivacy:
 # Push
 # ---------------------------------------------------------------------------
 
+SHARE_CARD = "---\ntags:\n  - ocr-bench\n  - ocr-bench-share\n---\n# OCR board\n"
+
 
 def _missing(repo_id):
     response = SimpleNamespace(status_code=404, headers={}, request=None)
@@ -391,128 +503,150 @@ def _missing(repo_id):
 
 
 class RecordingApi:
-    """Records every Hub call. ``repos`` maps repo id -> {"private", "files", "readme"}."""
+    """Records every Hub call. ``repos`` maps id -> {"private", "files", "readme", ...}."""
 
     def __init__(self, repos=None):
         self.repos = repos or {}
         self.calls: list[tuple] = []
 
-    def list_repo_files(self, repo_id, repo_type=None):
-        self.calls.append(("list_repo_files", repo_id))
+    def repo_info(self, repo_id, repo_type=None):
+        self.calls.append(("repo_info", repo_id))
         if repo_id not in self.repos:
             raise _missing(repo_id)
+        repo = self.repos[repo_id]
+        return SimpleNamespace(private=repo["private"], sha=repo.get("sha", "sha-1"))
+
+    def list_repo_files(self, repo_id, repo_type=None, revision=None):
+        self.calls.append(("list_repo_files", repo_id, revision))
         return list(self.repos[repo_id]["files"])
 
-    def hf_hub_download(self, repo_id, filename, repo_type=None):
-        self.calls.append(("hf_hub_download", repo_id, filename))
-        path = self.repos[repo_id]["tmp"] / filename
-        path.write_text(self.repos[repo_id]["readme"])
+    def hf_hub_download(self, repo_id, filename, repo_type=None, revision=None):
+        self.calls.append(("hf_hub_download", repo_id, filename, revision))
+        repo = self.repos[repo_id]
+        path = repo["tmp"] / filename
+        if filename == "README.md":
+            path.write_text(repo["readme"])
+        else:
+            path.write_text(json.dumps({"alias": repo.get("alias", "gov-scans-v1")}))
         return str(path)
 
     def create_repo(self, repo_id, repo_type=None, private=None, exist_ok=False):
         self.calls.append(("create_repo", repo_id, private))
         self.repos[repo_id] = {"private": bool(private), "files": [".gitattributes"]}
 
-    def create_commit(self, repo_id, repo_type=None, operations=(), commit_message=""):
-        self.calls.append(("create_commit", repo_id, list(operations)))
+    def create_commit(
+        self, repo_id, repo_type=None, operations=(), commit_message="", parent_commit=None
+    ):
+        self.calls.append(("create_commit", repo_id, list(operations), parent_commit))
 
-    def repo_info(self, repo_id, repo_type=None):
-        self.calls.append(("repo_info", repo_id))
-        return SimpleNamespace(private=self.repos[repo_id]["private"])
+
+def _existing(tmp_path, files, readme=SHARE_CARD, private=False, alias="gov-scans-v1"):
+    return {
+        "me/board": {
+            "private": private,
+            "sha": "sha-checked",
+            "files": [".gitattributes", *files],
+            "readme": readme,
+            "alias": alias,
+            "tmp": tmp_path,
+        }
+    }
+
+
+BOARD_FILES = ["README.md", "overall.jsonl", "board.json"]
 
 
 class TestPush:
     def _plan(self, **kwargs):
         return _plan(_evaluation(_results(range(20))), **kwargs)
 
+    def _push(self, api, dest="me/board", **kwargs):
+        return push_share(self._plan(), dest, results_repo=RESULTS, api=api, **kwargs)
+
     def test_a_failed_check_makes_no_hub_call(self):
         plan = self._plan()
         plan.files["README.md"] += plan.private_texts[0].encode() * 3
         api = RecordingApi()
         with pytest.raises(PrivacyError):
-            push_share(plan, "me/public-board", results_repo="me/private-results", api=api)
+            push_share(plan, "me/board", results_repo=RESULTS, api=api)
         assert api.calls == []
 
     def test_a_new_repo_is_created_then_written_in_one_commit(self):
         api = RecordingApi()
-        result = push_share(
-            self._plan(), "me/public-board", results_repo="me/private-results", api=api
-        )
+        result = self._push(api)
         assert [call[0] for call in api.calls] == [
-            "list_repo_files",
+            "repo_info",
             "create_repo",
+            "repo_info",
             "create_commit",
             "repo_info",
         ]
-        assert api.calls[1] == ("create_repo", "me/public-board", False)
-        operations = api.calls[2][2]
-        assert sorted(op.path_in_repo for op in operations) == [
-            "README.md",
-            "board.json",
-            "overall.jsonl",
-        ]
+        assert api.calls[1] == ("create_repo", "me/board", False)
+        operations = api.calls[3][2]
+        assert sorted(op.path_in_repo for op in operations) == sorted(BOARD_FILES)
         assert all(isinstance(op, CommitOperationAdd) for op in operations)
         assert result.created and not result.private
 
     def test_private_flag_creates_a_private_repo(self):
         api = RecordingApi()
-        result = push_share(
-            self._plan(), "me/board", results_repo="me/private-results", private=True, api=api
-        )
+        result = self._push(api, private=True)
         assert api.calls[1] == ("create_repo", "me/board", True)
         assert result.private
 
     def test_an_existing_private_board_stays_private(self, tmp_path):
-        api = RecordingApi(
-            {
-                "me/board": {
-                    "private": True,
-                    "files": [".gitattributes", "README.md", "overall.jsonl"],
-                    "readme": "---\ntags:\n  - ocr-bench\n  - ocr-bench-share\n---\n",
-                    "tmp": tmp_path,
-                }
-            }
-        )
-        result = push_share(self._plan(), "me/board", results_repo="me/private-results", api=api)
+        api = RecordingApi(_existing(tmp_path, BOARD_FILES, private=True))
+        result = self._push(api)
         assert "create_repo" not in [call[0] for call in api.calls]
         assert result.private and not result.created
 
+    def test_the_commit_is_on_the_checked_revision(self, tmp_path):
+        api = RecordingApi(_existing(tmp_path, BOARD_FILES))
+        self._push(api)
+        reads = [call for call in api.calls if call[0] in ("list_repo_files", "hf_hub_download")]
+        assert {call[-1] for call in reads} == {"sha-checked"}
+        commit = next(call for call in api.calls if call[0] == "create_commit")
+        assert commit[3] == "sha-checked"
+
     def test_stale_slice_file_is_deleted(self, tmp_path):
-        api = RecordingApi(
-            {
-                "me/board": {
-                    "private": False,
-                    "files": [".gitattributes", "README.md", "overall.jsonl", "slices.jsonl"],
-                    "readme": "---\ntags:\n  - ocr-bench-share\n---\n",
-                    "tmp": tmp_path,
-                }
-            }
-        )
-        push_share(self._plan(), "me/board", results_repo="me/private-results", api=api)
+        api = RecordingApi(_existing(tmp_path, [*BOARD_FILES, "slices.jsonl"]))
+        self._push(api)
         commit = next(call for call in api.calls if call[0] == "create_commit")
         deletes = [op.path_in_repo for op in commit[2] if isinstance(op, CommitOperationDelete)]
         assert deletes == ["slices.jsonl"]
 
-    def test_a_repo_share_did_not_write_is_refused(self, tmp_path):
-        api = RecordingApi(
-            {
-                "me/results": {
-                    "private": False,
-                    "files": [".gitattributes", "README.md", "comparisons/train-0.parquet"],
-                    "readme": "---\ntags:\n  - ocr-bench\n  - leaderboard\n---\n",
-                    "tmp": tmp_path,
-                }
-            }
-        )
-        with pytest.raises(ShareError, match="was not written by `ocr-bench share`"):
-            push_share(self._plan(), "me/results", results_repo="me/private-results", api=api)
+    def test_a_board_of_another_alias_needs_replace(self, tmp_path):
+        api = RecordingApi(_existing(tmp_path, BOARD_FILES, alias="idl-v1"))
+        with pytest.raises(ShareError, match="holds the board of 'idl-v1'"):
+            self._push(api)
+        assert "create_commit" not in [call[0] for call in api.calls]
+        self._push(api, replace=True)
+        assert "create_commit" in [call[0] for call in api.calls]
+
+    @pytest.mark.parametrize(
+        ("files", "readme"),
+        [
+            # A results repo: tagged ocr-bench, holds comparisons.
+            (
+                ["README.md", "comparisons/train-0.parquet"],
+                "---\ntags:\n  - ocr-bench\n  - leaderboard\n---\n",
+            ),
+            # The share tag in prose only.
+            (["README.md"], "# Notes\n\n- ocr-bench-share\n"),
+            # A share card next to a file share does not write.
+            ([*BOARD_FILES, "private-pages.parquet"], SHARE_CARD),
+        ],
+    )
+    def test_a_repo_share_did_not_write_is_refused(self, tmp_path, files, readme):
+        api = RecordingApi(_existing(tmp_path, files, readme=readme))
+        with pytest.raises(ShareError, match="did not write"):
+            self._push(api)
         assert "create_commit" not in [call[0] for call in api.calls]
 
-    @pytest.mark.parametrize("dest", ["me/private-results", "me/private-source"])
+    @pytest.mark.parametrize("dest", [RESULTS, SOURCE, RESULTS.upper()])
     def test_the_results_or_source_repo_is_refused(self, dest):
         api = RecordingApi()
         with pytest.raises(ShareError, match="separate repo"):
-            push_share(self._plan(), dest, results_repo="me/private-results", api=api)
+            self._push(api, dest=dest)
         assert api.calls == []
 
 
@@ -522,11 +656,11 @@ class TestPush:
 
 
 class TestCli:
-    def test_alias_is_required(self, capsys):
+    def test_alias_is_required(self):
         with pytest.raises(SystemExit):
             cli.build_parser().parse_args(["share", "me/results", "me/board"])
 
-    def test_dry_run_writes_files_and_pushes_nothing(self, monkeypatch, tmp_path):
+    def _dry_run(self, monkeypatch, alias, *extra):
         evaluation = _evaluation(_results(range(20)))
         monkeypatch.setattr(share, "load_private_evaluation", lambda repo: evaluation)
 
@@ -534,16 +668,33 @@ class TestCli:
             raise AssertionError("dry run must not push")
 
         monkeypatch.setattr(share, "push_share", no_push)
-        out = tmp_path / "board"
-        argv = ["ocr-bench", "share", "me/private-results", "me/board", "--alias", "v1"]
-        monkeypatch.setattr(sys, "argv", [*argv, "--dry-run", "--output-dir", str(out)])
+        argv = ["ocr-bench", "share", RESULTS, "me/board", "--alias", alias, "--dry-run"]
+        monkeypatch.setattr(sys, "argv", [*argv, *extra])
         cli.main()
-        assert sorted(p.name for p in out.iterdir()) == [
-            "README.md",
-            "board.json",
-            "overall.jsonl",
-        ]
+
+    def test_dry_run_writes_files_and_pushes_nothing(self, monkeypatch, tmp_path):
+        out = tmp_path / "board"
+        self._dry_run(monkeypatch, "v1", "--output-dir", str(out))
+        assert sorted(p.name for p in out.iterdir()) == sorted(BOARD_FILES)
         assert "# OCR board: v1" in (out / "README.md").read_text()
+
+    def test_dry_run_with_slices_prints_and_writes_the_slice_boards(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        values = ["letters" if page < 10 else "forms" for page in range(20)]
+        monkeypatch.setattr(share, "load_slice_values", lambda metadata, column: values)
+        out = tmp_path / "board"
+        self._dry_run(monkeypatch, "v1", "--slice-column", "doc_type", "--output-dir", str(out))
+        assert sorted(p.name for p in out.iterdir()) == sorted([*BOARD_FILES, "slices.jsonl"])
+        printed = capsys.readouterr().out
+        assert "v1: letters" in printed and "2 slice boards" in printed
+
+    def test_the_default_folder_stays_in_the_working_directory(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        self._dry_run(monkeypatch, "../../escape")
+        [folder] = tmp_path.iterdir()
+        assert folder.name.startswith("ocr-bench-share-") and "/" not in folder.name
+        assert (folder / "README.md").exists()
 
     def test_a_privacy_error_exits_with_an_error(self, monkeypatch, capsys):
         def leaky(*args, **kwargs):
