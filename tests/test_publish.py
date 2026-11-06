@@ -684,7 +684,6 @@ class TestPublishResults:
     @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.Dataset")
     def test_skips_comparisons_if_empty(self, mock_ds_cls, mock_api_cls):
-        mock_ds_cls.from_list.return_value
         board = Leaderboard(
             elo={"m": 1500.0},
             wins={"m": 0},
@@ -708,7 +707,6 @@ class TestPublishResults:
     @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.Dataset")
     def test_appends_existing_metadata(self, mock_ds_cls, mock_api_cls):
-        mock_ds_cls.from_list.return_value  # noqa: F841
         board = _make_board()
         meta = EvalMetadata(
             source_dataset="repo/data",

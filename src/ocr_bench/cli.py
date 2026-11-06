@@ -813,7 +813,7 @@ def _convert_results(
 ) -> list[ComparisonResult]:
     """Convert judged comparisons + aggregated outputs into ComparisonResult list."""
     results: list[ComparisonResult] = []
-    for comp, result in zip(comparisons, aggregated):
+    for comp, result in zip(comparisons, aggregated, strict=True):
         # Skip failures: empty dict (single judge failed) and 0/0 "ties"
         # (every judge in a jury failed) — neither is a real verdict.
         if not result or result.get("agreement") == "0/0":

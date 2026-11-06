@@ -1140,7 +1140,7 @@ class TestCmdRun:
             return launched
 
         def fake_poll(jobs, **k):
-            for job, status in zip(jobs, statuses):
+            for job, status in zip(jobs, statuses, strict=True):
                 job.status = status
             return jobs
 

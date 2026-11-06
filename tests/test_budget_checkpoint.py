@@ -347,7 +347,7 @@ class TestTargetedAdaptive:
         ds, _ = make_ds(n=10, models=("a", "b", "c", "d"))
         ocr = {
             f"col_{name}": model_id
-            for name, model_id in zip(("a", "b", "c", "d"), model_ids)
+            for name, model_id in zip(("a", "b", "c", "d"), model_ids, strict=True)
         }
         judge, m_publish, _ = _run_judge(
             [

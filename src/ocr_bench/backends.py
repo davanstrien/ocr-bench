@@ -294,7 +294,7 @@ def aggregate_jury_votes(
     for judge_results in zip_longest(*all_results, fillvalue={}):
         votes: list[str] = []
         reasons: list[str] = []
-        for name, result in zip(judge_names, judge_results):
+        for name, result in zip(judge_names, judge_results, strict=True):
             winner = result.get("winner", "")
             if winner:
                 votes.append(winner)
