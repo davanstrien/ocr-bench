@@ -63,6 +63,8 @@ ocr-bench judge <output-repo>
 ocr-bench view <output-repo>-results
 ```
 
+**Private collection?** [docs/private-eval.md](docs/private-eval.md) walks through a private eval on Jobs: your pages in a private dataset, OCR from recipes or your own outputs, the judge as a Job, and a scores-only public board with `share`. Agents can follow [skills/ocr-bench-private-eval](skills/ocr-bench-private-eval/SKILL.md).
+
 ### One command
 
 Or chain all three stages in a single call — the fastest way to try ocr-bench on a new collection:
