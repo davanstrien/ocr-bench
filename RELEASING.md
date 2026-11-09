@@ -41,6 +41,7 @@ Do not push a tag by hand. The workflow creates it. A push to `main` that change
    ```bash
    uv run ruff check src/ tests/
    uv run ruff format --check src/ tests/
+   uvx rumdl@0.3.2 check .
    uv run ty check src/
    uv run --extra viewer pytest tests/ -x -q
    ```

@@ -7,12 +7,17 @@ on:
     branches: [main]
   workflow_call: # release.yml runs this suite before it publishes
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: uv.lock holds no settings from a local uv config
         # Parse the lock as TOML: a text match misses an indented or quoted key
         # and fails on a comment.
@@ -44,5 +49,6 @@ jobs:
       - run: uv sync --locked --dev --extra viewer
       - run: uv run ruff check src/ tests/
       - run: uv run ruff format --check src/ tests/
+      - run: uvx rumdl@0.3.2 check .  # Markdown: tables aligned, see .rumdl.toml
       - run: uv run ty check src/
       - run: uv run pytest tests/ -x -q

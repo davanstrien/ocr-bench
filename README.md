@@ -14,14 +14,14 @@ ocr-bench lets you run the same set of OCR models on a sample of _your_ collecti
 
 The two published example boards, as ELO with page-level bootstrap 95% confidence intervals. Models whose intervals overlap are not separated by the run:
 
-| Model              | Britannica 1771 (50 pages)  | BPL card catalog (33 judged cards of 50) |
-| ------------------ | :-------------------------: | :--------------------------------------: |
-| NuExtract3 (4B)    | 1734 (1669–1820)            | —                                        |
-| GLM-OCR (0.9B)     | 1588 (1523–1655)            | 1434 (1361–1509)                         |
-| LightOnOCR-2 (1B)  | 1588 (1552–1623)            | 1526 (1449–1611)                         |
-| FireRed-OCR (2.1B) | 1426 (1358–1489)            | —                                        |
-| dots.ocr (1.7B)    | 1409 (1345–1469)\*          | 1632 (1571–1702)                         |
-| DeepSeek-OCR (4B)  | 1255 (1190–1309)            | 1408 (1336–1474)                         |
+| Model              | Britannica 1771 (50 pages) | BPL card catalog (33 judged cards of 50) |
+| ------------------ | :------------------------: | :--------------------------------------: |
+| NuExtract3 (4B)    |      1734 (1669–1820)      |                    —                     |
+| GLM-OCR (0.9B)     |      1588 (1523–1655)      |             1434 (1361–1509)             |
+| LightOnOCR-2 (1B)  |      1588 (1552–1623)      |             1526 (1449–1611)             |
+| FireRed-OCR (2.1B) |      1426 (1358–1489)      |                    —                     |
+| dots.ocr (1.7B)    |     1409 (1345–1469)\*     |             1632 (1571–1702)             |
+| DeepSeek-OCR (4B)  |      1255 (1190–1309)      |             1408 (1336–1474)             |
 
 On Britannica, NuExtract3 is ahead of every other model. Below it, GLM-OCR and LightOnOCR-2 overlap each other and are ahead of the rest. FireRed-OCR and dots.ocr overlap each other and are ahead of DeepSeek-OCR. On BPL, dots.ocr is ahead of GLM-OCR and DeepSeek-OCR, and LightOnOCR-2 overlaps all three. So dots.ocr is in the lower half on Britannica and has the highest rating on BPL, where only LightOnOCR-2 overlaps it. Two collections cannot show which model suits which document type, but they show that the order can change. For your own boards, judging more pages gathers more evidence, and human votes in the viewer cross-check the judge on the overlapping pairs; neither guarantees separation.
 
@@ -62,6 +62,8 @@ ocr-bench judge <output-repo>
 # 4. Browse results + validate
 ocr-bench view <output-repo>-results
 ```
+
+**Private collection?** [docs/private-eval.md](docs/private-eval.md) walks through a private eval on Jobs: your pages in a private dataset, OCR from recipes or your own outputs, the judge as a Job, and a scores-only public board with `share`. Agents can follow [skills/ocr-bench-private-eval](skills/ocr-bench-private-eval/SKILL.md).
 
 ### One command
 
