@@ -9,6 +9,8 @@ current behaviour.
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-11-09
+
 ### Changes
 
 - The `share` card is easier to read.
