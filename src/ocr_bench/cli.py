@@ -454,7 +454,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Folder for --dry-run (default: ./ocr-bench-share-<alias>)",
     )
     share.add_argument(
-        "--private", action="store_true", help="Create a missing destination repo private"
+        "--public",
+        action="store_true",
+        help=(
+            "Create a missing destination repo public (default: private, so you can "
+            "look at the board on the Hub before you publish it)"
+        ),
     )
     share.add_argument(
         "--replace",
@@ -2286,13 +2291,16 @@ def cmd_share(args: argparse.Namespace) -> None:
         return
 
     result = push_share(
-        plan, args.dest, results_repo=args.results, private=args.private, replace=args.replace
+        plan, args.dest, results_repo=args.results, public=args.public, replace=args.replace
     )
     state = "created" if result.created else "updated"
     visibility = "private" if result.private else "public"
     console.print(f"Board {state}: https://huggingface.co/datasets/{result.repo_id} ({visibility})")
     if result.private:
-        console.print("The repo is private. Make it public on the Hub when you are ready.")
+        console.print(
+            "The board is private. Look at it on the Hub; to publish it, run:\n"
+            f"  hf repos settings {result.repo_id} --repo-type dataset --public"
+        )
 
 
 SPACE_TEMPLATE = "davanstrien/ocr-bench-space-template"

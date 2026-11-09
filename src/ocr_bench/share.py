@@ -913,14 +913,14 @@ def push_share(
     dest: str,
     *,
     results_repo: str,
-    private: bool = False,
+    public: bool = False,
     replace: bool = False,
     api: HfApi | None = None,
 ) -> PushResult:
     """Check the files again, then write them to ``dest`` in one commit.
 
-    A missing ``dest`` is created (public unless ``private``). An existing one
-    keeps its visibility. The commit names the revision that was checked as its
+    A missing ``dest`` is created private, or public with ``public``. An existing
+    one keeps its visibility. The commit names the revision that was checked as its
     parent, so it fails if another writer changed the repo in between.
     """
     check_plan(plan)
@@ -932,7 +932,7 @@ def push_share(
     existing = _destination_files(api, dest, plan.alias, replace)
     created = existing is None
     if existing is None:
-        api.create_repo(dest, repo_type="dataset", private=private, exist_ok=False)
+        api.create_repo(dest, repo_type="dataset", private=not public, exist_ok=False)
         # Check the new repo too: another writer could commit before this read.
         existing = _destination_files(api, dest, plan.alias, replace)
         if existing is None:

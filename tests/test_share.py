@@ -684,11 +684,11 @@ class TestPush:
             "create_commit",
             "repo_info",
         ]
-        assert api.calls[1] == ("create_repo", "me/board", False)
+        assert api.calls[1] == ("create_repo", "me/board", True)  # private by default
         operations = api.calls[4][2]
         assert sorted(op.path_in_repo for op in operations) == sorted(BOARD_FILES)
         assert all(isinstance(op, CommitOperationAdd) for op in operations)
-        assert result.created and not result.private
+        assert result.created and result.private
 
     def test_a_commit_by_another_writer_after_creation_is_refused(self, tmp_path):
         class RacingApi(RecordingApi):
@@ -706,11 +706,17 @@ class TestPush:
             self._push(api)
         assert "create_commit" not in [call[0] for call in api.calls]
 
-    def test_private_flag_creates_a_private_repo(self):
+    def test_public_flag_creates_a_public_repo(self):
         api = RecordingApi()
-        result = self._push(api, private=True)
-        assert api.calls[1] == ("create_repo", "me/board", True)
-        assert result.private
+        result = self._push(api, public=True)
+        assert api.calls[1] == ("create_repo", "me/board", False)
+        assert not result.private
+
+    def test_an_existing_public_board_stays_public(self, tmp_path):
+        api = RecordingApi(_existing(tmp_path, BOARD_FILES, private=False))
+        result = self._push(api)
+        assert "create_repo" not in [call[0] for call in api.calls]
+        assert not result.private and not result.created
 
     def test_an_existing_private_board_stays_private(self, tmp_path):
         api = RecordingApi(_existing(tmp_path, BOARD_FILES, private=True))
