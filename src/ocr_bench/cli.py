@@ -60,6 +60,7 @@ from ocr_bench.judge import (
     Comparison,
     _normalize_pair,
     build_comparisons,
+    judging_order,
     prompt_hash,
     sample_indices,
     validate_prompt_template,
@@ -1347,8 +1348,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 "so its rank leaves out those pages."
             )
 
-    # The judged sample, for the text-cap warning and the coverage report.
-    # sample_indices is deterministic, so this matches the rows judged below.
+    # The judged sample: the text-cap warning, the fingerprints and the coverage
+    # report use it in this order. judge visits it in judging_order (below).
     judged_sample = sample_indices(len(ds), args.max_samples, args.seed)
     _warn_text_cap(ds, ocr_columns, judged_sample, args.max_ocr_text_len, normalize)
 
@@ -1369,9 +1370,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
     source_column_fingerprints: dict[str, str] = {}
     pair_provenance_hashes: dict[tuple[str, str], str] = {}
     if results_repo:
-        evaluated_indices = sample_indices(len(ds), args.max_samples, args.seed)
         source_fingerprint, source_column_fingerprints = evaluation_input_fingerprints(
-            ds, ocr_columns, evaluated_indices
+            ds, ocr_columns, judged_sample
         )
         from itertools import combinations as _provenance_pairs
 
@@ -1565,7 +1565,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
         # --- Adaptive stopping: batch-by-batch with convergence check ---
         from itertools import combinations as _combs
 
-        all_indices = sample_indices(len(ds), args.max_samples, args.seed)
+        # Visit the sample in a random order, so a budget or convergence stop
+        # leaves a random subset of pages, not the end of a sorted dataset.
+        all_indices = judging_order(judged_sample, args.seed)
         all_model_pairs = {
             _normalize_pair(model_a, model_b) for model_a, model_b in _combs(model_names, 2)
         }
@@ -1764,10 +1766,12 @@ def cmd_judge(args: argparse.Namespace) -> None:
             console.print(f"[dim]{n_auto_total} identical outputs auto-tied (no judge call)[/dim]")
     else:
         # --- Standard single-pass flow ---
+        # Random visiting order: a --max-comparisons trim keeps the first pairs
+        # built, so in dataset order it would drop the end of a sorted dataset.
         comparisons = build_comparisons(
             ds,
             ocr_columns,
-            max_samples=args.max_samples,
+            indices=judging_order(judged_sample, args.seed),
             seed=args.seed,
             skip_samples=skip_samples,
             min_chars=args.min_chars,
@@ -1778,8 +1782,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
         )
 
         # Global budget: judge at most N pairs, keeping every auto-tie (they
-        # cost no judge call). Which judged pairs get dropped depends on build
-        # order — acceptable for a blunt operational cap.
+        # cost no judge call). The pairs built last are dropped; with the random
+        # visiting order above, they come from random pages.
         if max_comparisons is not None:
             comparisons, hit_budget = _trim_to_budget(comparisons, max_comparisons)
             if hit_budget:

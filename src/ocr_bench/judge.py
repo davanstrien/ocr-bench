@@ -700,7 +700,15 @@ def _normalize_pair(a: str, b: str) -> tuple[str, str]:
 
 
 def sample_indices(dataset_len: int, max_samples: int | None = None, seed: int = 42) -> list[int]:
-    """Compute shuffled sample indices (cheap — no image loading).
+    """Return the evaluated sample: which rows are judged (cheap — no image loading).
+
+    With ``max_samples`` below the dataset length, this is a seeded random sample.
+    Otherwise it is every row, in dataset order.
+
+    The page and OCR fingerprints hash rows in this order, and ``share`` recomputes
+    it from the results metadata, so the output must stay the same for the same
+    arguments. The order in which ``judge`` visits the rows is separate: see
+    :func:`judging_order`.
 
     Args:
         dataset_len: Total number of rows in the dataset.
@@ -712,9 +720,31 @@ def sample_indices(dataset_len: int, max_samples: int | None = None, seed: int =
     """
     indices = list(range(dataset_len))
     if max_samples and max_samples < len(indices):
-        random.seed(seed)
-        indices = random.sample(indices, max_samples)
+        # A private generator gives the same sample as seeding the module-level
+        # one, without changing the global random state for other callers.
+        indices = random.Random(seed).sample(indices, max_samples)
     return indices
+
+
+def judging_order(indices: list[int], seed: int = 42) -> list[int]:
+    """Return ``indices`` in a seeded random order for judging.
+
+    ``judge`` visits the sample in this order. A ``--max-comparisons`` budget or
+    adaptive stopping can end a run before every row is visited, and datasets are
+    often sorted (by collection, decade or document). In dataset order, an early
+    stop would leave out whole groups. In a random order, the judged rows are a
+    random subset of the sample.
+
+    The sample itself, and so the fingerprints, does not change.
+
+    The shuffle uses its own random stream, derived from ``seed``. Reusing the
+    stream that drew the sample would correlate the two: in a 2-page sample of
+    128 sorted rows, the first page visited would fall in the upper half 75% of
+    the time, not 50%.
+    """
+    order = list(indices)
+    random.Random(f"judging-order:{seed}").shuffle(order)
+    return order
 
 
 def build_comparisons(
