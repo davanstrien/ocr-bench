@@ -16,14 +16,14 @@ Everything runs on the Hugging Face Hub: the OCR models and the judge run as [Jo
 
 ## The steps
 
-| Step | Command | Cost |
-|---|---|---|
-| 1. Put your pages in a private dataset | your own script (see below) | free |
-| 2. Get OCR outputs | `ocr-bench run`, or bring your own | GPU time on Jobs |
-| 3. Check the outputs | `ocr-bench audit --screen` | free |
-| 4. Judge | `ocr-bench judge`, as a Job | judge API calls |
-| 5. Look at the results | `ocr-bench view` | free |
-| 6. Publish the scores | `ocr-bench share` | free |
+| Step                                   | Command                            | Cost             |
+| -------------------------------------- | ---------------------------------- | ---------------- |
+| 1. Put your pages in a private dataset | your own script (see below)        | free             |
+| 2. Get OCR outputs                     | `ocr-bench run`, or bring your own | GPU time on Jobs |
+| 3. Check the outputs                   | `ocr-bench audit --screen`         | free             |
+| 4. Judge                               | `ocr-bench judge`, as a Job        | judge API calls  |
+| 5. Look at the results                 | `ocr-bench view`                   | free             |
+| 6. Publish the scores                  | `ocr-bench share`                  | free             |
 
 In the 425-page proof of concept, 8 OCR models ran and 7 were judged. The OCR and judge Jobs used about $4.50 of Jobs time, and the judge calls (about 6,400) cost about $9.30.
 
@@ -33,14 +33,14 @@ Log in first (`hf auth login`, or export `HF_TOKEN`): `-s HF_TOKEN` in the Job c
 
 Decide this first.
 
-| Where | What it sees | Visibility |
-|---|---|---|
-| Your source dataset | page images and your metadata | private, if you create it private |
-| The OCR output repo (`run`) | images and OCR text | private when the source is private |
-| The results repo (`judge`) | OCR text and the judge's reasons, which can quote the page | private when the source is private |
-| HF Jobs | everything the Job reads | runs under your account |
-| The judge model | each page image and two transcriptions | depends on the judge you choose |
-| The board repo (`share`) | ratings, settings and a fingerprint of the page set | private until you publish it |
+| Where                       | What it sees                                               | Visibility                         |
+| --------------------------- | ---------------------------------------------------------- | ---------------------------------- |
+| Your source dataset         | page images and your metadata                              | private, if you create it private  |
+| The OCR output repo (`run`) | images and OCR text                                        | private when the source is private |
+| The results repo (`judge`)  | OCR text and the judge's reasons, which can quote the page | private when the source is private |
+| HF Jobs                     | everything the Job reads                                   | runs under your account            |
+| The judge model             | each page image and two transcriptions                     | depends on the judge you choose    |
+| The board repo (`share`)    | ratings, settings and a fingerprint of the page set        | private until you publish it       |
 
 The default judge is `novita:Qwen/Qwen3.8-27B` through [HF Inference Providers](https://huggingface.co/docs/inference-providers/index), so Novita processes the page images.
 
@@ -54,11 +54,11 @@ Boards judged by different judges, or by the same model on different providers, 
 
 ocr-bench reads one Hub dataset with one row per page:
 
-| Column | Required | What it is |
-|---|---|---|
-| `image` | yes | the page image |
-| `page_id` | recommended | a stable, unique id for the page, for example `collection/item:page` |
-| slice columns | optional | labels for reporting, for example `collection`, `decade`, `doc_type` |
+| Column        | Required    | What it is                                                           |
+| ------------- | ----------- | -------------------------------------------------------------------- |
+| `image`       | yes         | the page image                                                       |
+| `page_id`     | recommended | a stable, unique id for the page, for example `collection/item:page` |
+| slice columns | optional    | labels for reporting, for example `collection`, `decade`, `doc_type` |
 
 Slice columns let `share` publish a board per label. **`share` publishes the column name and its labels as they are**, so use a column name and labels that may be public: `doc_type` with `typescript` or `1950s`, not a person's name, a client's name or a page's title. A slice column can have at most 50 different labels on the judged pages, so do not use a per-page or per-document column.
 
