@@ -9,6 +9,8 @@ current behaviour.
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-11-09
+
 ### Behaviour changes
 
 - `judge` visits the judged sample in a seeded random order. Before, without `--max-samples` below the dataset length, it visited the rows in dataset order, so a `--max-comparisons` budget or adaptive stopping on a sorted dataset (by collection, decade or document) judged only its first rows. When a budget or adaptive stopping ends a run early, the judged rows are now a random subset of the sample. The sample itself does not change, so the page fingerprints, resume and `share` work as before on existing results repos.
@@ -25,6 +27,7 @@ current behaviour.
 
 ### New
 
+- A guide to a private OCR eval on HF Jobs, [docs/private-eval.md](docs/private-eval.md): who sees the pages, the input dataset, OCR from recipes or your own outputs, the judge as a Job, and a scores-only board with `share`. An agent skill with the same steps and stop points is in [skills/ocr-bench-private-eval](skills/ocr-bench-private-eval/SKILL.md).
 - `share` publishes a scores-only board from a results repo to a separate dataset repo: `ocr-bench share <results-repo> <board-repo> --alias <name>`. The board has the overall ranking, one board per slice with `--slice-column`, and the judge settings. It has no page text, OCR outputs, judge reasons, page ids or repo ids. Before any Hub call, `share` checks the final files: allowed columns and values only, a README rendered from them, no repo ids, and no 32-character chunk of a compared output or judge reason. If a check fails, nothing is written. Slice labels are read only after the page fingerprint of the judged source config matches. A missing destination is created private, and `share` prints how to publish it (the repo's Settings page, or `hf repos settings ... --public` with the `hf` CLI 2.0 or later); `--public` creates it public in one step. An existing destination keeps its visibility. `--dry-run` writes the files locally. Every model on a board must be rankable against every other (no two groups that were never compared, and no model that won or lost every comparison): such an overall board is refused and such a slice is left out. `share` refuses a results repo whose last judge run did not finish publishing, and slice boards need a source with page images. See the README.
 - `audit --columns` reads the named text columns of a flat dataset (one column per model, named after the model), as `judge --columns` does. Before, `audit` found flat columns only from an `inference_info` column or from column names that contain `markdown`, `ocr` or `text`, so it could miss bring-your-own outputs. `--configs` takes precedence, as in `judge`.
 - `judge` and `bench` report on how many pages each model is ranked. The leaderboard has a Pages column, N/M: M is the number of pages in the judged sample (`--max-samples`, or every row), and N is the number of those pages where the model took part in at least one judged or auto-tied comparison. A footnote names each model with error sentinels (placeholders such as `[OCR ERROR]`) in the sample. The results card has a Coverage section, and each new `metadata` row has `model_coverage` (JSON: `sampled_pages`, `ranked_pages` and `sentinel_pages` per model).
