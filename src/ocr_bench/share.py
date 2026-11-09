@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import structlog
-from datasets import load_dataset
+from datasets import Image, load_dataset
 from huggingface_hub import CommitOperationAdd, CommitOperationDelete, DatasetCard, HfApi
 from huggingface_hub.errors import RepositoryNotFoundError
 
@@ -44,7 +44,13 @@ from ocr_bench.dataset import (
     fingerprint_identity_columns,
     load_config_dataset,
 )
-from ocr_bench.elo import MIN_PAGES_TO_RESOLVE, ComparisonResult, Leaderboard, compute_elo
+from ocr_bench.elo import (
+    MIN_PAGES_TO_RESOLVE,
+    ComparisonResult,
+    Leaderboard,
+    _unswap_winner,
+    compute_elo,
+)
 from ocr_bench.judge import sample_indices
 from ocr_bench.publish import (
     build_leaderboard_rows,
@@ -113,6 +119,12 @@ SETTINGS_KEYS = (
     "ocr_bench_version",
 )
 SHARE_FILES = ("README.md", "overall.jsonl", "slices.jsonl", "board.json")
+# The results repo folders judge writes, in the order it pushes them.
+RESULT_FOLDERS = ("comparisons", "data", "metadata")
+# Everything str.splitlines() splits on. A label or alias must hold none of them.
+LINE_BREAKS = "\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"
+# Markdown that could make a label render as a link, an image, HTML or code.
+MARKDOWN_SPECIAL = "\\`*_[]<>|"
 STATUSES = ("ranked", "degraded", "failed")
 
 # A slice board needs as many pages as a resolved ranking does. A smaller slice
@@ -165,23 +177,80 @@ class SharePlan:
 # --- reading -----------------------------------------------------------------
 
 
-def load_private_evaluation(results_repo: str) -> PrivateEvaluation:
-    """Read the leaderboard, comparisons and latest metadata row of a results repo."""
+def load_private_evaluation(results_repo: str, api: HfApi | None = None) -> PrivateEvaluation:
+    """Read the leaderboard, comparisons and latest metadata row of a results repo.
+
+    All three are read at one revision, after checking that the last judge run
+    finished publishing (see :func:`check_publish_order`).
+    """
+    api = api or HfApi()
     try:
-        leaderboard = [dict(row) for row in load_dataset(results_repo, split="train")]
+        revision = api.dataset_info(results_repo).sha
+    except Exception as exc:
+        raise ShareError(f"Could not read {results_repo} ({type(exc).__name__}).") from exc
+    check_publish_order(api, results_repo, revision)
+    try:
+        leaderboard = [
+            dict(row) for row in load_dataset(results_repo, split="train", revision=revision)
+        ]
     except Exception as exc:
         # The loader's message can quote file contents, so only its type is shown.
         raise ShareError(
             f"Could not read the leaderboard of {results_repo} ({type(exc).__name__}). "
             "Is it a results repo written by `ocr-bench judge`?"
         ) from exc
-    comparisons = load_existing_comparisons(results_repo)
+    comparisons = load_existing_comparisons(results_repo, revision=revision)
     if not comparisons:
         raise ShareError(f"{results_repo} has no comparisons to share.")
-    metadata_rows = load_existing_metadata(results_repo)
+    metadata_rows = load_existing_metadata(results_repo, revision=revision)
     if not metadata_rows:
         raise ShareError(f"{results_repo} has no metadata rows.")
     return PrivateEvaluation(leaderboard, comparisons, metadata_rows[-1])
+
+
+def check_publish_order(api: HfApi, results_repo: str, revision: str | None) -> None:
+    """Refuse a results repo whose last judge run did not finish publishing.
+
+    Judge pushes the comparisons, then the leaderboard, then the metadata row, in
+    separate commits; a checkpoint pushes only the comparisons. If a run stopped
+    between these pushes, the latest metadata row describes an earlier run, so its
+    settings and page fingerprint would be published with newer comparisons.
+    """
+    try:
+        infos = api.get_paths_info(
+            results_repo, list(RESULT_FOLDERS), expand=True, revision=revision, repo_type="dataset"
+        )
+        commits = [
+            commit.commit_id
+            for commit in api.list_repo_commits(
+                results_repo, repo_type="dataset", revision=revision
+            )
+        ]
+    except Exception as exc:
+        raise ShareError(
+            f"Could not read the commit history of {results_repo} ({type(exc).__name__})."
+        ) from exc
+    last: dict[str, str] = {}
+    for info in infos:
+        commit = getattr(info, "last_commit", None)
+        if commit is not None:
+            last[info.path] = commit.oid
+    missing = [folder for folder in RESULT_FOLDERS if folder not in last]
+    if missing:
+        raise ShareError(
+            f"{results_repo} has no {', '.join(missing)} folder. "
+            "Is it a results repo written by `ocr-bench judge`?"
+        )
+    newest_first = {commit: position for position, commit in enumerate(commits)}
+    if any(last[folder] not in newest_first for folder in RESULT_FOLDERS):
+        raise ShareError(f"Could not order the commits of {results_repo}.")
+    comparisons, leaderboard, metadata = (newest_first[last[f]] for f in RESULT_FOLDERS)
+    if not metadata <= leaderboard <= comparisons:
+        raise ShareError(
+            f"The last judge run on {results_repo} did not finish publishing: its "
+            "comparisons are newer than its leaderboard or metadata. Run the same "
+            "judge command again to finish it, then share."
+        )
 
 
 def reference_config(metadata: dict) -> str | None:
@@ -231,6 +300,14 @@ def load_slice_values(metadata: dict, slice_column: str) -> list:
     if slice_column not in ds.column_names:
         raise ShareError(
             f"Column '{slice_column}' is not in the judged source config {config or 'default'}."
+        )
+    if not any(isinstance(feature, Image) for feature in ds.features.values()):
+        # Without image bytes the fingerprint covers only the row ids, and ids do
+        # not show that a row is still the page that was judged.
+        raise ShareError(
+            f"The judged source config {config or 'default'} has no image column, so "
+            "share cannot check that slice labels are on the judged pages. Share "
+            "without --slice-column."
         )
     judged = sample_indices(len(ds), metadata.get("max_samples"), metadata.get("seed", 42))
     try:
@@ -382,7 +459,7 @@ def slice_groups(values: list, sample_ids: Iterable[int]) -> tuple[dict[str, set
             f"The slice column has {len(groups)} different values on the judged pages "
             f"(at most {MAX_SLICES}). Is it a per-page column?"
         )
-    if any(len(label) > MAX_LABEL_LENGTH or "\n" in label for label in groups):
+    if any(len(label) > MAX_LABEL_LENGTH or _has_line_break(label) for label in groups):
         raise ShareError(
             f"Slice labels must be {MAX_LABEL_LENGTH} characters or fewer, on one line. "
             "Use a column of short labels."
@@ -395,10 +472,9 @@ def rankable_models(
 ) -> tuple[list[str], list[ComparisonResult]]:
     """Models a slice board can rank, and the comparisons between them.
 
-    A model needs MIN_SLICE_PAGES pages in the slice. The models left must form
-    one connected comparison graph: Bradley-Terry cannot order two groups that
-    were never compared with each other (targeted runs judge only some pairs).
-    Returns no models when the graph is not connected.
+    A model needs MIN_SLICE_PAGES pages in the slice. The models left must be
+    rankable together (see :func:`rankable_together`). Returns no models when
+    they are not.
     """
     kept = list(models)
     while True:
@@ -414,20 +490,47 @@ def rankable_models(
         if still == kept:
             break
         kept = still
-    if len(kept) < 2:
-        return [], []
-    neighbours: dict[str, set[str]] = {m: set() for m in kept}
-    for c in between:
-        neighbours[c.model_a].add(c.model_b)
-        neighbours[c.model_b].add(c.model_a)
-    reached, todo = {kept[0]}, [kept[0]]
-    while todo:
-        for other in neighbours[todo.pop()] - reached:
-            reached.add(other)
-            todo.append(other)
-    if reached != kept_set:
+    if len(kept) < 2 or not rankable_together(kept, between):
         return [], []
     return kept, between
+
+
+def rankable_together(models: list[str], comparisons: list[ComparisonResult]) -> bool:
+    """Whether Bradley-Terry gives every model a finite rating from these comparisons.
+
+    Draw an arrow from each model to every model it beat or tied. The fit has a
+    finite rating for every model only when each model can reach every other
+    along the arrows. It fails when two groups were never compared (targeted
+    runs judge only some pairs), and when one group beat or lost to the other in
+    every comparison: a model that won all its comparisons gets an unbounded
+    rating and a zero-width interval.
+    """
+    beat: dict[str, set[str]] = {model: set() for model in models}
+    beaten_by: dict[str, set[str]] = {model: set() for model in models}
+    for c in comparisons:
+        if c.model_a not in beat or c.model_b not in beat:
+            continue
+        winner = _unswap_winner(c.winner, c.swapped)
+        if winner in ("A", "tie"):
+            beat[c.model_a].add(c.model_b)
+            beaten_by[c.model_b].add(c.model_a)
+        if winner in ("B", "tie"):
+            beat[c.model_b].add(c.model_a)
+            beaten_by[c.model_a].add(c.model_b)
+    return _reaches_all(models, beat) and _reaches_all(models, beaten_by)
+
+
+def _reaches_all(models: list[str], arrows: dict[str, set[str]]) -> bool:
+    reached, todo = {models[0]}, [models[0]]
+    while todo:
+        for other in arrows[todo.pop()] - reached:
+            reached.add(other)
+            todo.append(other)
+    return reached == set(models)
+
+
+def _has_line_break(text: str) -> bool:
+    return any(char in LINE_BREAKS for char in text)
 
 
 def check_judged_sample(values: list, metadata: dict, sample_ids: set[int]) -> None:
@@ -457,7 +560,9 @@ def _jsonl(rows: list[dict]) -> bytes:
 
 
 def _md(value: object) -> str:
-    return str(value).replace("|", "\\|").replace("\n", " ")
+    """A value as plain text in a markdown table cell."""
+    text = "".join(" " if char in LINE_BREAKS else char for char in str(value))
+    return "".join("\\" + char if char in MARKDOWN_SPECIAL else char for char in text)
 
 
 def _table(rows: list[dict]) -> list[str]:
@@ -615,7 +720,9 @@ def _check_value(path: str, key: str, value: object, allowed: frozenset[str]) ->
 
 def _rows(files: dict[str, bytes], path: str, columns: tuple[str, ...], allowed) -> list[dict]:
     rows = []
-    for line in files.get(path, b"").decode().splitlines():
+    for line in files.get(path, b"").decode().split("\n"):
+        if not line:
+            continue
         row = json.loads(line)
         if tuple(row) != columns:
             raise PrivacyError(
@@ -680,8 +787,9 @@ def _file_views(path: str, data: bytes) -> list[str]:
     text = data.decode("utf-8")
     views = [text]
     if path.endswith(".jsonl"):
-        for line in text.splitlines():
-            views.extend(_strings(json.loads(line)))
+        for line in text.split("\n"):
+            if line:
+                views.extend(_strings(json.loads(line)))
     elif path.endswith(".json"):
         views.extend(_strings(json.loads(text)))
     return views
@@ -725,7 +833,7 @@ def check_plan(plan: SharePlan) -> None:
 
 def _check_alias(alias: str) -> str:
     alias = alias.strip()
-    if not alias or len(alias) > MAX_LABEL_LENGTH or "\n" in alias:
+    if not alias or len(alias) > MAX_LABEL_LENGTH or _has_line_break(alias):
         raise ShareError(f"--alias must be 1–{MAX_LABEL_LENGTH} characters on one line.")
     return alias
 
@@ -752,6 +860,14 @@ def plan_share(
     if not comparisons:
         raise ShareError(f"{results_repo} has no comparisons between its leaderboard models.")
     failed_outputs = json.loads(metadata.get("failed_outputs") or "{}")
+    if not rankable_together(models, comparisons):
+        raise ShareError(
+            "The comparisons cannot rank every leaderboard model against every other: "
+            "two groups of models were never compared, or one model won (or lost) "
+            "every comparison. Bradley-Terry gives no finite rating then, so share "
+            "publishes no board. Judge the missing pairs, or leave such a model out "
+            "with judge --configs."
+        )
 
     board = compute_elo(comparisons, models, n_bootstrap=N_BOOTSTRAP)
     check_board_matches(board, evaluation.leaderboard, results_repo)
@@ -780,7 +896,11 @@ def plan_share(
             slice_board = compute_elo(slice_comparisons, slice_models, n_bootstrap=N_BOOTSTRAP)
             slice_rows += _slice_rows(slice_board, name)
             slice_names.append(name)
-            slice_pages.append(len(pages))
+            # Pages whose only comparisons involve a model left out of this board
+            # are not on it.
+            ranked_pages = {c.sample_idx for c in slice_comparisons}
+            slice_pages.append(len(ranked_pages))
+            not_in_a_slice += len(pages) - len(ranked_pages)
 
     judge_models = json.loads(metadata.get("judge_models") or "[]")
     judge_spec_hashes = json.loads(metadata.get("judge_spec_hashes") or "[]")
@@ -841,6 +961,11 @@ def write_local(plan: SharePlan, out_dir: Path) -> list[Path]:
     """Write the checked files to a local folder (``--dry-run``)."""
     check_plan(plan)
     out_dir.mkdir(parents=True, exist_ok=True)
+    # A file from an earlier run (slices.jsonl after a run without slices) would
+    # otherwise sit next to the new board.
+    for name in SHARE_FILES:
+        if name not in plan.files and (out_dir / name).is_file():
+            (out_dir / name).unlink()
     written = []
     for path, data in plan.files.items():
         target = out_dir / path

@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import random
+import re
 import string
 import sys
 from itertools import combinations
@@ -30,9 +31,12 @@ from ocr_bench.share import (
     ShareError,
     check_no_page_text,
     check_plan,
+    check_publish_order,
+    load_private_evaluation,
     load_slice_values,
     plan_share,
     push_share,
+    write_local,
 )
 
 MODELS = ["org/model-good", "org/model-mid", "org/model-weak"]
@@ -218,7 +222,28 @@ class TestBoards:
         assert plan.settings["criteria"] == "custom"
         assert "rubric" not in b"".join(plan.files.values()).decode()
 
-    @pytest.mark.parametrize("alias", ["", "   ", "x" * 65, "two\nlines"])
+    def test_models_never_compared_across_groups_are_refused(self):
+        # Two independent pairs: nothing orders A-B against C-D.
+        models = ["org/a", "org/b", "org/c", "org/d"]
+        results = _results(range(20), models, pairs=[("org/a", "org/b"), ("org/c", "org/d")])
+        with pytest.raises(ShareError, match="cannot rank every leaderboard model"):
+            _plan(_evaluation(results, models))
+
+    def test_a_model_that_won_every_comparison_is_refused(self):
+        # The unregularised fit puts such a model at an unbounded rating with a
+        # zero-width interval.
+        results = [
+            ComparisonResult(
+                sample_idx=page, model_a="org/a", model_b="org/b", winner="A", provenance_hash="h"
+            )
+            for page in range(20)
+        ]
+        with pytest.raises(ShareError, match="won \\(or lost\\)"):
+            _plan(_evaluation(results, ["org/a", "org/b"]))
+
+    @pytest.mark.parametrize(
+        "alias", ["", "   ", "x" * 65, "two\nlines", "carriage\rreturn", "line\u2028separator"]
+    )
     def test_alias_must_be_a_short_single_line(self, alias):
         with pytest.raises(ShareError, match="--alias"):
             _plan(_evaluation(_results(range(20))), alias=alias)
@@ -298,6 +323,55 @@ class TestSlices:
         )
         assert plan.settings["slices"] == ["letters"]
 
+    def test_a_slice_where_one_model_won_every_comparison_is_left_out(self):
+        # On the forms pages good beats both others every time: no finite rating.
+        sweep = [
+            ComparisonResult(
+                sample_idx=page,
+                model_a="org/model-good",
+                model_b=other,
+                winner="A",
+                provenance_hash="h",
+            )
+            for page in range(20, 40)
+            for other in ("org/model-mid", "org/model-weak")
+        ]
+        sweep += _results(range(20, 40), pairs=[("org/model-mid", "org/model-weak")])
+        plan = self._plan(
+            {"letters": range(0, 20), "forms": range(20, 40)},
+            results=_results(range(20)) + sweep,
+        )
+        assert plan.settings["slices"] == ["letters"]
+        assert plan.settings["pages_not_in_a_slice_board"] == 20
+
+    def test_slice_pages_count_only_pages_on_the_board(self):
+        # forms: 10 pages compare good-mid-weak, 9 pages compare only new-other.
+        # new and other have 9 pages (< 10) and leave the board, with their pages.
+        models = [*MODELS, "org/model-new", "org/model-other"]
+        linking = _results(range(0, 20), models)
+        forms = _results(range(20, 30))
+        forms += _results(range(30, 39), pairs=[("org/model-new", "org/model-other")])
+        plan = self._plan(
+            {"letters": range(0, 20), "forms": range(20, 39)},
+            results=linking + forms,
+            models=models,
+        )
+        pages = dict(zip(plan.settings["slices"], plan.settings["slice_pages"], strict=True))
+        assert pages["forms"] == 10
+        assert plan.settings["pages_not_in_a_slice_board"] == 9
+
+    @pytest.mark.parametrize("label", ["line\u2028separator", "carriage\rreturn", "form\x0cfeed"])
+    def test_labels_with_any_line_break_are_refused(self, label):
+        with pytest.raises(ShareError, match="on one line"):
+            self._plan({label: range(0, 20), "forms": range(20, 40)})
+
+    def test_markdown_in_a_label_is_shown_as_text(self):
+        label = "[x](https://example.com)<img src=x>"
+        plan = self._plan({label: range(0, 20), "forms": range(20, 40)})
+        readme = plan.files["README.md"].decode()
+        assert "\\[x\\](https://example.com)\\<img src=x\\>" in readme
+        assert not re.search(r"(?<!\\)\[x|(?<!\\)<img", readme)  # no unescaped markup
+
     def test_comparisons_outside_the_drawn_sample_are_refused(self):
         drawn = sorted(sample_indices(100, 40, 42))
         others = sorted(set(range(100)) - set(drawn))[:40]
@@ -332,16 +406,108 @@ class TestSlices:
             self._plan({SOURCE: range(0, 20), "forms": range(20, 40)})
 
 
-def _source(n_rows=30, order=None, labels=None):
-    """A flat source with page ids and slice labels; order permutes the rows."""
-    order = order or list(range(n_rows))
-    return Dataset.from_dict(
-        {
-            "id": [f"page-{i:03d}" for i in order],
-            "doc_type": [(labels or {}).get(i, "letters" if i < 15 else "forms") for i in order],
-            "markdown": [f"text {i}" for i in order],
-        }
+class TestLocalFiles:
+    def test_a_stale_slice_file_is_removed_from_the_dry_run_folder(self, tmp_path):
+        values = _labels(40, {"letters": range(0, 20), "forms": range(20, 40)})
+        evaluation = _evaluation(_results(range(40)), n_rows=40)
+        with_slices = _plan(evaluation, slice_column="doc_type", slice_values=lambda m, c: values)
+        write_local(with_slices, tmp_path)
+        assert (tmp_path / "slices.jsonl").exists()
+        write_local(_plan(evaluation), tmp_path)
+        assert sorted(p.name for p in tmp_path.iterdir()) == sorted(BOARD_FILES)
+
+
+class FakeHistory:
+    """The commit history of a results repo: folder -> last commit, newest first."""
+
+    def __init__(self, last, commits=("c3", "c2", "c1"), sha="c3"):
+        self.last, self.commits, self.sha = last, list(commits), sha
+
+    def dataset_info(self, repo_id):
+        return SimpleNamespace(sha=self.sha)
+
+    def get_paths_info(self, repo_id, paths, expand=False, revision=None, repo_type=None):
+        return [
+            SimpleNamespace(path=path, last_commit=SimpleNamespace(oid=self.last[path]))
+            for path in paths
+            if path in self.last
+        ]
+
+    def list_repo_commits(self, repo_id, repo_type=None, revision=None):
+        return [SimpleNamespace(commit_id=commit) for commit in self.commits]
+
+
+class TestPublishOrder:
+    """A judge run pushes comparisons, then the leaderboard, then the metadata."""
+
+    def test_a_finished_run_passes(self):
+        check_publish_order(
+            FakeHistory({"comparisons": "c1", "data": "c2", "metadata": "c3"}), RESULTS, "c3"
+        )
+
+    def test_one_commit_for_all_three_passes(self):
+        history = FakeHistory({"comparisons": "c3", "data": "c3", "metadata": "c3"})
+        check_publish_order(history, RESULTS, "c3")
+
+    @pytest.mark.parametrize(
+        "last",
+        [
+            {"comparisons": "c3", "data": "c2", "metadata": "c2"},  # a checkpoint after the run
+            {"comparisons": "c2", "data": "c3", "metadata": "c1"},  # stopped before the metadata
+            {"comparisons": "c2", "data": "c1", "metadata": "c3"},  # leaderboard older
+        ],
     )
+    def test_an_unfinished_run_is_refused(self, last):
+        with pytest.raises(ShareError, match="did not finish publishing"):
+            check_publish_order(FakeHistory(last), RESULTS, "c3")
+
+    def test_a_repo_without_the_judge_folders_is_refused(self):
+        with pytest.raises(ShareError, match="no metadata folder"):
+            check_publish_order(FakeHistory({"comparisons": "c1", "data": "c2"}), RESULTS, "c3")
+
+    def test_all_three_are_read_at_the_checked_revision(self, monkeypatch):
+        evaluation = _evaluation(_results(range(20)))
+        reads = []
+
+        def fake_load_dataset(repo, split=None, revision=None):
+            reads.append(("leaderboard", revision))
+            return evaluation.leaderboard
+
+        def fake_comparisons(repo, revision=None):
+            reads.append(("comparisons", revision))
+            return evaluation.comparisons
+
+        def fake_metadata(repo, revision=None):
+            reads.append(("metadata", revision))
+            return [evaluation.metadata]
+
+        monkeypatch.setattr(share, "load_dataset", fake_load_dataset)
+        monkeypatch.setattr(share, "load_existing_comparisons", fake_comparisons)
+        monkeypatch.setattr(share, "load_existing_metadata", fake_metadata)
+        history = FakeHistory({"comparisons": "c1", "data": "c2", "metadata": "c3"}, sha="c3")
+        loaded = load_private_evaluation(RESULTS, api=history)
+        assert reads == [("leaderboard", "c3"), ("comparisons", "c3"), ("metadata", "c3")]
+        assert loaded.metadata == evaluation.metadata
+
+
+def _png(shade):
+    buffer = io.BytesIO()
+    PILImage.new("L", (2, 2), shade).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _source(n_rows=30, order=None, labels=None, images=True):
+    """A flat source with page ids, page images and slice labels; order permutes the rows."""
+    order = order or list(range(n_rows))
+    columns = {
+        "id": [f"page-{i:03d}" for i in order],
+        "doc_type": [(labels or {}).get(i, "letters" if i < 15 else "forms") for i in order],
+        "markdown": [f"text {i}" for i in order],
+    }
+    if not images:
+        return Dataset.from_dict(columns)
+    columns["image"] = [{"bytes": _png(i), "path": None} for i in order]
+    return Dataset.from_dict(columns).cast_column("image", Image())
 
 
 class TestSliceSource:
@@ -397,6 +563,14 @@ class TestSliceSource:
         load_slice_values(metadata, "doc_type")
         assert calls == [(SOURCE, "model-b", "train", "refs/pr/3")]
 
+    def test_a_source_without_images_is_refused(self, monkeypatch):
+        # Ids alone do not show that a row is still the judged page: the labels and
+        # text could be replaced under the same ids.
+        source = _source(images=False)
+        self._loader(monkeypatch, source)
+        with pytest.raises(ShareError, match="no image column"):
+            load_slice_values(self._metadata(source), "doc_type")
+
     def test_a_missing_column_is_an_error(self, monkeypatch):
         source = _source()
         self._loader(monkeypatch, source)
@@ -417,12 +591,6 @@ class TestSliceSource:
             load_slice_values(self._metadata(_source()), "doc_type")
         assert "CONFIDENTIAL" not in str(exc.value)
         assert "page-0042" not in str(exc.value)
-
-
-def _png(shade):
-    buffer = io.BytesIO()
-    PILImage.new("L", (2, 2), shade).save(buffer, format="PNG")
-    return buffer.getvalue()
 
 
 def _config(n_rows, *, ids=True):

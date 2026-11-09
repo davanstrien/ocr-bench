@@ -2277,8 +2277,9 @@ def cmd_share(args: argparse.Namespace) -> None:
             f"{plan.settings['pages_not_in_a_slice_board']} judged pages are in none."
         )
     console.print(
-        "[green]Privacy checks passed[/green]: allowed columns and values only, "
-        "no page text or judge reasons."
+        "[green]Privacy checks passed[/green]: allowed columns and values only, and no "
+        "32-character fragment of a compared output or judge reason. The alias, slice "
+        "labels and model names are published as they are: check them."
     )
 
     if args.dry_run:
