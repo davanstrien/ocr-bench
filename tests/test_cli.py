@@ -342,6 +342,18 @@ def _audit_report(sentinel_count: int = 0, n_rows: int = 10, status: str = "ok")
 
 
 class TestCmdAudit:
+    def test_columns_reach_audit_repo(self, monkeypatch):
+        seen = {}
+
+        def fake_audit_repo(*args, **kwargs):
+            seen.update(kwargs)
+            return _audit_report()
+
+        monkeypatch.setattr(cli, "audit_repo", fake_audit_repo)
+        args = build_parser().parse_args(["audit", "user/data", "--columns", "vendor", "mine"])
+        cli.cmd_audit(args)
+        assert seen["columns"] == ["vendor", "mine"]
+
     def test_config_without_text_exits_one(self, monkeypatch):
         report = _audit_report()
         report.configs_without_text = ["broken"]

@@ -538,7 +538,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Audit these text columns of a flat dataset (one column per model, named "
-            "after the model), as in 'judge --columns'. Ignored with --configs."
+            "after the model), as in 'judge --columns'. Ignored with --configs; "
+            "--from-prs is ignored with --columns."
         ),
     )
     audit.add_argument(
