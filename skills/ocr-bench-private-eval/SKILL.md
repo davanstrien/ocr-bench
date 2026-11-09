@@ -17,6 +17,8 @@ The full human guide is [docs/private-eval.md](../../docs/private-eval.md). Read
 2. **Anything public.** `share` creates a missing board repo private; making it public (the repo's Settings page, `hf repos settings <board-repo> --repo-type dataset --public` with `hf` 2.0 or later, or `share --public`) needs the user's OK. Show the `--dry-run` files first.
 3. **Where the pages go.** The default judge (`novita:Qwen/Qwen3.8-27B`) sends each page image to Novita through HF Inference Providers. Say so, and ask whether that is acceptable. If not, the user chooses an endpoint that meets their needs and you pass it with `--model`: an HF Inference Endpoint, a model served on a Job (https://huggingface.co/docs/hub/jobs-serving; `--model https://<job-id>--8000.hf.jobs/v1/:<org>/<model>`; the HF token is sent), or an OpenAI-compatible server that needs no API key. Only the default judge has been checked against ground truth.
 
+Use full repo ids (`<user>/name`) in every command. For table-dense material, use `--criteria table-fidelity` instead of `body-text` (one criterion per board).
+
 Never change the visibility of a source, OCR output or results repo. Never publish the OCR output repo or the results repo: they contain page text and judge reasons that quote the page.
 
 ## Steps

@@ -11,6 +11,7 @@ Everything runs on the Hugging Face Hub: the OCR models and the judge run as [Jo
 
 - Install the CLI with `uv tool install ocr-bench` (or run a single command with `uvx ocr-bench ...`). Use the latest release from [PyPI](https://pypi.org/project/ocr-bench/), and the same version in the Job commands below.
 - Jobs guides: [overview](https://huggingface.co/docs/hub/jobs-overview), [configuration](https://huggingface.co/docs/hub/jobs-configuration) (hardware flavors, timeout), [managing Jobs](https://huggingface.co/docs/hub/jobs-manage) (logs, cancel) and [pricing](https://huggingface.co/docs/hub/jobs-pricing). `hf jobs --help` lists the CLI commands; the [`hf` CLI guide](https://huggingface.co/docs/huggingface_hub/guides/cli) covers the rest.
+- Use full repo ids (`<you>/my-pages`, never a bare `my-pages`) in every command.
 - Working with an AI agent? `hf skills add` installs a skill that teaches it the `hf` CLI, and this repo's [agent skill](../skills/ocr-bench-private-eval/SKILL.md) gives it these steps with stop points.
 
 ## The steps
@@ -142,7 +143,7 @@ For a private source, the results repo is private automatically. Pass `--private
 
 - **Cost.** About $0.0014 per comparison with the default judge, an 8,000-character cap and 1,024 px images (billed in the proof of concept). A run is at most pages × models × (models − 1) / 2 comparisons; adaptive stopping usually uses fewer. `--max-comparisons N` sets a hard limit: your budget divided by $0.0014, for example about 7,000 comparisons for $10. A run stopped by this limit can be continued later with the same command and a higher limit.
 - **Text cap.** `--max-ocr-text-len` is 2,500 characters by default; longer outputs are cut before the judge sees them. Use the cap that `audit --screen` suggests (the proof of concept used 8,000 for dense pages). Choose it before the first run: changing it later needs `--full-rejudge`.
-- **`--criteria body-text`** asks the judge to compare the body text and to ignore page furniture (running heads, page numbers).
+- **`--criteria body-text`** asks the judge to compare the body text and to ignore page furniture (running heads, page numbers). For table-dense material, `--criteria table-fidelity` adds a row-and-column check. One board uses one criterion.
 - **`--max-samples N`** judges a random sample of N pages.
 - **Adding a model later:** run the OCR for the new model, then run the same `judge` command again. Only the new pairs are judged. If an input changed (a re-run model, other pages, another judge setting), `judge` stops and tells you to pass `--full-rejudge` or use a new results repo. A re-run of one model counts as a change, so the whole board is judged again.
 - **Logs:** `hf jobs logs <job-id>`. The leaderboard is printed at the end and written to the results repo.
