@@ -150,20 +150,24 @@ class TestParseJudgeSpec:
     def test_hf_jobs_auth_and_model(self, mock_get_token, mock_openai, suffix):
         backend = parse_judge_spec("https://abc--8000.hf.jobs" + suffix)
         mock_openai.assert_called_once_with(
-            base_url="https://abc--8000.hf.jobs/v1", api_key="hf_test_token",
+            base_url="https://abc--8000.hf.jobs/v1",
+            api_key="hf_test_token",
         )
         assert backend.model == ("judge" if suffix.endswith(":judge") else "default")
         assert "guided_json" in backend.extra_body
 
     @patch("ocr_bench.backends.OpenAI")
     @patch("huggingface_hub.get_token", return_value="hf_test_token")
-    @pytest.mark.parametrize("url", [
-        "https://example.com/path.endpoints.huggingface.cloud/v1",
-        "https://abc.endpoints.huggingface.cloud.example.com/v1",
-        "https://abc.hf.jobs.example.com/v1",
-        "https://example.com/?host=abc.hf.jobs",
-        "http://abc--8000.hf.jobs/v1",
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://example.com/path.endpoints.huggingface.cloud/v1",
+            "https://abc.endpoints.huggingface.cloud.example.com/v1",
+            "https://abc.hf.jobs.example.com/v1",
+            "https://example.com/?host=abc.hf.jobs",
+            "http://abc--8000.hf.jobs/v1",
+        ],
+    )
     def test_other_urls_never_receive_hf_token(self, mock_get_token, mock_openai, url):
         parse_judge_spec(url)
         mock_get_token.assert_not_called()

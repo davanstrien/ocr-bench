@@ -13,8 +13,6 @@ from openai import OpenAIError
 from ocr_bench import cli
 from ocr_bench.cli import (
     _convert_results,
-    _existing_criteria_provenance,
-    _existing_preprocessing_provenance,
     _merge_auto_ties,
     _refresh_viewer_space,
     _resolve_criteria,
@@ -25,7 +23,7 @@ from ocr_bench.cli import (
 from ocr_bench.dataset import AlignmentResult, DatasetError
 from ocr_bench.elo import compute_elo
 from ocr_bench.integrity import AuditReport, ColumnStats, ConfigAudit
-from ocr_bench.judge import CRITERIA_PROFILES, DEFAULT_CRITERIA, Comparison, prompt_hash
+from ocr_bench.judge import CRITERIA_PROFILES, Comparison, prompt_hash
 from ocr_bench.screen import ModelScreen, ScreenReport
 
 
@@ -79,9 +77,7 @@ class TestBuildParser:
         parser = build_parser()
         args = parser.parse_args(["bench", "user/imgs", "user/out"])
         assert args.judge_text_mode == "normalized"
-        args = parser.parse_args(
-            ["bench", "user/imgs", "user/out", "--judge-text-mode", "raw"]
-        )
+        args = parser.parse_args(["bench", "user/imgs", "user/out", "--judge-text-mode", "raw"])
         assert args.judge_text_mode == "raw"
 
     def test_multiple_models(self):
@@ -292,6 +288,10 @@ class TestAuditParser:
         assert args.screen is False
         assert args.json is False
 
+    def test_audit_columns(self):
+        args = build_parser().parse_args(["audit", "user/data", "--columns", "vendor", "mine"])
+        assert args.columns == ["vendor", "mine"]
+
     def test_audit_selection_and_screen_flags(self):
         args = build_parser().parse_args(
             ["audit", "user/data", "--from-prs", "--configs", "a", "b", "--screen", "--json"]
@@ -342,6 +342,18 @@ def _audit_report(sentinel_count: int = 0, n_rows: int = 10, status: str = "ok")
 
 
 class TestCmdAudit:
+    def test_columns_reach_audit_repo(self, monkeypatch):
+        seen = {}
+
+        def fake_audit_repo(*args, **kwargs):
+            seen.update(kwargs)
+            return _audit_report()
+
+        monkeypatch.setattr(cli, "audit_repo", fake_audit_repo)
+        args = build_parser().parse_args(["audit", "user/data", "--columns", "vendor", "mine"])
+        cli.cmd_audit(args)
+        assert seen["columns"] == ["vendor", "mine"]
+
     def test_config_without_text_exits_one(self, monkeypatch):
         report = _audit_report()
         report.configs_without_text = ["broken"]
@@ -374,9 +386,7 @@ class TestCmdAudit:
         assert exc_info.value.code == 1
 
     def test_misalignment_exit_one(self, monkeypatch):
-        monkeypatch.setattr(
-            cli, "audit_repo", lambda *a, **k: _audit_report(status="misaligned")
-        )
+        monkeypatch.setattr(cli, "audit_repo", lambda *a, **k: _audit_report(status="misaligned"))
         args = build_parser().parse_args(["audit", "user/data"])
         with pytest.raises(SystemExit) as exc_info:
             cli.cmd_audit(args)
@@ -544,7 +554,7 @@ class TestCmdAuditJsonAndScreen:
         assert "1/10" in out  # cfg's loops
         assert "--max-ocr-text-len 3500" in out
         # The screen table keeps the configs' order.
-        screen_part = out[out.index("Screen"):]
+        screen_part = out[out.index("Screen") :]
         assert screen_part.index("cfg2") > screen_part.index("1/10")
 
     def test_screen_skip_reason_is_printed(self, monkeypatch, capsys):
@@ -614,9 +624,7 @@ class TestMainErrorHandling:
             raise exc
 
         monkeypatch.setattr(cli, "cmd_judge", boom)
-        monkeypatch.setattr(
-            sys, "argv", ["ocr-bench", "judge", "user/dataset", "--no-publish"]
-        )
+        monkeypatch.setattr(sys, "argv", ["ocr-bench", "judge", "user/dataset", "--no-publish"])
         with pytest.raises(SystemExit) as exc_info:
             cli.main()
         return exc_info.value.code
@@ -650,59 +658,6 @@ class TestResolveResultsRepo:
     def test_no_publish_overrides_explicit(self):
         result = _resolve_results_repo("user/my-dataset", "user/custom", True)
         assert result is None
-
-
-class TestExistingPreprocessingProvenance:
-    def test_missing_metadata_is_legacy_raw(self):
-        assert _existing_preprocessing_provenance([]) == ("raw", 2500, 1024)
-        assert _existing_preprocessing_provenance([{"source_dataset": "d"}]) == (
-            "raw",
-            2500,
-            1024,
-        )
-
-    def test_reads_latest_recorded_settings(self):
-        rows = [
-            {"judge_text_mode": "raw", "max_ocr_text_len": 2500, "judge_image_dim": 1024},
-            {
-                "judge_text_mode": "normalized",
-                "max_ocr_text_len": 5000,
-                "judge_image_dim": 2048,
-            },
-        ]
-        assert _existing_preprocessing_provenance(rows) == ("normalized", 5000, 2048)
-
-    def test_aligned_none_values_use_legacy_defaults(self):
-        rows = [
-            {"judge_text_mode": None, "max_ocr_text_len": None, "judge_image_dim": None}
-        ]
-        assert _existing_preprocessing_provenance(rows) == ("raw", 2500, 1024)
-
-
-class TestExistingCriteriaProvenance:
-    """Reads the criteria/prompt_hash the existing comparisons were judged under."""
-
-    _DEFAULT_HASH = prompt_hash(CRITERIA_PROFILES[DEFAULT_CRITERIA])
-
-    def test_no_rows_is_default(self):
-        assert _existing_criteria_provenance([]) == (DEFAULT_CRITERIA, self._DEFAULT_HASH)
-
-    def test_reads_last_row(self):
-        rows = [
-            {"criteria": "default", "prompt_hash": self._DEFAULT_HASH},
-            {"criteria": "table-fidelity", "prompt_hash": "fe138e71ecc3"},
-        ]
-        assert _existing_criteria_provenance(rows) == ("table-fidelity", "fe138e71ecc3")
-
-    def test_none_values_treated_as_default(self):
-        # Post-alignment old rows carry explicit None for the new columns.
-        rows = [{"criteria": None, "prompt_hash": None}]
-        assert _existing_criteria_provenance(rows) == (DEFAULT_CRITERIA, self._DEFAULT_HASH)
-
-    def test_missing_keys_treated_as_default(self):
-        # Genuinely pre-#44 rows lack the columns entirely.
-        rows = [{"source_dataset": "d", "judge_models": "[]"}]
-        assert _existing_criteria_provenance(rows) == (DEFAULT_CRITERIA, self._DEFAULT_HASH)
 
 
 _AUTO_TIE = {"winner": "tie", "reason": "identical outputs — auto-tie", "agreement": "auto"}
@@ -800,9 +755,7 @@ class TestRefreshViewerSpace:
 
         _refresh_viewer_space("user/x-results")
 
-        api.restart_space.assert_called_once_with(
-            "user/x-results-viewer", factory_reboot=True
-        )
+        api.restart_space.assert_called_once_with("user/x-results-viewer", factory_reboot=True)
 
     @patch("huggingface_hub.HfApi")
     def test_restarts_when_repos_unset(self, mock_api_cls):
@@ -813,9 +766,7 @@ class TestRefreshViewerSpace:
 
         _refresh_viewer_space("user/x-results")
 
-        api.restart_space.assert_called_once_with(
-            "user/x-results-viewer", factory_reboot=True
-        )
+        api.restart_space.assert_called_once_with("user/x-results-viewer", factory_reboot=True)
 
     @patch("huggingface_hub.HfApi")
     def test_warns_and_skips_on_repos_mismatch(self, mock_api_cls):
@@ -846,6 +797,7 @@ class TestRefreshViewerSpace:
         _refresh_viewer_space("user/x-results")  # must not raise
 
         api.restart_space.assert_not_called()
+
     def test_auto_tie_kept_as_tie(self):
         """An auto-tie verdict is a real tie, not a failure — it must survive."""
         results = _convert_results([_auto_comparison()], [dict(_AUTO_TIE)])
@@ -1119,8 +1071,7 @@ class TestCmdBench:
         """bench --criteria + --criteria-file fails fast (before launching jobs)."""
         calls = self._patch(monkeypatch)
         args = build_parser().parse_args(
-            ["bench", "user/imgs", "user/out", "--criteria", "default",
-             "--criteria-file", "r.txt"]
+            ["bench", "user/imgs", "user/out", "--criteria", "default", "--criteria-file", "r.txt"]
         )
         with pytest.raises(DatasetError, match="mutually exclusive"):
             cli.cmd_bench(args)
@@ -1187,15 +1138,14 @@ class TestCmdRun:
         from ocr_bench.run import JobRun
 
         launched = [
-            JobRun(slug, f"j{i}", f"u{i}")
-            for i, slug in enumerate(["glm-ocr", "dots-ocr"])
+            JobRun(slug, f"j{i}", f"u{i}") for i, slug in enumerate(["glm-ocr", "dots-ocr"])
         ]
 
         def fake_launch(*a, **k):
             return launched
 
         def fake_poll(jobs, **k):
-            for job, status in zip(jobs, statuses):
+            for job, status in zip(jobs, statuses, strict=True):
                 job.status = status
             return jobs
 
@@ -1227,10 +1177,7 @@ class TestCmdJudgeEmptyGuard:
         it must print the no-comparisons message, not an all-1500 board."""
         from PIL import Image
 
-        ds = [
-            {"image": Image.new("RGB", (20, 20)), "a": "x", "b": "y"}
-            for _ in range(4)
-        ]
+        ds = [{"image": Image.new("RGB", (20, 20)), "a": "x", "b": "y"} for _ in range(4)]
 
         def fake_flat(dataset, split="train", columns=None):
             return ds, {"a": "ModelA", "b": "ModelB"}

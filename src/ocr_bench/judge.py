@@ -222,8 +222,6 @@ CRITERIA_PROFILES: dict[str, str] = {
     "table-fidelity": _TABLE_FIDELITY_PROMPT,
     "body-text": _BODY_TEXT_PROMPT,
 }
-# Backward-compatible name for callers that imported the original single prompt.
-PAIRWISE_PROMPT = CRITERIA_PROFILES[DEFAULT_CRITERIA]
 
 
 def prompt_hash(prompt_template: str) -> str:
@@ -311,33 +309,122 @@ _CELL_DELIM = " | "
 _KNOWN_HTML_TAGS = frozenset(
     {
         # tables
-        "table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption",
-        "colgroup", "col",
+        "table",
+        "thead",
+        "tbody",
+        "tfoot",
+        "tr",
+        "td",
+        "th",
+        "caption",
+        "colgroup",
+        "col",
         # blocks
-        "p", "div", "span", "br", "hr", "pre", "code", "blockquote",
-        "figure", "figcaption", "section", "article", "header", "footer",
-        "nav", "aside", "main", "address",
+        "p",
+        "div",
+        "span",
+        "br",
+        "hr",
+        "pre",
+        "code",
+        "blockquote",
+        "figure",
+        "figcaption",
+        "section",
+        "article",
+        "header",
+        "footer",
+        "nav",
+        "aside",
+        "main",
+        "address",
         # lists
-        "ul", "ol", "li", "dl", "dt", "dd",
+        "ul",
+        "ol",
+        "li",
+        "dl",
+        "dt",
+        "dd",
         # headings
-        "h1", "h2", "h3", "h4", "h5", "h6",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
         # inline
-        "b", "i", "u", "s", "em", "strong", "small", "sub", "sup", "mark",
-        "del", "ins", "a", "img", "abbr", "cite", "q", "label", "font",
-        "center", "wbr", "big", "tt",
+        "b",
+        "i",
+        "u",
+        "s",
+        "em",
+        "strong",
+        "small",
+        "sub",
+        "sup",
+        "mark",
+        "del",
+        "ins",
+        "a",
+        "img",
+        "abbr",
+        "cite",
+        "q",
+        "label",
+        "font",
+        "center",
+        "wbr",
+        "big",
+        "tt",
         # document / non-visible
-        "html", "head", "body", "script", "style", "template", "title",
-        "meta", "link",
+        "html",
+        "head",
+        "body",
+        "script",
+        "style",
+        "template",
+        "title",
+        "meta",
+        "link",
     }
 )
 
 # Tags whose boundaries start a new line in the flattened text.
 _BLOCK_TAGS = frozenset(
     {
-        "p", "div", "tr", "li", "br", "table", "thead", "tbody", "tfoot",
-        "ul", "ol", "dl", "dt", "dd", "section", "article", "header", "footer",
-        "nav", "aside", "main", "blockquote", "pre", "figure", "figcaption",
-        "hr", "caption", "h1", "h2", "h3", "h4", "h5", "h6",
+        "p",
+        "div",
+        "tr",
+        "li",
+        "br",
+        "table",
+        "thead",
+        "tbody",
+        "tfoot",
+        "ul",
+        "ol",
+        "dl",
+        "dt",
+        "dd",
+        "section",
+        "article",
+        "header",
+        "footer",
+        "nav",
+        "aside",
+        "main",
+        "blockquote",
+        "pre",
+        "figure",
+        "figcaption",
+        "hr",
+        "caption",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
     }
 )
 
@@ -490,7 +577,7 @@ def _truncation_note(label: str) -> str:
 
 
 # Anchor for inserting the note(s): the fixed response-format instruction that
-# closes PAIRWISE_PROMPT. Inserting before it places the note(s) after both
+# closes the built-in criteria prompts. Inserting before it places the note(s) after both
 # output blocks and keeps the JSON instruction last, without editing the
 # (byte-stable) prompt constant.
 _JSON_INSTRUCTION_ANCHOR = "Respond with JSON only (no markdown fences"
@@ -612,10 +699,16 @@ def _normalize_pair(a: str, b: str) -> tuple[str, str]:
     return (a, b) if a <= b else (b, a)
 
 
-def sample_indices(
-    dataset_len: int, max_samples: int | None = None, seed: int = 42
-) -> list[int]:
-    """Compute shuffled sample indices (cheap — no image loading).
+def sample_indices(dataset_len: int, max_samples: int | None = None, seed: int = 42) -> list[int]:
+    """Return the evaluated sample: which rows are judged (cheap — no image loading).
+
+    With ``max_samples`` below the dataset length, this is a seeded random sample.
+    Otherwise it is every row, in dataset order.
+
+    The page and OCR fingerprints hash rows in this order, and ``share`` recomputes
+    it from the results metadata, so the output must stay the same for the same
+    arguments. The order in which ``judge`` visits the rows is separate: see
+    :func:`judging_order`.
 
     Args:
         dataset_len: Total number of rows in the dataset.
@@ -627,9 +720,31 @@ def sample_indices(
     """
     indices = list(range(dataset_len))
     if max_samples and max_samples < len(indices):
-        random.seed(seed)
-        indices = random.sample(indices, max_samples)
+        # A private generator gives the same sample as seeding the module-level
+        # one, without changing the global random state for other callers.
+        indices = random.Random(seed).sample(indices, max_samples)
     return indices
+
+
+def judging_order(indices: list[int], seed: int = 42) -> list[int]:
+    """Return ``indices`` in a seeded random order for judging.
+
+    ``judge`` visits the sample in this order. A ``--max-comparisons`` budget or
+    adaptive stopping can end a run before every row is visited, and datasets are
+    often sorted (by collection, decade or document). In dataset order, an early
+    stop would leave out whole groups. In a random order, the judged rows are a
+    random subset of the sample.
+
+    The sample itself, and so the fingerprints, does not change.
+
+    The shuffle uses its own random stream, derived from ``seed``. Reusing the
+    stream that drew the sample would correlate the two: in a 2-page sample of
+    128 sorted rows, the first page visited would fall in the upper half 75% of
+    the time, not 50%.
+    """
+    order = list(indices)
+    random.Random(f"judging-order:{seed}").shuffle(order)
+    return order
 
 
 def build_comparisons(
@@ -719,8 +834,7 @@ def build_comparisons(
         needed_pairs = [
             (i, j)
             for i, j in pairs
-            if idx
-            not in normalized_skip.get(_normalize_pair(model_names[i], model_names[j]), ())
+            if idx not in normalized_skip.get(_normalize_pair(model_names[i], model_names[j]), ())
         ]
         if not needed_pairs:
             continue  # Skip image encoding entirely
@@ -763,9 +877,7 @@ def build_comparisons(
         # rows whose pairs are all auto-ties skip the image entirely.
         needs_judge = any(auto is None for (_, _, _, _, auto) in valid_pairs)
         image_b64 = (
-            image_to_base64(dataset[idx]["image"], max_dim=judge_image_dim)
-            if needs_judge
-            else ""
+            image_to_base64(dataset[idx]["image"], max_dim=judge_image_dim) if needs_judge else ""
         )
 
         for i, j, text_a, text_b, auto in valid_pairs:

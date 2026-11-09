@@ -11,6 +11,12 @@ current behaviour.
 
 ### Behaviour changes
 
+- `judge` visits the judged sample in a seeded random order. Before, without `--max-samples` below the dataset length, it visited the rows in dataset order, so a `--max-comparisons` budget or adaptive stopping on a sorted dataset (by collection, decade or document) judged only its first rows. When a budget or adaptive stopping ends a run early, the judged rows are now a random subset of the sample. The sample itself does not change, so the page fingerprints, resume and `share` work as before on existing results repos.
+  - A results repo whose earlier run judged only the first rows keeps those comparisons. The random order applies to the rows judged from now on.
+  - The order uses its own random stream, derived from `--seed`. Reusing the stream that draws the sample would bias which pages come first.
+  - The sample uses a private random generator. It used to seed Python's global random generator; the sample is the same.
+  - Which output is shown to the judge as A and which as B is still drawn at random, but in the new visiting order, so for a given seed it differs from earlier runs.
+
 - `audit --screen` also counts a counting list (`- 1`, `- 2`, `- 3`, …) as a loop: the last 2,000 characters of an output of 500 or more characters hold 50 or more numbers in a row that each count up by one, with the same text between each number and the next. Such a list does not compress, because each line has a new number, so the compression test missed it. In `--json`, these rows are listed under `loop.counting_rows`, and the thresholds include `counting_run`. Peer agreement leaves out these loops, as it does the others.
   - The same-text condition keeps real numbered lists with different entries (a membership roll, a coin catalogue, numbered verse, a list of plates) from being flagged. A real list of 50 or more numbered entries with the same text in each (`1 Ditto`, `2 Ditto`, …, or folio numbers with the same word between them) is still flagged; check such rows in `loop.counting_rows`.
   - On the public Britannica board (6 models, 50 pages), the screen now finds 21 loops: the 20 it found before, and DeepSeek-OCR's 10,490-character list on row 0, which only `>5x length` flagged before.
@@ -19,6 +25,8 @@ current behaviour.
 
 ### New
 
+- `share` publishes a scores-only board from a results repo to a separate dataset repo: `ocr-bench share <results-repo> <board-repo> --alias <name>`. The board has the overall ranking, one board per slice with `--slice-column`, and the judge settings. It has no page text, OCR outputs, judge reasons, page ids or repo ids. Before any Hub call, `share` checks the final files: allowed columns and values only, a README rendered from them, no repo ids, and no 32-character chunk of a compared output or judge reason. If a check fails, nothing is written. Slice labels are read only after the page fingerprint of the judged source config matches. A missing destination is created private, and `share` prints how to publish it (the repo's Settings page, or `hf repos settings ... --public` with the `hf` CLI 2.0 or later); `--public` creates it public in one step. An existing destination keeps its visibility. `--dry-run` writes the files locally. Every model on a board must be rankable against every other (no two groups that were never compared, and no model that won or lost every comparison): such an overall board is refused and such a slice is left out. `share` refuses a results repo whose last judge run did not finish publishing, and slice boards need a source with page images. See the README.
+- `audit --columns` reads the named text columns of a flat dataset (one column per model, named after the model), as `judge --columns` does. Before, `audit` found flat columns only from an `inference_info` column or from column names that contain `markdown`, `ocr` or `text`, so it could miss bring-your-own outputs. `--configs` takes precedence, as in `judge`.
 - `judge` and `bench` report on how many pages each model is ranked. The leaderboard has a Pages column, N/M: M is the number of pages in the judged sample (`--max-samples`, or every row), and N is the number of those pages where the model took part in at least one judged or auto-tied comparison. A footnote names each model with error sentinels (placeholders such as `[OCR ERROR]`) in the sample. The results card has a Coverage section, and each new `metadata` row has `model_coverage` (JSON: `sampled_pages`, `ranked_pages` and `sentinel_pages` per model).
 - `judge` prints a note when a model has error sentinels at a rate of 10% or less: they are excluded from judging, so its rank leaves out those pages. Before, only rates over 10% were reported. The threshold and the exclusion do not change.
 - Before judging, `judge` and `bench` warn when `--max-ocr-text-len` truncates more than half of the outputs in the judged sample, overall or for any one model. The warning suggests a cap from the `audit --screen` checks (a cap that fits every output that no check flags), when 3 or more models have output. The default cap does not change.
@@ -31,6 +39,20 @@ These are reports only. Prompt hashes, comparison fingerprints and resume proven
 - A flat dataset with no rows stops with an error that says so. Before, it raised `IndexError`.
 - `audit` and `judge` check that the dataset repo exists before they look for configs. For a missing repo, or a private repo that the token cannot read, the error is now "Dataset repo '<id>' was not found on the Hub (repo type: dataset)". Before, the error named the discussions endpoint. `audit` still exits with 2.
 - The "no HF token" error of `run` says `hf auth login`, not `hf login`.
+
+### Removed
+
+ocr-bench is experimental, so these go without a transition release.
+
+- `judge` does not read old metadata rows to explain a criteria or preprocessing change any more. If a comparison it would reuse (one between two models of this run) has no resume provenance hash, the run stops with the "lack resume provenance" error. Such rows come from older ocr-bench versions or an incomplete old checkpoint. Run `--full-rejudge` once. A change of criteria, criteria file, text cap, text mode or image size on stamped comparisons still stops with "resume provenance mismatch".
+- `judge` does not drop old comparisons that hold an OCR error placeholder any more. The judge never compares a placeholder, so only rows from older versions can hold one, and those rows have no provenance hash.
+- Results repos do not get a duplicate `leaderboard` config any more, and the README does not declare one. Load the default config: `load_dataset("<repo>")`. Existing repos keep their old `leaderboard/` folder, which stops updating. The viewer reads the default config only.
+- The `PAIRWISE_PROMPT` alias and three unused viewer helpers are gone. Use `CRITERIA_PROFILES[DEFAULT_CRITERIA]`.
+
+### Other
+
+- Code that pairs lists that must have the same length now uses `zip(..., strict=True)`, so a mismatch raises an error instead of dropping rows silently. This covers judge results and comparisons, jury votes, fingerprints and alignment columns.
+- Development: `ty` is pinned to 0.0.97 and ruff to 0.15.4. ruff also checks the `B` rules. `src/` and `tests/` are formatted with `ruff format`. CI checks the format. CI also checks that `uv.lock` resolves from https://pypi.org/simple only and records no `exclude-newer` setting.
 
 ## [0.0.6] - 2026-11-04
 

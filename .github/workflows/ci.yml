@@ -18,8 +18,36 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - name: uv.lock holds no settings from a local uv config
+        # Parse the lock as TOML: a text match misses an indented or quoted key
+        # and fails on a comment.
+        run: |
+          python3 - <<'EOF'
+          import sys
+          import tomllib
+
+          with open("uv.lock", "rb") as handle:
+              lock = tomllib.load(handle)
+          registries = sorted(
+              {
+                  package["source"]["registry"]
+                  for package in lock.get("package", [])
+                  if "registry" in package.get("source", {})
+              }
+          )
+          problems = []
+          if registries != ["https://pypi.org/simple"]:
+              problems.append(f"uv.lock must resolve from https://pypi.org/simple only. Found: {registries}")
+          settings = sorted(key for key in lock.get("options", {}) if key.startswith("exclude-newer"))
+          if settings:
+              problems.append(f"uv.lock records {', '.join(settings)}, probably from a local uv config.")
+          if problems:
+              print("\n".join([*problems, "Relock with: uv lock --no-config"]))
+              sys.exit(1)
+          EOF
       - run: uv python install 3.13
       - run: uv sync --locked --dev --extra viewer
       - run: uv run ruff check src/ tests/
+      - run: uv run ruff format --check src/ tests/
       - run: uv run ty check src/
       - run: uv run pytest tests/ -x -q

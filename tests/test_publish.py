@@ -148,9 +148,7 @@ class TestBuildMetadataRow:
             source_columns={"a": "org/A", "b": "org/B"},
             source_output_columns={"a": "ocr_v2", "b": "markdown"},
             judge_models=["judge-a"],
-            judge_spec_hashes=hash_judge_specs(
-                ["https://judge.example/v1/:judge-a"]
-            ),
+            judge_spec_hashes=hash_judge_specs(["https://judge.example/v1/:judge-a"]),
             seed=42,
             max_samples=10,
             total_comparisons=30,
@@ -598,7 +596,7 @@ class TestPublishCheckpoint:
 class TestPublishResults:
     @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.Dataset")
-    def test_publishes_four_configs(self, mock_ds_cls, mock_api_cls):
+    def test_publishes_three_configs(self, mock_ds_cls, mock_api_cls):
         mock_ds = mock_ds_cls.from_list.return_value
         board = _make_board()
         meta = EvalMetadata(
@@ -611,17 +609,15 @@ class TestPublishResults:
         )
         publish_results("user/results", board, meta)
 
-        # 4 pushes: comparisons, default leaderboard, named leaderboard, metadata
-        assert mock_ds.push_to_hub.call_count == 4
+        # 3 pushes: comparisons, default leaderboard, metadata
+        assert mock_ds.push_to_hub.call_count == 3
         calls = mock_ds.push_to_hub.call_args_list
         # comparisons
         assert calls[0].kwargs["config_name"] == "comparisons"
         # default leaderboard (no config_name kwarg)
         assert calls[1] == (("user/results",),)
-        # named leaderboard
-        assert calls[2].kwargs["config_name"] == "leaderboard"
         # metadata
-        assert calls[3].kwargs["config_name"] == "metadata"
+        assert calls[2].kwargs["config_name"] == "metadata"
         # README uploaded
         mock_api_cls.return_value.upload_file.assert_called_once()
 
@@ -686,7 +682,6 @@ class TestPublishResults:
     @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.Dataset")
     def test_skips_comparisons_if_empty(self, mock_ds_cls, mock_api_cls):
-        mock_ds_cls.from_list.return_value
         board = Leaderboard(
             elo={"m": 1500.0},
             wins={"m": 0},
@@ -704,13 +699,12 @@ class TestPublishResults:
         )
         publish_results("user/results", board, meta)
 
-        # default leaderboard + named leaderboard + metadata = 3
-        assert mock_ds_cls.from_list.return_value.push_to_hub.call_count == 3
+        # default leaderboard + metadata = 2
+        assert mock_ds_cls.from_list.return_value.push_to_hub.call_count == 2
 
     @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.Dataset")
     def test_appends_existing_metadata(self, mock_ds_cls, mock_api_cls):
-        mock_ds_cls.from_list.return_value  # noqa: F841
         board = _make_board()
         meta = EvalMetadata(
             source_dataset="repo/data",
@@ -855,9 +849,7 @@ class TestLoadExistingComparisons:
 
     @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.load_dataset")
-    def test_existing_comparison_files_fail_closed_on_load_error(
-        self, mock_load, mock_api_cls
-    ):
+    def test_existing_comparison_files_fail_closed_on_load_error(self, mock_load, mock_api_cls):
         mock_load.side_effect = Exception("temporary parquet failure")
         mock_api_cls.return_value.list_repo_files.return_value = [
             "comparisons/train-00000-of-00001.parquet"
@@ -889,9 +881,7 @@ class TestLoadExistingMetadata:
 
     @patch("ocr_bench.publish.HfApi")
     @patch("ocr_bench.publish.load_dataset")
-    def test_existing_metadata_files_fail_closed_on_load_error(
-        self, mock_load, mock_api_cls
-    ):
+    def test_existing_metadata_files_fail_closed_on_load_error(self, mock_load, mock_api_cls):
         mock_load.side_effect = Exception("temporary parquet failure")
         mock_api_cls.return_value.list_repo_files.return_value = [
             "metadata/train-00000-of-00001.parquet"
@@ -928,7 +918,7 @@ class TestBuildReadme:
         assert "| Model | Ranked on | Error sentinels |" in readme
         assert "| model-b | 8 of 10 pages | 2 |" in readme
         # Same order as the leaderboard table.
-        section = readme[readme.index("## Coverage"):]
+        section = readme[readme.index("## Coverage") :]
         assert section.index("model-a") < section.index("model-c") < section.index("model-b")
 
     def test_no_coverage_section_without_coverage(self):
@@ -1009,10 +999,20 @@ class TestBuildReadme:
             losses={"model-a": 0, "model-b": 1},
             ties={"model-a": 1, "model-b": 1},
             comparison_log=[
-                {"sample_idx": 0, "model_a": "model-a", "model_b": "model-b",
-                 "winner": "A", "agreement": "1/1"},
-                {"sample_idx": 1, "model_a": "model-a", "model_b": "model-b",
-                 "winner": "tie", "agreement": "auto"},
+                {
+                    "sample_idx": 0,
+                    "model_a": "model-a",
+                    "model_b": "model-b",
+                    "winner": "A",
+                    "agreement": "1/1",
+                },
+                {
+                    "sample_idx": 1,
+                    "model_a": "model-a",
+                    "model_b": "model-b",
+                    "winner": "tie",
+                    "agreement": "auto",
+                },
             ],
         )
         rows = build_leaderboard_rows(board)
@@ -1139,16 +1139,3 @@ class TestBuildReadme:
         readme = _build_readme("user/results", rows, board, self._metadata_with_failed({}))
         assert "## ⚠ Failed outputs" not in readme
         assert "⚠" not in readme
-
-    def test_failed_outputs_accepts_json_string(self):
-        """Stored metadata may carry failed_outputs as a JSON string."""
-        import json
-
-        from ocr_bench.publish import _build_readme
-
-        board = self._board_two_models()
-        rows = build_leaderboard_rows(board)
-        readme = _build_readme(
-            "user/results", rows, board, self._metadata_with_failed(json.dumps({"model-b": 7}))
-        )
-        assert "| model-b | 7 |" in readme

@@ -352,5 +352,3 @@ def _agreement_banner(stats: AgreementStats) -> str:
         )
 
     return f"Judge: {' | '.join(parts)}{warning}"
-
-

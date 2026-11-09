@@ -247,20 +247,14 @@ class TestLaunchOcrJobs:
     @patch("ocr_bench.run.get_token", return_value="fake-token")
     def test_unknown_model_raises(self, mock_token):
         mock_api = MagicMock()
-        try:
+        with pytest.raises(ValueError, match="nonexistent"):
             launch_ocr_jobs("in", "out", models=["nonexistent"], api=mock_api)
-            assert False, "Should have raised"
-        except ValueError as e:
-            assert "nonexistent" in str(e)
 
     @patch("ocr_bench.run.get_token", return_value=None)
     def test_no_token_raises(self, mock_token):
         mock_api = MagicMock()
-        try:
+        with pytest.raises(RuntimeError, match="(?i)token"):
             launch_ocr_jobs("in", "out", api=mock_api)
-            assert False, "Should have raised"
-        except RuntimeError as e:
-            assert "token" in str(e).lower()
 
     @patch("ocr_bench.run.get_token", return_value="fake-token")
     def test_flavor_override(self, mock_token):

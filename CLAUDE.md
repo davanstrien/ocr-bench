@@ -35,8 +35,12 @@ Inspired by [Datalab's Benchmarks + Evals](https://www.datalab.to/blog/datalab-b
 ```bash
 uv sync --dev --extra viewer
 uv run ruff check src/ tests/
+uv run ruff format src/ tests/
+uv run ty check src/
 uv run pytest tests/ -x -q
 ```
+
+CI also checks `ruff format --check`, and that `uv.lock` resolves from https://pypi.org/simple only and records no `exclude-newer` setting. A local uv config (another index, or `exclude-newer`) can leak into the lock. Relock with `uv lock --no-config`.
 
 Branch protection is on — all changes go through PRs with CI checks.
 

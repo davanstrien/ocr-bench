@@ -54,9 +54,7 @@ class TestComputeColumnStats:
     def test_normalized_mode_measures_content_not_html_markup(self):
         html = "<table><tr><td>alpha</td><td>beta</td></tr></table>"
         normalized = compute_column_stats("cfg", "m", [html], max_ocr_text_len=20)
-        raw = compute_column_stats(
-            "cfg", "m", [html], max_ocr_text_len=20, normalize=False
-        )
+        raw = compute_column_stats("cfg", "m", [html], max_ocr_text_len=20, normalize=False)
         assert normalized.max_len == len("alpha | beta")
         assert normalized.n_over_max == 0
         assert raw.max_len == len(html)
@@ -256,7 +254,9 @@ class TestAuditRepo:
         mock_pr.return_value = ([], {})
         mock_main.return_value = ["cfg_a", "cfg_b", "cfg_c"]
         no_text = LoadedConfig(
-            config="cfg_c", model_id="model-c", ds=Dataset.from_dict({"inference_info": ["{}"]}),
+            config="cfg_c",
+            model_id="model-c",
+            ds=Dataset.from_dict({"inference_info": ["{}"]}),
             text_col=None,
         )
         mock_load.return_value = [
@@ -440,6 +440,61 @@ class TestAuditRepo:
         assert len(report.configs) == 1
         assert report.has_problems  # 50% sentinels
 
+    @patch("ocr_bench.integrity.load_flat_dataset")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_columns_read_a_flat_dataset_without_config_discovery(
+        self, mock_pr, mock_main, mock_flat
+    ):
+        ds = Dataset.from_dict(
+            {
+                "image": [None, None],
+                "vendor": ["good text here", "more good text"],
+                "mine": ["a", "b"],
+            }
+        )
+        mock_flat.return_value = (ds, {"vendor": "vendor", "mine": "mine"})
+        report = audit_repo("user/repo", columns=["vendor", "mine"])
+        mock_pr.assert_not_called()
+        mock_main.assert_not_called()
+        assert mock_flat.call_args.kwargs["columns"] == ["vendor", "mine"]
+        assert [audit.stats.model for audit in report.configs] == ["vendor", "mine"]
+
+    @patch("ocr_bench.integrity.load_flat_dataset")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_columns_take_precedence_over_from_prs(self, mock_pr, mock_main, mock_flat):
+        # As in judge: --columns without --configs reads the flat dataset, not PRs.
+        ds = Dataset.from_dict({"image": [None], "vendor": ["good text here"]})
+        mock_flat.return_value = (ds, {"vendor": "vendor"})
+        audit_repo("user/repo", columns=["vendor"], from_prs=True)
+        mock_pr.assert_not_called()
+        mock_main.assert_not_called()
+        assert mock_flat.call_args.kwargs["columns"] == ["vendor"]
+
+    @patch("ocr_bench.integrity.load_flat_dataset")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_columns_are_screened(self, mock_pr, mock_main, mock_flat):
+        texts = [f"page {i} of a longer transcription with enough text" for i in range(4)]
+        ds = Dataset.from_dict(
+            {"image": [None] * 4, "a": texts, "b": list(texts), "c": list(texts)}
+        )
+        mock_flat.return_value = (ds, {"a": "a", "b": "b", "c": "c"})
+        report = audit_repo("user/repo", columns=["a", "b", "c"], screen=True)
+        assert report.screen is not None
+        assert sorted(model.name for model in report.screen.models) == ["a", "b", "c"]
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.load_flat_dataset")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_configs_take_precedence_over_columns(self, mock_pr, mock_main, mock_flat, mock_load):
+        # As in judge: --configs wins when both are given.
+        mock_load.return_value = _three_configs(("cfg_a", "cfg_b"))
+        audit_repo("user/repo", configs=["cfg_a", "cfg_b"], columns=["vendor"])
+        mock_flat.assert_not_called()
+
 
 _PAGES = [
     "first page of a longer transcription",
@@ -449,8 +504,7 @@ _PAGES = [
 
 def _three_configs(names=("cfg_a", "cfg_b", "cfg_c")):
     return [
-        _loaded_config(name, f"model-{name}", list(_PAGES), {"b_number": [1, 2]})
-        for name in names
+        _loaded_config(name, f"model-{name}", list(_PAGES), {"b_number": [1, 2]}) for name in names
     ]
 
 
@@ -574,9 +628,7 @@ class TestAuditScreen:
         mock_main.return_value = ["cfg_a", "cfg_b", "cfg_c"]
         loaded = _three_configs(("cfg_a", "cfg_b"))
         loaded.append(
-            _loaded_config(
-                "cfg_c", "model-c", ["[OCR ERROR]", "[OCR ERROR]"], {"b_number": [1, 2]}
-            )
+            _loaded_config("cfg_c", "model-c", ["[OCR ERROR]", "[OCR ERROR]"], {"b_number": [1, 2]})
         )
         mock_load.return_value = loaded
         report = audit_repo("user/repo", screen=True)

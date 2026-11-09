@@ -91,8 +91,7 @@ class JudgeBackend(abc.ABC):
         results: list[dict[str, str]] = [{}] * len(comparisons)
         with ThreadPoolExecutor(max_workers=self.concurrency) as pool:
             future_to_idx = {
-                pool.submit(self._call_single, comp): i
-                for i, comp in enumerate(comparisons)
+                pool.submit(self._call_single, comp): i for i, comp in enumerate(comparisons)
             }
             for future in as_completed(future_to_idx):
                 idx = future_to_idx[future]
@@ -116,7 +115,10 @@ class InferenceProviderJudge(JudgeBackend):
     """HF Inference Providers backend (Novita, Together, etc.)."""
 
     def __init__(
-        self, model: str, provider: str | None = None, max_tokens: int = DEFAULT_MAX_TOKENS,
+        self,
+        model: str,
+        provider: str | None = None,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
         concurrency: int = 1,
     ):
         self.name = f"{provider + ':' if provider else ''}{model}"
@@ -190,7 +192,9 @@ DEFAULT_JUDGE = "novita:Qwen/Qwen3.8-27B"
 
 
 def parse_judge_spec(
-    spec: str, max_tokens: int = DEFAULT_MAX_TOKENS, concurrency: int = 1,
+    spec: str,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    concurrency: int = 1,
 ) -> JudgeBackend:
     """Parse a judge specification string into a backend.
 
@@ -248,7 +252,9 @@ def parse_judge_spec(
                 concurrency=concurrency,
             )
         return OpenAICompatibleJudge(
-            base_url=url_part, model=model_name, max_tokens=max_tokens,
+            base_url=url_part,
+            model=model_name,
+            max_tokens=max_tokens,
             concurrency=concurrency,
         )
 
@@ -259,7 +265,10 @@ def parse_judge_spec(
         if slash_idx == -1 or colon_idx < slash_idx:
             provider, model = spec.split(":", 1)
             return InferenceProviderJudge(
-                model=model, provider=provider, max_tokens=max_tokens, concurrency=concurrency,
+                model=model,
+                provider=provider,
+                max_tokens=max_tokens,
+                concurrency=concurrency,
             )
 
     return InferenceProviderJudge(model=spec, max_tokens=max_tokens, concurrency=concurrency)
@@ -294,7 +303,7 @@ def aggregate_jury_votes(
     for judge_results in zip_longest(*all_results, fillvalue={}):
         votes: list[str] = []
         reasons: list[str] = []
-        for name, result in zip(judge_names, judge_results):
+        for name, result in zip(judge_names, judge_results, strict=True):
             winner = result.get("winner", "")
             if winner:
                 votes.append(winner)
@@ -314,10 +323,12 @@ def aggregate_jury_votes(
             majority_winner = "tie"
         agreement = f"{majority_count}/{len(votes)}"
 
-        aggregated.append({
-            "winner": majority_winner,
-            "reason": "; ".join(reasons),
-            "agreement": agreement,
-        })
+        aggregated.append(
+            {
+                "winner": majority_winner,
+                "reason": "; ".join(reasons),
+                "agreement": agreement,
+            }
+        )
 
     return aggregated

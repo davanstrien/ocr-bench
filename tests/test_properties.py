@@ -24,13 +24,10 @@ WINNERS = ("A", "B", "tie")
 # ---------------------------------------------------------------------------
 
 json_values = st.recursive(
-    st.none()
-    | st.booleans()
-    | st.integers()
-    | st.floats(allow_nan=False)
-    | st.text(max_size=20),
-    lambda children: st.lists(children, max_size=4)
-    | st.dictionaries(st.text(max_size=10), children, max_size=4),
+    st.none() | st.booleans() | st.integers() | st.floats(allow_nan=False) | st.text(max_size=20),
+    lambda children: (
+        st.lists(children, max_size=4) | st.dictionaries(st.text(max_size=10), children, max_size=4)
+    ),
     max_leaves=10,
 )
 
@@ -79,9 +76,7 @@ class TestUnswapProperties:
 
 vote_result = st.one_of(
     st.just({}),  # failed judge call
-    st.fixed_dictionaries(
-        {"winner": st.sampled_from(WINNERS), "reason": st.text(max_size=20)}
-    ),
+    st.fixed_dictionaries({"winner": st.sampled_from(WINNERS), "reason": st.text(max_size=20)}),
 )
 
 

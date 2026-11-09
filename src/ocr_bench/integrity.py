@@ -481,6 +481,7 @@ def audit_repo(
     configs: list[str] | None = None,
     from_prs: bool = False,
     screen: bool = False,
+    columns: list[str] | None = None,
 ) -> AuditReport:
     """Run config discovery and compute a health report — no judging, no writes.
 
@@ -490,8 +491,10 @@ def audit_repo(
     - ``configs`` and ``from_prs``: the named configs, each from its newest open
       PR, or from main when it has no PR or main changed after the PR;
     - ``configs`` only: the named configs from main;
+    - ``columns`` (and no ``configs``): these text columns of a flat dataset,
+      one column per model, named after its model;
     - ``from_prs`` only: every config with an open PR;
-    - neither: open PRs plus main-branch configs, then flat columns.
+    - none of these: open PRs plus main-branch configs, then flat columns.
 
     With ``screen``, also run the screen checks (see :mod:`ocr_bench.screen`)
     on the configs with judgeable rows.
@@ -516,6 +519,8 @@ def audit_repo(
         )
     elif configs:
         config_names = list(configs)
+    elif columns:
+        config_names = []  # a flat dataset: read the named columns below
     elif from_prs:
         pr_configs, pr_revisions = discover_pr_configs(
             repo_id,
@@ -542,7 +547,7 @@ def audit_repo(
                 config_names.append(mc)
 
     # name -> (model label, outputs), for the screen.
-    columns: dict[str, tuple[str, list]] = {}
+    screen_inputs: dict[str, tuple[str, list]] = {}
     if config_names:
         loaded = _load_configs(repo_id, config_names, split, pr_revisions)
         usable = [lc for lc in loaded if lc.text_col is not None]
@@ -558,7 +563,7 @@ def audit_repo(
             if text_col is None:  # filtered into `usable` above; narrows the type
                 continue
             values = _column_values(lc.ds, text_col)
-            columns[lc.config] = (lc.model_id, values)
+            screen_inputs[lc.config] = (lc.model_id, values)
             stats = compute_column_stats(
                 lc.config,
                 lc.model_id,
@@ -570,17 +575,15 @@ def audit_repo(
     else:
         configs_without_text = []
         auxiliary_configs = []
-        ds, ocr_columns = load_flat_dataset(repo_id, split=split)
+        ds, ocr_columns = load_flat_dataset(repo_id, split=split, columns=columns)
         alignment = AlignmentResult(status="n/a")
         audits = []
         for col, model in ocr_columns.items():  # same order as compute_model_stats
             values = _column_values(ds, col)
-            columns[col] = (model, values)
+            screen_inputs[col] = (model, values)
             audits.append(
                 ConfigAudit(
-                    compute_column_stats(
-                        col, model, values, max_ocr_text_len, normalize=normalize
-                    )
+                    compute_column_stats(col, model, values, max_ocr_text_len, normalize=normalize)
                 )
             )
 
@@ -604,7 +607,7 @@ def audit_repo(
             for c in report.configs
             if c.stats.n_empty + c.stats.n_sentinel == c.stats.n_rows
         }
-        screened = {name: col for name, col in columns.items() if name not in without_output}
+        screened = {name: col for name, col in screen_inputs.items() if name not in without_output}
         reason = _screen_skip_reason(
             alignment, {len(values) for _, values in screened.values()}, len(screened)
         )

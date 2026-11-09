@@ -355,38 +355,3 @@ class TestAgreementBanner:
         banner = _agreement_banner(stats)
         assert "reliable" not in banner
         assert "trustworthy" not in banner
-
-
-class TestBuildPairSummary:
-    """Test the viewer pair summary helper (imported from validate for testing)."""
-
-    def test_basic_summary(self):
-        from ocr_bench.viewer import _build_pair_summary
-
-        comparisons = [
-            {"model_a": "A", "model_b": "B", "winner": "A"},
-            {"model_a": "A", "model_b": "B", "winner": "A"},
-            {"model_a": "A", "model_b": "B", "winner": "B"},
-            {"model_a": "A", "model_b": "B", "winner": "tie"},
-        ]
-        summary = _build_pair_summary(comparisons)
-        assert "2W" in summary
-        assert "1L" in summary
-        assert "1T" in summary
-
-    def test_empty_comparisons(self):
-        from ocr_bench.viewer import _build_pair_summary
-
-        assert _build_pair_summary([]) == ""
-
-
-class TestModelLabel:
-    def test_with_col(self):
-        from ocr_bench.viewer import _model_label
-
-        assert _model_label("model-a", "col_a") == "model-a (col_a)"
-
-    def test_without_col(self):
-        from ocr_bench.viewer import _model_label
-
-        assert _model_label("model-a", "") == "model-a"

@@ -59,6 +59,19 @@ def _stored_image_bytes(image: dict[str, Any], column: str) -> bytes:
         return image_file.read()
 
 
+def fingerprint_identity_columns(column_names: list[str]) -> list[str]:
+    """The columns that identify a page in :func:`evaluation_input_fingerprints`.
+
+    Stable passthrough ids when present, plus one image column. IDs detect
+    reordering; image content also catches a page replaced in place with the same id.
+    """
+    identity_columns = [key for key in ALIGNMENT_KEYS if key in column_names]
+    image_columns = [col for col in column_names if col == "image" or "image" in col.lower()]
+    if image_columns:
+        identity_columns.append("image" if "image" in image_columns else image_columns[0])
+    return identity_columns
+
+
 def evaluation_input_fingerprints(
     dataset: Dataset,
     ocr_columns: dict[str, str],
@@ -71,15 +84,7 @@ def evaluation_input_fingerprints(
     independently so adding a new model does not invalidate safe comparisons
     between unchanged existing models.
     """
-    identity_columns = [key for key in ALIGNMENT_KEYS if key in dataset.column_names]
-    image_columns = [
-        col for col in dataset.column_names if col == "image" or "image" in col.lower()
-    ]
-    if image_columns:
-        # IDs detect reordering; image content also catches a page being replaced
-        # in place while retaining the same ID.
-        image_column = "image" if "image" in image_columns else image_columns[0]
-        identity_columns.append(image_column)
+    identity_columns = fingerprint_identity_columns(dataset.column_names)
     if not identity_columns:
         raise DatasetError(
             "Cannot fingerprint evaluated pages: no stable identity or image column found"
@@ -106,7 +111,7 @@ def evaluation_input_fingerprints(
     for column in ocr_columns:
         digest = hashlib.sha256()
         values = selected[column]
-        for source_idx, value in zip(indices, values):
+        for source_idx, value in zip(indices, values, strict=True):
             _hash_value(digest, source_idx)
             _hash_value(digest, value)
         column_fingerprints[column] = digest.hexdigest()
@@ -245,7 +250,7 @@ def alignment_keys_identify_rows(ds: Dataset, keys: list[str]) -> bool:
         return False
     columns = [ds[key] for key in keys]
     identities: list[tuple[object, ...]] = []
-    for values in zip(*columns):
+    for values in zip(*columns, strict=True):
         if all(_alignment_value_missing(value) for value in values):
             return False
         identities.append(tuple(_alignment_value_key(value) for value in values))
@@ -453,9 +458,7 @@ def discover_pr_configs(
             newest[config] = disc.num
         else:
             older, newer = sorted((newest[config], disc.num))
-            logger.warning(
-                "duplicate_pr_config", config=config, using_pr=newer, ignoring_pr=older
-            )
+            logger.warning("duplicate_pr_config", config=config, using_pr=newer, ignoring_pr=older)
             newest[config] = newer
             older_prs.setdefault(config, []).append(older)
 
@@ -571,7 +574,7 @@ def _find_image_mismatch(reference: list[str] | None, other: Dataset) -> int | N
         return None
     if sorted(reference) != sorted(fingerprints):
         return "unverified"
-    return next(i for i, (a, b) in enumerate(zip(reference, fingerprints)) if a != b)
+    return next(i for i, (a, b) in enumerate(zip(reference, fingerprints, strict=True)) if a != b)
 
 
 def check_config_alignment(loaded: list[LoadedConfig]) -> AlignmentResult:

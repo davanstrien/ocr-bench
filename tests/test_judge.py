@@ -1,6 +1,7 @@
 """Tests for the pairwise judge module."""
 
 import json
+import random
 
 import pytest
 from PIL import Image
@@ -8,17 +9,18 @@ from PIL import Image
 from ocr_bench.judge import (
     CRITERIA_PROFILES,
     DEFAULT_CRITERIA,
-    PAIRWISE_PROMPT,
     Comparison,
     build_comparisons,
     build_messages,
     build_prompt,
     image_to_base64,
     is_sentinel,
+    judging_order,
     normalize_for_judge,
     ocr_text,
     parse_judge_output,
     prompt_hash,
+    sample_indices,
     validate_prompt_template,
 )
 
@@ -199,9 +201,7 @@ class TestNormalizeForJudge:
         assert out == "Before\nAfter"
 
     def test_template_content_suppressed(self):
-        out = normalize_for_judge(
-            "<p>Before</p><template><td>hidden</td></template><p>After</p>"
-        )
+        out = normalize_for_judge("<p>Before</p><template><td>hidden</td></template><p>After</p>")
         assert out == "Before\nAfter"
 
     # --- Fix 3: never-raises honours non-str input ---
@@ -401,11 +401,12 @@ class TestBuildPrompt:
         assert "Output B above was truncated" in prompt
         assert "Output A above was truncated" not in prompt
 
-    def test_pairwise_prompt_constant_unmodified(self):
+    def test_default_prompt_constant_unmodified(self):
         # The note is composed after .format(); the prompt constant stays
         # byte-stable (no truncation machinery leaked into it).
-        assert "Evaluator note" not in PAIRWISE_PROMPT
-        assert "truncated" not in PAIRWISE_PROMPT
+        default_prompt = CRITERIA_PROFILES[DEFAULT_CRITERIA]
+        assert "Evaluator note" not in default_prompt
+        assert "truncated" not in default_prompt
 
     def test_truncation_flags_track_original_order_when_swapped(self):
         # A is long (truncated), B is short. Even when displayed swapped, the
@@ -524,7 +525,7 @@ class TestParseJudgeOutput:
         result = parse_judge_output('{"winner": "C", "reason": "confused"}')
         assert result == {}
 
-    @pytest.mark.parametrize("text", ['{}', '{"reason": "unsure"}'])
+    @pytest.mark.parametrize("text", ["{}", '{"reason": "unsure"}'])
     def test_missing_winner_returns_empty(self, text):
         assert parse_judge_output(text) == {}
 
@@ -826,9 +827,7 @@ class TestBuildComparisons:
         ]
         ocr_columns = {"col_a": "ModelA", "col_b": "ModelB"}
         # Skip in reverse pair order.
-        comps = build_comparisons(
-            ds, ocr_columns, skip_samples={("ModelB", "ModelA"): {0}}
-        )
+        comps = build_comparisons(ds, ocr_columns, skip_samples={("ModelB", "ModelA"): {0}})
         assert len(comps) == 0
 
     def test_skip_samples_tops_up_unjudged_samples(self):
@@ -919,9 +918,7 @@ class TestBuildComparisons:
         from unittest.mock import patch
 
         with patch("ocr_bench.judge.image_to_base64") as mock_img:
-            build_comparisons(
-                ds, ocr_columns, skip_samples={("ModelA", "ModelB"): {0}}
-            )
+            build_comparisons(ds, ocr_columns, skip_samples={("ModelA", "ModelB"): {0}})
             mock_img.assert_not_called()
 
     def test_truncation_flags_default_false(self):
@@ -956,9 +953,7 @@ class TestBuildComparisons:
             },
         ]
         with patch("ocr_bench.judge.image_to_base64", return_value="b64") as mock_img:
-            build_comparisons(
-                ds, {"col_a": "A", "col_b": "B"}, judge_image_dim=1536, min_chars=0
-            )
+            build_comparisons(ds, {"col_a": "A", "col_b": "B"}, judge_image_dim=1536, min_chars=0)
             mock_img.assert_called_once()
             assert mock_img.call_args.kwargs["max_dim"] == 1536
 
@@ -1004,9 +999,7 @@ class TestBlankPairFiltering:
         assert comps[0].auto_result is None
 
     def test_both_long_distinct_kept_for_judging(self):
-        comps = build_comparisons(
-            self._ds(self.LONG_A, self.LONG_B), {"col_a": "A", "col_b": "B"}
-        )
+        comps = build_comparisons(self._ds(self.LONG_A, self.LONG_B), {"col_a": "A", "col_b": "B"})
         assert len(comps) == 1
         assert comps[0].auto_result is None
         assert comps[0].messages  # image + prompt built
@@ -1050,9 +1043,7 @@ class TestAutoTie:
         from unittest.mock import patch
 
         with patch("ocr_bench.judge.image_to_base64") as mock_img:
-            comps = build_comparisons(
-                self._ds(self.LONG, self.LONG), {"col_a": "A", "col_b": "B"}
-            )
+            comps = build_comparisons(self._ds(self.LONG, self.LONG), {"col_a": "A", "col_b": "B"})
             mock_img.assert_not_called()
         assert comps[0].auto_result is not None
 
@@ -1079,3 +1070,51 @@ class TestAutoTie:
         assert len(autos) == 1  # A vs B identical
         assert len(judged) == 2  # A vs C, B vs C
         assert all(c.messages for c in judged)
+
+
+class TestSampleIndices:
+    """The evaluated sample. Fingerprints hash it in order, and share recomputes it."""
+
+    @pytest.mark.parametrize(("n", "k", "seed"), [(425, 340, 42), (100, 40, 42), (50, 7, 0)])
+    def test_same_sample_as_seeding_the_module_generator(self, n, k, seed):
+        # Earlier versions called random.seed(seed); random.sample(...). Existing
+        # results repos store fingerprints of that order, so it must not change.
+        random.seed(seed)
+        expected = random.sample(list(range(n)), k)
+        assert sample_indices(n, k, seed) == expected
+
+    def test_leaves_the_global_random_state_alone(self):
+        random.seed(123)
+        before = random.getstate()
+        sample_indices(100, 10, 42)
+        assert random.getstate() == before
+
+    @pytest.mark.parametrize("max_samples", [None, 0, 10, 25])
+    def test_every_row_in_dataset_order_without_a_smaller_sample(self, max_samples):
+        assert sample_indices(10, max_samples, 42) == list(range(10))
+
+
+class TestJudgingOrder:
+    def test_is_a_seeded_permutation(self):
+        indices = list(range(50))
+        order = judging_order(indices, 42)
+        assert sorted(order) == indices
+        assert order != indices
+        assert judging_order(indices, 42) == order
+        assert judging_order(indices, 7) != order
+
+    def test_order_of_a_random_sample_has_no_position_bias(self):
+        # Sampling and ordering need separate random streams. With one shared
+        # seed, the first page visited in a 2-page sample of 128 sorted rows fell
+        # in the upper half 75% of the time.
+        seeds = range(4000)
+        upper = sum(judging_order(sample_indices(128, 2, seed), seed)[0] >= 64 for seed in seeds)
+        assert 0.46 < upper / len(seeds) < 0.54
+
+    def test_does_not_change_its_input(self):
+        indices = [3, 1, 2]
+        judging_order(indices, 42)
+        assert indices == [3, 1, 2]
+
+    def test_empty_sample(self):
+        assert judging_order([], 42) == []
