@@ -307,19 +307,24 @@ def load_slice_values(metadata: dict, slice_column: str) -> list:
         raise ShareError(
             f"Column '{slice_column}' is not in the judged source config {config or 'default'}."
         )
-    identity = fingerprint_identity_columns(ds.column_names)
-    if not any(isinstance(ds.features.get(column), Image) for column in identity):
-        # Without image bytes the fingerprint covers only the row ids, and ids do
-        # not show that a row is still the page that was judged. An image column
-        # the fingerprint does not read (one not named like an image) is no help.
-        raise ShareError(
-            f"The judged source config {config or 'default'} has no image column, so "
-            "share cannot check that slice labels are on the judged pages. Share "
-            "without --slice-column."
-        )
     judged = sample_indices(len(ds), metadata.get("max_samples"), metadata.get("seed", 42))
     try:
-        found, _ = evaluation_input_fingerprints(_as_judged(ds, metadata), {}, judged)
+        view = _as_judged(ds, metadata)
+    except Exception as exc:
+        raise ShareError(f"Could not rebuild the judged pages ({type(exc).__name__}).") from exc
+    # Check the columns the fingerprint reads, after judge's merge: a config named
+    # "image" replaces the page image with that config's OCR text there.
+    identity = fingerprint_identity_columns(view.column_names)
+    if not any(isinstance(view.features.get(column), Image) for column in identity):
+        # Without image bytes the fingerprint covers only the row ids, and ids do
+        # not show that a row is still the page that was judged.
+        raise ShareError(
+            f"The judged pages from {config or 'default'} have no image column that "
+            "the page fingerprint reads, so share cannot check that slice labels are "
+            "on the judged pages. Share without --slice-column."
+        )
+    try:
+        found, _ = evaluation_input_fingerprints(view, {}, judged)
     except Exception as exc:
         # A fingerprint error can name a local image path, so only its type is shown.
         raise ShareError(

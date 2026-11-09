@@ -634,8 +634,13 @@ def _config(n_rows, *, ids=True):
 class TestFingerprintMatchesJudge:
     """share must reproduce the fingerprint judge stored, from judge's own merge."""
 
-    def _check(self, monkeypatch, configs, *, ids=True):
-        tables = {name: _config(30, ids=ids) for name in configs}
+    def _check(self, monkeypatch, configs, *, ids=True, image_column="image"):
+        tables = {
+            name: _config(30, ids=ids).rename_column("image", image_column)
+            if image_column != "image"
+            else _config(30, ids=ids)
+            for name in configs
+        }
 
         def fake_load_dataset(path=None, name=None, split=None, revision=None, **kwargs):
             return tables[name]
@@ -663,6 +668,17 @@ class TestFingerprintMatchesJudge:
         # Judge's merge adds a column named "id" (that config's OCR text), which
         # judge fingerprints as a page id. share rebuilds the merge for this case.
         labels = self._check(monkeypatch, ["id", "other"], ids=False)
+        assert len(labels) == 30
+
+    def test_a_config_named_image_leaves_no_image_bytes_to_check(self, monkeypatch):
+        # The page image is in "page_image". Judge's merge adds a column "image"
+        # (the OCR text of the config named "image"), and the fingerprint reads
+        # that column, so it covers no image bytes.
+        with pytest.raises(ShareError, match="no image column"):
+            self._check(monkeypatch, ["image", "other"], image_column="page_image")
+
+    def test_an_image_column_with_another_image_name_is_read(self, monkeypatch):
+        labels = self._check(monkeypatch, ["model-a", "model-b"], image_column="page_image")
         assert len(labels) == 30
 
     def test_an_unreadable_image_does_not_show_its_path(self, monkeypatch):
