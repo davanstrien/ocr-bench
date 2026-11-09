@@ -1,8 +1,8 @@
 # Build a private OCR eval
 
-This guide shows how to rank OCR models on your own pages without publishing the pages. The pages, the OCR outputs and the judge's reasons stay in private Hub repos. When you want to show the result, `ocr-bench share` publishes the scores only.
+This guide shows how to rank OCR models on your own pages without publishing the pages. The pages, the OCR outputs and the judge's reasons stay in private Hub repos. When you want to show the result, `ocr-bench share` publishes the scores and the judge settings only.
 
-Everything runs on the Hugging Face Hub: the OCR models and the judge run as [Jobs](https://huggingface.co/docs/hub/jobs-overview), and the data lives in private dataset repos. You need an [HF token](https://huggingface.co/settings/tokens) with write access, and Jobs access on your account or organisation.
+Everything runs on the Hugging Face Hub: the OCR models and the judge run as [Jobs](https://huggingface.co/docs/hub/jobs-overview), and the data lives in private dataset repos. You need an [HF token](https://huggingface.co/settings/tokens) with write access, and a plan that includes Jobs (PRO, Team or Enterprise).
 
 > [!NOTE]
 > ocr-bench is a proof of concept. Before 0.1.0, the CLI, the defaults and the results format can change. The way ocr-bench gets OCR outputs (step 2) is the part most likely to change. `share` needs ocr-bench 0.0.7 or later.
@@ -18,7 +18,7 @@ Everything runs on the Hugging Face Hub: the OCR models and the judge run as [Jo
 | 5. Look at the results | `ocr-bench view` | free |
 | 6. Publish the scores | `ocr-bench share` | free |
 
-In the 425-page proof of concept, 8 OCR models and the judge Jobs used about $4.50 of Jobs time. The judge calls (about 6,400 comparisons) cost about $9.
+In the 425-page proof of concept, 8 OCR models and the judge Jobs used about $4.50 of Jobs time. The judge calls (about 6,400 comparisons) cost about $9.30.
 
 ## Who sees your pages
 
@@ -33,7 +33,7 @@ Decide this first.
 | The judge model | each page image and two transcriptions | depends on the judge you choose |
 | The board repo (`share`) | ratings, settings and a fingerprint of the page set | public, or private with `--private` |
 
-The default judge is `novita:Qwen/Qwen3.8-27B` through [HF Inference Providers](https://huggingface.co/docs/inference-providers/index), so Novita processes the page images. **If you need to control where your pages are sent, pass `--model` with an endpoint that meets your privacy needs**, for example a [Hugging Face Inference Endpoint](https://huggingface.co/docs/inference-endpoints) URL or any OpenAI-compatible server (`https://host/v1/:org/model`). Boards judged by different judges, or by the same model on different providers, are not comparable.
+The default judge is `novita:Qwen/Qwen3.8-27B` through [HF Inference Providers](https://huggingface.co/docs/inference-providers/index), so Novita processes the page images. **If you need to control where your pages are sent, pass `--model` with an endpoint that meets your privacy needs**: a [Hugging Face Inference Endpoint](https://huggingface.co/docs/inference-endpoints) URL or a model you serve on Jobs (ocr-bench sends your HF token to both), or an OpenAI-compatible server that needs no API key (`https://host/v1/:org/model`). Boards judged by different judges, or by the same model on different providers, are not comparable.
 
 `run`, `judge` and `bench` never make a private repo public, and they stop before writing to an existing public repo for a private source. Do not change the visibility of an output or results repo yourself: they contain page text.
 
@@ -47,7 +47,7 @@ ocr-bench reads one Hub dataset with one row per page:
 | `page_id` | recommended | a stable, unique id for the page, for example `collection/item:page` |
 | slice columns | optional | labels for reporting, for example `collection`, `decade`, `doc_type` |
 
-Slice columns let `share` publish a board per label. **`share` publishes the labels as they are**, so use labels that may be public: `typescript` or `1950s`, not a person's name or a page's title.
+Slice columns let `share` publish a board per label. **`share` publishes the labels as they are**, so use labels that may be public: `typescript` or `1950s`, not a person's name or a page's title. A slice column can have at most 50 labels, so do not use a per-page or per-document column.
 
 A simple way to build it: put the images in a folder with a `metadata.csv` (`file_name,page_id,collection,decade`) and push it as a private dataset:
 
@@ -60,9 +60,9 @@ ds.push_to_hub("<you>/my-pages", private=True)
 
 ### Choosing pages
 
-- **Size.** 300–500 pages is enough for a first board. In the proof of concept, 278 judged text pages separated the top model from the rest.
+- **Size.** 300–500 pages is enough for a first board. In the proof of concept, with 278 judged text pages, the top model's interval did not overlap the next model's.
 - **One page per document**, or a few. Many pages from one document make the board about that document.
-- **Slices.** `share` reports a slice only when it has 10 or more judged pages. Plan the sample so that each slice you care about has more than that.
+- **Slices.** `share` ranks a model in a slice only when the model has 10 or more judged pages in it. A failed page (`[OCR ERROR]`) does not count, so plan more than 10 pages for each slice you care about.
 - **Blank pages.** Add some known-blank pages on purpose, and label them (for example `page_type = blank`). Some models write text on blank pages: a description of the image, a stock phrase or another page's text. `audit --screen` counts this.
 - **Order does not matter.** `judge` visits the sample in a random order, so a sorted dataset is fine.
 
@@ -87,7 +87,7 @@ ocr-bench run <you>/my-pages <you>/my-pages-ocr --models glm-ocr lighton-ocr-2 d
 
 ### B. Bring your own outputs
 
-If you already have transcriptions (from a vendor, another tool, a model that `run` does not have, or the text that came with your scans), put them in one dataset: the `image` column, your other columns, and one text column per model. The column name is the model's name on the board.
+If you already have transcriptions (from a vendor, another tool, a model that `run` does not have, or the text that came with your scans), put them in one dataset: the `image` column, your other columns, and one text column per model. The column name is the model's name on the board, and `share` publishes it: do not use a contract name or a project code name.
 
 ```python
 ds = ds.add_column("vendor-ocr", vendor_texts)        # same row order as ds
@@ -121,10 +121,12 @@ hf jobs run --detach --flavor cpu-upgrade -s HF_TOKEN \
     --save-results <you>/my-pages-results --private
 ```
 
-- **Cost.** About $0.0013 per comparison with the default judge, an 8,000-character cap and 1,024 px images (measured in the proof of concept). Without adaptive stopping, a run is at most pages × models × (models − 1) / 2 comparisons. `--max-comparisons N` sets a hard limit.
-- **`--criteria body-text`** asks the judge to compare the body text and to ignore page furniture (running heads, page numbers). It suits most historical material.
+`--private` is automatic for a private source; passing it also stops the run if the results repo would be public.
+
+- **Cost.** About $0.0014 per comparison with the default judge, an 8,000-character cap and 1,024 px images (billed in the proof of concept). A run is at most pages × models × (models − 1) / 2 comparisons; adaptive stopping usually uses fewer. `--max-comparisons N` sets a hard limit. A run stopped by the limit can be continued later with the same command and a higher limit.
+- **`--criteria body-text`** asks the judge to compare the body text and to ignore page furniture (running heads, page numbers).
 - **`--max-samples N`** judges a random sample of N pages.
-- **Adding a model later:** run the OCR for the new model, then run the same `judge` command again. Only the new pairs are judged. If an input changed (a re-run model, other pages, another judge setting), `judge` stops and tells you to pass `--full-rejudge` or use a new results repo.
+- **Adding a model later:** run the OCR for the new model, then run the same `judge` command again. Only the new pairs are judged. If an input changed (a re-run model, other pages, another judge setting), `judge` stops and tells you to pass `--full-rejudge` or use a new results repo. A re-run of one model counts as a change, so the whole board is judged again.
 - **Logs:** `hf jobs logs <job-id>`. The leaderboard is printed at the end and written to the results repo.
 
 ## 5. Look at the results
@@ -134,7 +136,7 @@ uv tool install "ocr-bench[viewer]"
 ocr-bench view <you>/my-pages-results
 ```
 
-The viewer runs on your machine and reads the private results with your token. It shows the leaderboard and each comparison: the page, both transcriptions and the judge's reason. Vote on some comparisons to check that the judge agrees with you.
+The viewer runs on your machine. It reads the private results repo and the private source images with the token you are logged in with (`hf auth login` or `HF_TOKEN`), so that token needs read access to both. It shows the leaderboard and each comparison: the page, both transcriptions and the judge's reason. Vote on some comparisons to check that the judge agrees with you.
 
 ## 6. Publish the scores
 
@@ -145,8 +147,9 @@ ocr-bench share <you>/my-pages-results <you>/my-ocr-board \
 
 `--dry-run` writes the board to a local folder (`./ocr-bench-share-<alias>`) and pushes nothing. Read the files. When they are right, run the same command without `--dry-run`.
 
-- The board has the overall ranking, one board per slice label with 10 or more judged pages, the judge settings and a fingerprint of the page set. It has no page text, OCR outputs, judge reasons, page ids, or the names of your repos. `--alias` is the public name of your page set.
+- The board has the overall ranking, one board per slice label, the judge settings and a fingerprint of the page set. It has no page text, OCR outputs, judge reasons, page ids, or the names of your repos. `--alias` is the public name of your page set.
 - Before it writes anything, `share` checks the final files: only allowed columns and values, and no fragment of any compared output or judge reason. If a check fails, nothing is written.
+- Use a new or empty repo for the board. `share` refuses a repo with files that it did not write, and a repo with the board of another alias unless you pass `--replace`.
 - A missing board repo is created public. Pass `--private` to create it private.
 - Never publish the results repo or the OCR output repo instead. They contain page text.
 
