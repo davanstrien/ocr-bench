@@ -31,7 +31,7 @@ Decide this first.
 | The results repo (`judge`) | OCR text and the judge's reasons, which can quote the page | private when the source is private |
 | HF Jobs | everything the Job reads | runs under your account |
 | The judge model | each page image and two transcriptions | depends on the judge you choose |
-| The board repo (`share`) | ratings, settings and a fingerprint of the page set | public, or private with `--private` |
+| The board repo (`share`) | ratings, settings and a fingerprint of the page set | private until you publish it |
 
 The default judge is `novita:Qwen/Qwen3.8-27B` through [HF Inference Providers](https://huggingface.co/docs/inference-providers/index), so Novita processes the page images. **If you need to control where your pages are sent, pass `--model` with an endpoint that meets your privacy needs**: a [Hugging Face Inference Endpoint](https://huggingface.co/docs/inference-endpoints) URL or a model you serve on Jobs (ocr-bench sends your HF token to both), or an OpenAI-compatible server that needs no API key (`https://host/v1/:org/model`). Boards judged by different judges, or by the same model on different providers, are not comparable.
 
@@ -147,12 +147,18 @@ ocr-bench share <you>/my-pages-results <you>/my-ocr-board \
   --alias "gov-typescripts-v1" --slice-column decade --dry-run
 ```
 
-`--dry-run` writes the board to a local folder (`./ocr-bench-share-<alias>`) and pushes nothing. Read the files. When they are right, run the same command without `--dry-run`.
+`--dry-run` writes the board to a local folder (`./ocr-bench-share-<alias>`) and pushes nothing. Read the files. When they are right, run the same command without `--dry-run`. This creates the board repo private; look at it on the Hub, then publish it (below).
 
 - The board has the overall ranking, one board per slice label, the judge settings and a fingerprint of the page set. It has no page text, OCR outputs, judge reasons, page ids, or the names of your repos. `--alias` is the public name of your page set.
 - Before it writes anything, `share` checks the final files: only allowed columns and values, and no fragment of any compared output or judge reason. If a check fails, nothing is written.
 - Use a new or empty repo for the board. `share` refuses a repo with files that it did not write, and a repo with the board of another alias unless you pass `--replace`.
-- A missing board repo is created public. Pass `--private` to create it private.
+- A missing board repo is created private, so you can look at the board on the Hub first. `share` then prints the command that publishes it:
+
+  ```bash
+  hf repos settings <you>/my-ocr-board --repo-type dataset --public
+  ```
+
+  Pass `--public` to `share` to create it public in one step. An existing board repo keeps its visibility.
 - Never publish the results repo or the OCR output repo instead. They contain page text.
 
 ## Troubleshooting
