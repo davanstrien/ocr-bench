@@ -125,6 +125,10 @@ def _evaluation(results, models=MODELS, *, n_rows=None, failed_models=(), failed
     return PrivateEvaluation(leaderboard=rows, comparisons=results, metadata=metadata)
 
 
+def _md_escaped(text):
+    return "".join("\\" + char if char in "\\`*_[]<>|" else char for char in text)
+
+
 def _plan(evaluation, **kwargs):
     kwargs.setdefault("alias", "gov-scans-v1")
     kwargs.setdefault("board_repo", "me/board")
@@ -289,6 +293,8 @@ class TestBoards:
             (3_343_978_497, "3.3B"),
             (34_500_000, "34.5M"),
             (269_944_416, "0.27B"),
+            (10_500_000_000, "10.5B"),
+            (123_400_000_000, "123B"),
         ],
     )
     def test_size_format(self, total, shown):
@@ -325,11 +331,31 @@ class TestBoards:
         assert plan.settings["sampled_pages"] is None
         assert "from a sample of at most 1000" in plan.files["README.md"].decode()
 
+    @pytest.mark.parametrize("name", ["org/x](https://evil.example)", "org/x <img src=x>"])
+    def test_a_model_name_shaped_like_markup_is_text_and_not_a_link(self, name):
+        models = ["org/model-good", name]
+        readme = _plan(_evaluation(_results(range(20), models), models)).files["README.md"].decode()
+        assert _md_escaped(name) in readme
+        assert "huggingface.co/org/x" not in readme
+
+    def test_a_failed_model_has_a_note(self):
+        evaluation = _evaluation(_results(range(20)), failed_models=["org/model-dead"])
+        readme = _plan(evaluation).files["README.md"].decode()
+        assert "| FAILED |" in readme
+        assert "FAILED: every output was an error message" in readme
+
+    def test_without_a_sample_cap_the_card_counts_the_compared_pages(self):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata.pop("model_coverage", None)
+        evaluation.metadata["max_samples"] = None
+        readme = _plan(evaluation).files["README.md"].decode()
+        assert "- **Pages**: 20 pages with at least one comparison\n" in readme
+
     def test_error_outputs_are_counted_in_the_note(self):
         evaluation = _evaluation(_results(range(20)), failed_outputs={"org/model-weak": 3})
         readme = _plan(evaluation).files["README.md"].decode()
         assert "⚠ marks a model" in readme
-        assert "Error outputs: org/model-weak: 3." in readme
+        assert "Error outputs in the sample: org/model-weak: 3." in readme
 
     def test_the_card_names_the_board_repo_in_its_data_snippets(self):
         plan = _plan(_evaluation(_results(range(20))), board_repo="me/board")
@@ -469,6 +495,14 @@ class TestSlices:
         # The label is inline code, where markdown and HTML do not render.
         assert f"### `{label}` (ranked on" in readme
         assert readme.count("<img src=x>") == readme.count(f"`{label}`")
+
+    def test_a_slice_column_with_markup_is_escaped_text(self):
+        values = _labels(40, {"letters": range(0, 20), "forms": range(20, 40)})
+        evaluation = _evaluation(_results(range(40)), n_rows=40)
+        plan = _plan(evaluation, slice_column="a`b<i>", slice_values=lambda m, c: values)
+        readme = plan.files["README.md"].decode()
+        assert "## By a\\`b\\<i\\>" in readme
+        assert not re.search(r"(?<!\\)<i>", readme)
 
     def test_a_label_with_a_backtick_is_escaped_text(self):
         label = "a`b<i>"

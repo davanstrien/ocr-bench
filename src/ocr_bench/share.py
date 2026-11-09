@@ -137,13 +137,21 @@ HUB_MODEL_ID = re.compile(rf"(?P<repo>{REPO_ID})(?P<label> \([^()]+\))?")
 BOARD_REPO_ID = re.compile(REPO_ID)
 # What each judge criteria profile asks the judge to compare.
 CRITERIA_MEANING = {
-    "default": "all visible text counts, including headers, footers, marginalia and stamps",
-    "body-text": (
-        "the main text, headings, footnotes and captions count; running headers and page "
-        "numbers neither help nor hurt an output"
+    "default": (
+        "In order: no invented text, then completeness (all visible text, including "
+        "headers, footers, marginalia and stamps), then accuracy, reading order and "
+        "formatting."
     ),
-    "table-fidelity": "all visible text counts, and tables must keep their rows and columns",
-    "custom": "a custom prompt",
+    "body-text": (
+        "In order: no invented text, then completeness (the main text, headings, "
+        "footnotes and captions; running headers and page numbers neither help nor "
+        "hurt), then accuracy, reading order and formatting."
+    ),
+    "table-fidelity": (
+        "In order: no invented text, then completeness (all visible text), table "
+        "structure, accuracy and reading order."
+    ),
+    "custom": "A custom prompt.",
 }
 
 # A slice board needs as many pages as a resolved ranking does. A smaller slice
@@ -436,6 +444,8 @@ def check_board_matches(board: Leaderboard, leaderboard: list[dict], results_rep
 
 def _format_size(total: int) -> str:
     """A parameter count in the registry's style: 0.85B, 3.3B, 34.5M."""
+    if total >= 10_000_000_000:
+        return f"{total / 1e9:.3g}B"
     if total >= 100_000_000:
         return f"{total / 1e9:.2g}B"
     return f"{total / 1e6:.3g}M"
@@ -656,14 +666,14 @@ def _table(rows: list[dict]) -> list[str]:
         status = row.get("status", "ranked")
         if status == "failed":
             lines.append(
-                f"| — | {_model_cell(row['model'])} | {row['params'] or ''} | FAILED "
+                f"| — | {_model_cell(row['model'])} | {_md(row['params'] or '')} | FAILED "
                 "| — | — | — | — | — |"
             )
             continue
         ci = f"{row['elo_low']}–{row['elo_high']}" if row.get("elo_low") is not None else "—"
         mark = " ⚠" if status == "degraded" else ""
         lines.append(
-            f"| {row['rank']} | {_model_cell(row['model'])}{mark} | {row['params'] or ''} "
+            f"| {row['rank']} | {_model_cell(row['model'])}{mark} | {_md(row['params'] or '')} "
             f"| {row['elo']} | {ci} | {row['pages']} | {row['wins']} | {row['losses']} "
             f"| {row['ties']} |"
         )
@@ -699,15 +709,17 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         "",
         f"{len(ranked)} OCR models ranked on {settings['pages']} pages. For each page, a "
         "vision-language model compared two transcriptions at a time and picked the more "
-        "faithful one. [ocr-bench](https://github.com/davanstrien/ocr-bench) ran the "
-        "comparisons and fitted the ratings. The pages, the transcriptions and the judge's "
-        "reasons stay private: this repo holds scores only.",
+        "faithful one, or called a tie. "
+        "[ocr-bench](https://github.com/davanstrien/ocr-bench) ran the comparisons and "
+        "fitted the ratings. The pages, the transcriptions and the judge's reasons stay "
+        "private: this repo holds scores only.",
         "",
         "**How to read it.** A higher rating is better; 1500 is the average rating on each "
         "board. The 95% interval is where the rating stays when the pages are resampled: "
-        "models whose intervals overlap are not separated by this data. Pages is the number "
-        "of pages a model was compared on. Wins, losses and ties are raw counts that depend "
-        "on how often a model was compared, so compare ratings, not wins.",
+        "when two intervals overlap, this data does not clearly separate those models. "
+        "Pages is the number of pages a model was compared on. Wins, losses and ties are "
+        "raw counts that depend on how often a model was compared, so compare ratings, "
+        "not wins.",
         "",
         f"## All pages ({settings['pages']})",
         "",
@@ -720,7 +732,7 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
             "",
             "⚠ marks a model that returned an error message (such as `[OCR ERROR]`) instead "
             "of text on some pages. Those pages were skipped for it, so its rating rests on "
-            f"the pages in the Pages column. Error outputs: {counts}.",
+            f"the pages in the Pages column. Error outputs in the sample: {counts}.",
         ]
     if any(row["status"] == "failed" for row in overall_rows):
         lines += ["", "FAILED: every output was an error message, so the model has no rating."]
@@ -739,9 +751,10 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         if settings["pages_not_in_a_slice_board"]:
             lines += [
                 "",
-                f"{settings['pages_not_in_a_slice_board']} pages are in none of these boards: "
-                f"no label, a label with fewer than {MIN_SLICE_PAGES} pages, or only "
-                "comparisons with models left out of that board.",
+                f"{settings['pages_not_in_a_slice_board']} judged pages are in none of these "
+                "boards because they have no label, their label has fewer than "
+                f"{MIN_SLICE_PAGES} pages, or they were only compared with models left out of "
+                "their board.",
             ]
     judges = ", ".join(_md(name) for name in settings["judge_models"]) or "not recorded"
     criteria = settings["criteria"]
@@ -762,8 +775,7 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         "",
         "## How this board was made",
         "",
-        f"- **Judge**: {judges}, with the `{_md(criteria)}` criteria"
-        + (f" ({meaning})" if meaning else ""),
+        f"- **Judge**: {judges}, `{_md(criteria)}` criteria." + (f" {meaning}" if meaning else ""),
         f"- **Pages**: {sample}",
         f"- **Comparisons**: {settings['comparisons']:,}; {settings['auto_tied']} pairs had "
         "identical text and were tied without a judge call",
@@ -776,6 +788,7 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         "",
         "## Use the data",
         "",
+        "In Python, with `from datasets import load_dataset`: "
         f'`load_dataset("{repo}")` gives the overall board'
         + (
             f'; `load_dataset("{repo}", "slices")` gives the boards by label.'
@@ -790,6 +803,8 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         "`elo_high` are its 95% interval.",
         "",
         "```sql",
+        "-- a private board needs a Hub token first:",
+        "-- CREATE SECRET hf (TYPE huggingface, PROVIDER credential_chain);",
         f"SELECT rank, model, elo, elo_low, elo_high, pages "
         f"FROM 'hf://datasets/{repo}/overall.jsonl' ORDER BY rank;",
     ]
@@ -1267,7 +1282,8 @@ def push_share(
         )
     if plan.settings["repo"] != dest:
         raise ShareError(
-            f"The board was built for {plan.settings['repo']}, not {dest}. Share again to {dest}."
+            f"The board was built for {plan.settings['repo']}, not {dest}. "
+            f"Build it again with board_repo={dest!r}."
         )
     api = api or HfApi()
     existing = _destination_files(api, dest, plan.alias, replace)

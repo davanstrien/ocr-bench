@@ -2276,6 +2276,16 @@ def cmd_share(args: argparse.Namespace) -> None:
         board_repo=args.dest,
         model_sizes=hub_model_sizes,
     )
+    for private in (args.results, plan.source_dataset):
+        if (
+            private
+            and private.lower() in args.dest.lower()
+            and private.lower() != args.dest.lower()
+        ):
+            console.print(
+                f"[yellow]Note:[/yellow] the board repo name contains {private}, and repo names "
+                "are public with the board."
+            )
     _print_share_board(f"{plan.alias}: overall ({plan.settings['pages']} pages)", plan.overall_rows)
     for name in plan.settings["slices"]:
         _print_share_board(
