@@ -120,7 +120,15 @@ def build_parser() -> argparse.ArgumentParser:
     # Dataset
     judge.add_argument("dataset", help="HF dataset repo id")
     judge.add_argument("--split", default="train", help="Dataset split (default: train)")
-    judge.add_argument("--columns", nargs="+", default=None, help="Explicit OCR column names")
+    judge.add_argument(
+        "--columns",
+        nargs="+",
+        default=None,
+        help=(
+            "Judge these text columns of a flat dataset (one column per model, named "
+            "after the model). Ignored with --configs; --from-prs is ignored with --columns."
+        ),
+    )
     judge.add_argument(
         "--configs",
         nargs="+",
