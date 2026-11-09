@@ -9,6 +9,21 @@ current behaviour.
 
 ## [Unreleased]
 
+### Changes
+
+- The `share` card is easier to read.
+  - It opens with what the board is, a link to ocr-bench, and how to read a rating and its 95% interval.
+  - The columns are Rating and 95% interval (a Bradley-Terry fit on an Elo-like scale), and Size.
+  - Each model name that is a Hub repo id links to its model page. With a label in brackets after the id, as in `baidu/Unlimited-OCR-2 (tiled)`, the id is linked.
+  - The ⚠ note gives each model's number of error outputs in the source dataset. A FAILED row has a note.
+  - Slice labels and the slice column are shown as code.
+  - The settings section keeps the judge, its criteria (with a link to the judge prompts at that ocr-bench version), the sample, the comparisons and the judge date. The prompt hash, caps and fingerprint stay in `board.json`. The card does not describe the criteria in its own words: judge reasons repeat the prompt's wording, and the page-text check refused such a card on a real board.
+  - A "Use the data" section has `load_dataset` lines and a collapsed section of DuckDB queries.
+- `plan_share` takes the board repo (`board_repo=`), and `board.json` records it as `repo`. The card names it in its `load_dataset` and DuckDB examples. `push_share` refuses to push a board to a repo other than the one it was built for. A board repo that is the results repo or the source is refused when the board is built, so a dry run does not write it either.
+- The check that no file names the results repo or the source allows a mention inside the board's own repo id, so a board repo such as `me/scans-board` for a source `me/scans` can be shared. Any other mention of a private repo, also one that overlaps the board id, is still refused. The board repo must pass `huggingface_hub.utils.validate_repo_id` and have a namespace (`namespace/name`), also in a dry run.
+- The card gives the size of the sample that was judged (from the coverage that `judge` records). Without it, `--max-samples` is shown as a cap.
+- `share` fills the Size column from the parameter count the Hub records for each model's safetensors files, so every size is measured the same way. The built-in registry's size is used only for a model without one (Tesseract shows `n/a`). The Hub count can differ from the size in a model's name or card: it counts the whole model, vision encoder and all experts included (GLM-OCR: 1.3B, not 0.9B). A model name with a label in brackets after its repo id, such as `baidu/Unlimited-OCR-2 (tiled)`, uses the id. Only public repos are read, without a token, so a private model gets no size.
+
 ## [0.0.7] - 2026-11-09
 
 ### Behaviour changes

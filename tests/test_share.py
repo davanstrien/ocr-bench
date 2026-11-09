@@ -29,9 +29,11 @@ from ocr_bench.share import (
     PrivacyError,
     PrivateEvaluation,
     ShareError,
+    _format_size,
     check_no_page_text,
     check_plan,
     check_publish_order,
+    hub_model_sizes,
     load_private_evaluation,
     load_slice_values,
     plan_share,
@@ -123,8 +125,13 @@ def _evaluation(results, models=MODELS, *, n_rows=None, failed_models=(), failed
     return PrivateEvaluation(leaderboard=rows, comparisons=results, metadata=metadata)
 
 
+def _md_escaped(text):
+    return "".join("\\" + char if char in "\\`*_[]<>|" else char for char in text)
+
+
 def _plan(evaluation, **kwargs):
     kwargs.setdefault("alias", "gov-scans-v1")
+    kwargs.setdefault("board_repo", "me/board")
     return plan_share(evaluation, results_repo=RESULTS, now=NOW, **kwargs)
 
 
@@ -256,6 +263,133 @@ class TestBoards:
         with pytest.raises(ShareError, match="won \\(or lost\\)"):
             _plan(_evaluation(results, ["org/a", "org/b"]))
 
+    def test_hub_model_ids_link_to_their_model_pages(self):
+        models = ["org/model-good", "tesseract-5", "org/model-x (tiled)"]
+        readme = _plan(_evaluation(_results(range(20), models), models)).files["README.md"].decode()
+        assert "[org/model-good](https://huggingface.co/org/model-good)" in readme
+        assert "huggingface.co/tesseract-5" not in readme
+        # A " (label)" suffix links the base repo and keeps the label as text.
+        assert "[org/model-x](https://huggingface.co/org/model-x) (tiled)" in readme
+
+    def test_sizes_the_registry_does_not_know_come_from_model_sizes(self):
+        models = ["org/model-good", "org/model-x (tiled)", "tesseract-5"]
+        asked = []
+
+        def sizes(names):
+            asked.extend(names)
+            return {"org/model-good": "0.85B", "org/model-x (tiled)": "3.3B"}
+
+        plan = _plan(_evaluation(_results(range(20), models), models), model_sizes=sizes)
+        by_model = {row["model"]: row["params"] for row in plan.overall_rows}
+        assert by_model["org/model-good"] == "0.85B"
+        assert by_model["org/model-x (tiled)"] == "3.3B"
+        assert by_model["tesseract-5"] == "n/a"  # no Hub size: the registry's stays
+        assert sorted(asked) == sorted(models)
+        assert "| 0.85B |" in plan.files["README.md"].decode()
+
+    def test_the_hub_size_replaces_the_registry_size(self):
+        models = ["zai-org/GLM-OCR", "org/model-weak"]  # the registry says 0.9B for GLM-OCR
+        plan = _plan(
+            _evaluation(_results(range(20), models), models),
+            model_sizes=lambda names: {"zai-org/GLM-OCR": "1.3B"},
+        )
+        assert {row["model"]: row["params"] for row in plan.overall_rows}[
+            "zai-org/GLM-OCR"
+        ] == "1.3B"
+
+    @pytest.mark.parametrize(
+        ("total", "shown"),
+        [
+            (852_985_920, "0.85B"),
+            (3_343_978_497, "3.3B"),
+            (34_500_000, "34.5M"),
+            (269_944_416, "0.27B"),
+            (10_500_000_000, "10.5B"),
+            (123_400_000_000, "123B"),
+        ],
+    )
+    def test_size_format(self, total, shown):
+        assert _format_size(total) == shown
+
+    def test_hub_sizes_skip_models_the_hub_cannot_give(self):
+        class Api:
+            def model_info(self, repo, expand=None, token=None):
+                assert token is False  # only public repos are read
+                if repo == "org/gone":
+                    raise RepositoryNotFoundError("gone")
+                safetensors = (
+                    None if repo == "org/no-st" else type("S", (), {"total": 1_200_000_000})()
+                )
+                return type("I", (), {"safetensors": safetensors})()
+
+        sizes = hub_model_sizes(
+            ["org/ok (tiled)", "org/gone", "org/no-st", "local-model"], api=Api()
+        )
+        assert sizes == {"org/ok (tiled)": "1.2B"}
+
+    def test_the_card_gives_the_drawn_sample_size(self):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata["model_coverage"] = json.dumps(
+            {"org/model-good": {"sampled_pages": 20, "ranked_pages": 20}}
+        )
+        readme = _plan(evaluation).files["README.md"].decode()
+        assert "20 pages sampled (seed" in readme
+
+    def test_without_coverage_the_cap_is_shown_as_a_cap(self):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata.pop("model_coverage", None)
+        evaluation.metadata["max_samples"] = 1000
+        plan = _plan(evaluation)
+        assert plan.settings["sampled_pages"] is None
+        assert "from a sample of at most 1000" in plan.files["README.md"].decode()
+
+    @pytest.mark.parametrize("name", ["org/x](https://evil.example)", "org/x <img src=x>"])
+    def test_a_model_name_shaped_like_markup_is_text_and_not_a_link(self, name):
+        models = ["org/model-good", name]
+        readme = _plan(_evaluation(_results(range(20), models), models)).files["README.md"].decode()
+        assert _md_escaped(name) in readme
+        assert "huggingface.co/org/x" not in readme
+
+    def test_a_failed_model_has_a_note(self):
+        evaluation = _evaluation(_results(range(20)), failed_models=["org/model-dead"])
+        readme = _plan(evaluation).files["README.md"].decode()
+        assert "| FAILED |" in readme
+        assert "FAILED: every output was an error message" in readme
+
+    def test_without_a_sample_cap_the_card_counts_the_compared_pages(self):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata.pop("model_coverage", None)
+        evaluation.metadata["max_samples"] = None
+        readme = _plan(evaluation).files["README.md"].decode()
+        assert "- **Pages**: 20 pages with at least one comparison\n" in readme
+
+    def test_the_judge_line_links_the_prompts_at_the_share_version(self):
+        plan = _plan(_evaluation(_results(range(20))))
+        version = plan.settings["ocr_bench_version"]
+        url = f"https://github.com/davanstrien/ocr-bench/blob/v{version}/src/ocr_bench/judge.py"
+        assert f"[the prompts in ocr-bench {version}]({url})" in plan.files["README.md"].decode()
+
+    def test_a_custom_prompt_has_no_prompts_link(self):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata["criteria"] = "custom:my-rubric.txt"
+        readme = _plan(evaluation).files["README.md"].decode()
+        assert "with a custom prompt" in readme
+        assert "judge.py" not in readme
+        assert "my-rubric" not in readme
+
+    def test_error_outputs_are_counted_in_the_note(self):
+        evaluation = _evaluation(_results(range(20)), failed_outputs={"org/model-weak": 3})
+        readme = _plan(evaluation).files["README.md"].decode()
+        assert "⚠ marks a model" in readme
+        assert "Error outputs in the source dataset: org/model-weak: 3." in readme
+
+    def test_the_card_names_the_board_repo_in_its_data_snippets(self):
+        plan = _plan(_evaluation(_results(range(20))), board_repo="me/board")
+        readme = plan.files["README.md"].decode()
+        assert 'load_dataset("me/board")' in readme
+        assert "hf://datasets/me/board/overall.jsonl" in readme
+        assert plan.settings["repo"] == "me/board"
+
     @pytest.mark.parametrize(
         "alias", ["", "   ", "x" * 65, "two\nlines", "carriage\rreturn", "line\u2028separator"]
     )
@@ -270,6 +404,18 @@ class TestSlices:
         results = results or _results(pages or range(40))
         evaluation = _evaluation(results, n_rows=n_rows, **kwargs)
         return _plan(evaluation, slice_column="doc_type", slice_values=lambda m, c: values)
+
+    def test_hub_sizes_also_fill_the_slice_boards(self):
+        values = _labels(40, {"letters": range(0, 20), "forms": range(20, 40)})
+        evaluation = _evaluation(_results(range(40)), n_rows=40)
+        plan = _plan(
+            evaluation,
+            slice_column="doc_type",
+            slice_values=lambda m, c: values,
+            model_sizes=lambda names: dict.fromkeys(names, "1.2B"),
+        )
+        assert plan.slice_rows
+        assert all(row["params"] == "1.2B" for row in plan.slice_rows)
 
     def test_one_board_per_label_with_enough_pages(self):
         plan = self._plan({"letters": range(0, 15), "forms": range(15, 30), "maps": range(30, 33)})
@@ -384,8 +530,24 @@ class TestSlices:
         label = "[x](https://example.com)<img src=x>"
         plan = self._plan({label: range(0, 20), "forms": range(20, 40)})
         readme = plan.files["README.md"].decode()
-        assert "\\[x\\](https://example.com)\\<img src=x\\>" in readme
-        assert not re.search(r"(?<!\\)\[x|(?<!\\)<img", readme)  # no unescaped markup
+        # The label is inline code, where markdown and HTML do not render.
+        assert f"### `{label}` (ranked on" in readme
+        assert readme.count("<img src=x>") == readme.count(f"`{label}`")
+
+    def test_a_slice_column_with_markup_is_escaped_text(self):
+        values = _labels(40, {"letters": range(0, 20), "forms": range(20, 40)})
+        evaluation = _evaluation(_results(range(40)), n_rows=40)
+        plan = _plan(evaluation, slice_column="a`b<i>", slice_values=lambda m, c: values)
+        readme = plan.files["README.md"].decode()
+        assert "## By a\\`b\\<i\\>" in readme
+        assert not re.search(r"(?<!\\)<i>", readme)
+
+    def test_a_label_with_a_backtick_is_escaped_text(self):
+        label = "a`b<i>"
+        plan = self._plan({label: range(0, 20), "forms": range(20, 40)})
+        readme = plan.files["README.md"].decode()
+        assert "### a\\`b\\<i\\> (ranked on" in readme
+        assert not re.search(r"(?<!\\)<i>", readme)
 
     def test_comparisons_outside_the_drawn_sample_are_refused(self):
         drawn = sorted(sample_indices(100, 40, 42))
@@ -886,6 +1048,62 @@ class TestPush:
             self._push(api, dest=dest)
         assert api.calls == []
 
+    def test_a_board_named_after_the_source_can_be_shared(self):
+        # The repo name is published anyway; only other mentions of the source count.
+        plan = _plan(_evaluation(_results(range(20))), board_repo=f"{SOURCE}-board")
+        assert f'load_dataset("{SOURCE}-board")' in plan.files["README.md"].decode()
+
+    def test_the_source_id_in_the_alias_is_still_refused_with_such_a_board(self):
+        with pytest.raises(PrivacyError, match="names the results repo or the source"):
+            _plan(_evaluation(_results(range(20))), board_repo=f"{SOURCE}-board", alias=SOURCE)
+
+    def test_a_board_id_inside_the_results_id_does_not_hide_it(self):
+        # Board me/private would otherwise mask me/private-results in the alias.
+        with pytest.raises(PrivacyError, match="names the results repo or the source"):
+            _plan(_evaluation(_results(range(20))), board_repo="me/private", alias=RESULTS)
+
+    @pytest.mark.parametrize("board_repo", [RESULTS, SOURCE.upper()])
+    def test_the_results_repo_or_source_as_board_is_refused_before_any_file(self, board_repo):
+        with pytest.raises(ShareError, match="is the results repo or the source dataset"):
+            _plan(_evaluation(_results(range(20))), board_repo=board_repo)
+
+    @pytest.mark.parametrize("case", ["lower", "upper"])
+    def test_a_private_id_overlapping_the_board_id_is_refused(self, case):
+        # Board public/me must not hide me/private-source in "public/me/private-source".
+        alias = f"public/{SOURCE}" if case == "lower" else f"PUBLIC/{SOURCE.upper()}"
+        with pytest.raises(PrivacyError, match="names the results repo or the source"):
+            _plan(_evaluation(_results(range(20))), board_repo="public/me", alias=alias)
+
+    @pytest.mark.parametrize(
+        "board_repo",
+        [
+            "me/board`<img src=x>`",
+            "me/bo\nard",
+            "me/bo ard",
+            "me/board\n",
+            "board",
+            "me/a--b",
+            "me/börd",
+            "-me/board",
+        ],
+    )
+    def test_a_board_repo_that_is_not_a_hub_id_is_refused(self, board_repo):
+        with pytest.raises(ShareError, match="namespace/name"):
+            _plan(_evaluation(_results(range(20))), board_repo=board_repo)
+
+    def test_a_board_built_for_another_repo_is_refused(self):
+        plan = plan_share(
+            _evaluation(_results(range(20))),
+            results_repo=RESULTS,
+            alias="gov-scans-v1",
+            now=NOW,
+            board_repo="me/other-board",
+        )
+        api = RecordingApi()
+        with pytest.raises(ShareError, match="built for me/other-board"):
+            push_share(plan, "me/board", results_repo=RESULTS, api=api)
+        assert api.calls == []
+
     def test_a_failed_check_makes_no_hub_call(self):
         plan = self._plan()
         plan.files["README.md"] += plan.private_texts[0].encode() * 3
@@ -1009,6 +1227,7 @@ class TestCli:
     def _dry_run(self, monkeypatch, alias, *extra):
         evaluation = _evaluation(_results(range(20)))
         monkeypatch.setattr(share, "load_private_evaluation", lambda repo: evaluation)
+        monkeypatch.setattr(share, "hub_model_sizes", lambda models: {})  # no network in tests
 
         def no_push(*args, **kwargs):
             raise AssertionError("dry run must not push")
@@ -1022,7 +1241,7 @@ class TestCli:
         out = tmp_path / "board"
         self._dry_run(monkeypatch, "v1", "--output-dir", str(out))
         assert sorted(p.name for p in out.iterdir()) == sorted(BOARD_FILES)
-        assert "# OCR board: v1" in (out / "README.md").read_text()
+        assert "# OCR leaderboard: v1" in (out / "README.md").read_text()
 
     def test_dry_run_with_slices_prints_and_writes_the_slice_boards(
         self, monkeypatch, tmp_path, capsys
