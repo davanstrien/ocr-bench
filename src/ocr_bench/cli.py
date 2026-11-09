@@ -2278,8 +2278,9 @@ def cmd_share(args: argparse.Namespace) -> None:
         )
     console.print(
         "[green]Privacy checks passed[/green]: allowed columns and values only, and no "
-        "32-character fragment of a compared output or judge reason. The alias, slice "
-        "labels and model names are published as they are: check them."
+        "copied fragment of 63 or more characters from a compared output or judge "
+        "reason. The alias, slice labels and model names are published as they are: "
+        "check them."
     )
 
     if args.dry_run:

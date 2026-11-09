@@ -229,6 +229,21 @@ class TestBoards:
         with pytest.raises(ShareError, match="cannot rank every leaderboard model"):
             _plan(_evaluation(results, models))
 
+    def test_a_model_whose_only_non_losses_are_ties_is_rankable(self):
+        # A tie counts half each way, so one tie gives the weaker model a finite rating.
+        results = [
+            ComparisonResult(
+                sample_idx=page,
+                model_a="org/a",
+                model_b="org/b",
+                winner="tie" if page == 0 else "A",
+                provenance_hash="h",
+            )
+            for page in range(20)
+        ]
+        plan = _plan(_evaluation(results, ["org/a", "org/b"]))
+        assert [row["model"] for row in plan.overall_rows] == ["org/a", "org/b"]
+
     def test_a_model_that_won_every_comparison_is_refused(self):
         # The unregularised fit puts such a model at an unbounded rating with a
         # zero-width interval.
@@ -449,12 +464,16 @@ class TestPublishOrder:
         history = FakeHistory({"comparisons": "c3", "data": "c3", "metadata": "c3"})
         check_publish_order(history, RESULTS, "c3")
 
+    def test_an_unchanged_leaderboard_is_not_a_failed_run(self):
+        # An identical leaderboard is not uploaded again, so its folder looks older.
+        history = FakeHistory({"comparisons": "c2", "data": "c1", "metadata": "c3"})
+        check_publish_order(history, RESULTS, "c3")
+
     @pytest.mark.parametrize(
         "last",
         [
             {"comparisons": "c3", "data": "c2", "metadata": "c2"},  # a checkpoint after the run
             {"comparisons": "c2", "data": "c3", "metadata": "c1"},  # stopped before the metadata
-            {"comparisons": "c2", "data": "c1", "metadata": "c3"},  # leaderboard older
         ],
     )
     def test_an_unfinished_run_is_refused(self, last):
@@ -462,7 +481,7 @@ class TestPublishOrder:
             check_publish_order(FakeHistory(last), RESULTS, "c3")
 
     def test_a_repo_without_the_judge_folders_is_refused(self):
-        with pytest.raises(ShareError, match="no metadata folder"):
+        with pytest.raises(ShareError, match="last commit of the metadata folder"):
             check_publish_order(FakeHistory({"comparisons": "c1", "data": "c2"}), RESULTS, "c3")
 
     def test_all_three_are_read_at_the_checked_revision(self, monkeypatch):
@@ -567,6 +586,13 @@ class TestSliceSource:
         # Ids alone do not show that a row is still the judged page: the labels and
         # text could be replaced under the same ids.
         source = _source(images=False)
+        self._loader(monkeypatch, source)
+        with pytest.raises(ShareError, match="no image column"):
+            load_slice_values(self._metadata(source), "doc_type")
+
+    def test_an_image_column_the_fingerprint_does_not_read_is_refused(self, monkeypatch):
+        # The fingerprint reads the column named like an image; "scan" is not.
+        source = _source().rename_column("image", "scan")
         self._loader(monkeypatch, source)
         with pytest.raises(ShareError, match="no image column"):
             load_slice_values(self._metadata(source), "doc_type")

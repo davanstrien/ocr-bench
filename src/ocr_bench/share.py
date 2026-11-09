@@ -212,9 +212,16 @@ def check_publish_order(api: HfApi, results_repo: str, revision: str | None) -> 
     """Refuse a results repo whose last judge run did not finish publishing.
 
     Judge pushes the comparisons, then the leaderboard, then the metadata row, in
-    separate commits; a checkpoint pushes only the comparisons. If a run stopped
-    between these pushes, the latest metadata row describes an earlier run, so its
-    settings and page fingerprint would be published with newer comparisons.
+    separate commits; a checkpoint pushes only the comparisons. Every run appends a
+    metadata row, so after a finished run the metadata folder changed no earlier
+    than the comparisons folder. If a run stopped before its metadata push, the
+    latest row describes an earlier run, and its settings and page fingerprint
+    would be published with newer comparisons.
+
+    The leaderboard is not ordered here: an unchanged leaderboard is not uploaded
+    again, so its folder can look older after a finished run. The refit check
+    (:func:`check_board_matches`) ties it to the comparisons instead. The check
+    cannot tell apart two judge runs on the same repo at the same time.
     """
     try:
         infos = api.get_paths_info(
@@ -238,18 +245,17 @@ def check_publish_order(api: HfApi, results_repo: str, revision: str | None) -> 
     missing = [folder for folder in RESULT_FOLDERS if folder not in last]
     if missing:
         raise ShareError(
-            f"{results_repo} has no {', '.join(missing)} folder. "
-            "Is it a results repo written by `ocr-bench judge`?"
+            f"Could not find the last commit of the {', '.join(missing)} folder in "
+            f"{results_repo}. Is it a results repo written by `ocr-bench judge`?"
         )
     newest_first = {commit: position for position, commit in enumerate(commits)}
     if any(last[folder] not in newest_first for folder in RESULT_FOLDERS):
         raise ShareError(f"Could not order the commits of {results_repo}.")
-    comparisons, leaderboard, metadata = (newest_first[last[f]] for f in RESULT_FOLDERS)
-    if not metadata <= leaderboard <= comparisons:
+    if newest_first[last["metadata"]] > newest_first[last["comparisons"]]:
         raise ShareError(
             f"The last judge run on {results_repo} did not finish publishing: its "
-            "comparisons are newer than its leaderboard or metadata. Run the same "
-            "judge command again to finish it, then share."
+            "comparisons are newer than its metadata. Run the same judge command "
+            "again to finish it, then share."
         )
 
 
@@ -301,9 +307,11 @@ def load_slice_values(metadata: dict, slice_column: str) -> list:
         raise ShareError(
             f"Column '{slice_column}' is not in the judged source config {config or 'default'}."
         )
-    if not any(isinstance(feature, Image) for feature in ds.features.values()):
+    identity = fingerprint_identity_columns(ds.column_names)
+    if not any(isinstance(ds.features.get(column), Image) for column in identity):
         # Without image bytes the fingerprint covers only the row ids, and ids do
-        # not show that a row is still the page that was judged.
+        # not show that a row is still the page that was judged. An image column
+        # the fingerprint does not read (one not named like an image) is no help.
         raise ShareError(
             f"The judged source config {config or 'default'} has no image column, so "
             "share cannot check that slice labels are on the judged pages. Share "
