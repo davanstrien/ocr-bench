@@ -405,6 +405,21 @@ class TestBudget:
         assert judge.judged == 7
         assert _published_metadata(m_publish).budget_exhausted is True
 
+    @pytest.mark.parametrize("adaptive", [True, False])
+    def test_budget_stop_reaches_both_halves_of_a_sorted_dataset(self, adaptive):
+        # 40 pages x 3 pairs; a budget of 30 judges about 10 pages. Sorted
+        # datasets (by collection or decade) are common, so the judged pages
+        # must come from the whole sample, not only from its start.
+        ds, ocr = make_ds(n=40)
+        flags = ["--max-comparisons", "30", "--checkpoint-every", "0"]
+        if not adaptive:
+            flags.insert(0, "--no-adaptive")
+        judge, _, _ = _run_judge(flags, ds, ocr, judge=FakeJudge(winner="tie"))
+        assert judge.judged == 30
+        pages = {sample for _, sample in judge.pair_samples}
+        assert any(page < 20 for page in pages)
+        assert any(page >= 20 for page in pages)
+
     def test_no_budget_judges_everything(self):
         ds, ocr = make_ds(n=10)
         judge, m_publish, _ = _run_judge(["--no-adaptive", "--checkpoint-every", "0"], ds, ocr)
