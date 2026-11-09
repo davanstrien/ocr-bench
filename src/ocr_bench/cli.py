@@ -120,7 +120,15 @@ def build_parser() -> argparse.ArgumentParser:
     # Dataset
     judge.add_argument("dataset", help="HF dataset repo id")
     judge.add_argument("--split", default="train", help="Dataset split (default: train)")
-    judge.add_argument("--columns", nargs="+", default=None, help="Explicit OCR column names")
+    judge.add_argument(
+        "--columns",
+        nargs="+",
+        default=None,
+        help=(
+            "Judge these text columns of a flat dataset (one column per model, named "
+            "after the model). Ignored with --configs; --from-prs is ignored with --columns."
+        ),
+    )
     judge.add_argument(
         "--configs",
         nargs="+",
@@ -530,6 +538,16 @@ def build_parser() -> argparse.ArgumentParser:
             "Audit only these configs, loaded from main. With --from-prs, each is "
             "loaded from its newest open PR, or from main if it has no open PR or it "
             "changed on main after its newest open PR, as in 'judge'."
+        ),
+    )
+    audit.add_argument(
+        "--columns",
+        nargs="+",
+        default=None,
+        help=(
+            "Audit these text columns of a flat dataset (one column per model, named "
+            "after the model), as in 'judge --columns'. Ignored with --configs; "
+            "--from-prs is ignored with --columns."
         ),
     )
     audit.add_argument(
@@ -2407,6 +2425,7 @@ def cmd_audit(args: argparse.Namespace) -> None:
                 configs=args.configs,
                 from_prs=args.from_prs,
                 screen=args.screen,
+                columns=args.columns,
             )
     except (DatasetError, DatasetsError, OSError, OpenAIError, ValueError) as exc:
         # Couldn't even run the check (repo missing, no OCR columns, network /

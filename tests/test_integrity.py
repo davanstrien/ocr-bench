@@ -440,6 +440,61 @@ class TestAuditRepo:
         assert len(report.configs) == 1
         assert report.has_problems  # 50% sentinels
 
+    @patch("ocr_bench.integrity.load_flat_dataset")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_columns_read_a_flat_dataset_without_config_discovery(
+        self, mock_pr, mock_main, mock_flat
+    ):
+        ds = Dataset.from_dict(
+            {
+                "image": [None, None],
+                "vendor": ["good text here", "more good text"],
+                "mine": ["a", "b"],
+            }
+        )
+        mock_flat.return_value = (ds, {"vendor": "vendor", "mine": "mine"})
+        report = audit_repo("user/repo", columns=["vendor", "mine"])
+        mock_pr.assert_not_called()
+        mock_main.assert_not_called()
+        assert mock_flat.call_args.kwargs["columns"] == ["vendor", "mine"]
+        assert [audit.stats.model for audit in report.configs] == ["vendor", "mine"]
+
+    @patch("ocr_bench.integrity.load_flat_dataset")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_columns_take_precedence_over_from_prs(self, mock_pr, mock_main, mock_flat):
+        # As in judge: --columns without --configs reads the flat dataset, not PRs.
+        ds = Dataset.from_dict({"image": [None], "vendor": ["good text here"]})
+        mock_flat.return_value = (ds, {"vendor": "vendor"})
+        audit_repo("user/repo", columns=["vendor"], from_prs=True)
+        mock_pr.assert_not_called()
+        mock_main.assert_not_called()
+        assert mock_flat.call_args.kwargs["columns"] == ["vendor"]
+
+    @patch("ocr_bench.integrity.load_flat_dataset")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_columns_are_screened(self, mock_pr, mock_main, mock_flat):
+        texts = [f"page {i} of a longer transcription with enough text" for i in range(4)]
+        ds = Dataset.from_dict(
+            {"image": [None] * 4, "a": texts, "b": list(texts), "c": list(texts)}
+        )
+        mock_flat.return_value = (ds, {"a": "a", "b": "b", "c": "c"})
+        report = audit_repo("user/repo", columns=["a", "b", "c"], screen=True)
+        assert report.screen is not None
+        assert sorted(model.name for model in report.screen.models) == ["a", "b", "c"]
+
+    @patch("ocr_bench.integrity._load_configs")
+    @patch("ocr_bench.integrity.load_flat_dataset")
+    @patch("ocr_bench.integrity.discover_configs")
+    @patch("ocr_bench.integrity.discover_pr_configs")
+    def test_configs_take_precedence_over_columns(self, mock_pr, mock_main, mock_flat, mock_load):
+        # As in judge: --configs wins when both are given.
+        mock_load.return_value = _three_configs(("cfg_a", "cfg_b"))
+        audit_repo("user/repo", configs=["cfg_a", "cfg_b"], columns=["vendor"])
+        mock_flat.assert_not_called()
+
 
 _PAGES = [
     "first page of a longer transcription",
