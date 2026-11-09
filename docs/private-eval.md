@@ -158,7 +158,10 @@ ocr-bench share <you>/my-pages-results <you>/my-ocr-board \
 `--dry-run` writes the board to a local folder (`./ocr-bench-share-<alias>`) and pushes nothing. Read the files. When they are right, run the same command without `--dry-run`. This creates the board repo private; look at it on the Hub, then publish it (below). `share` reads the results repo and the source dataset (for the slice labels and the page fingerprint), so your token needs read access to both.
 
 - The board has the overall ranking, one board per slice label, the judge settings and a fingerprint of the page set. It has no page text, OCR outputs, judge reasons, page ids, or the names of your repos. `--alias` is the public name of your page set.
-- Before it writes anything, `share` checks the final files: only allowed columns and values, and no fragment of any compared output or judge reason. If a check fails, nothing is written.
+- Before it writes anything, `share` checks the final files: only allowed columns and values, and no 32-character fragment of any compared output or judge reason. Shorter text, and the alias, slice labels and model names, are not checked: read them in the dry run. If a check fails, nothing is written.
+- Every model on a board must be rankable against every other. If two groups of models were never compared, or a model won (or lost) every comparison, the ratings would be meaningless: `share` refuses such an overall board and leaves such a slice out.
+- Slice boards need page images in the source: `share` checks that the labels are on the judged pages by their image bytes.
+- If the last `judge` run did not finish publishing (for example, it stopped after a checkpoint), `share` refuses until you run `judge` again.
 - Use a new or empty repo for the board. `share` refuses a repo with files that it did not write, and a repo with the board of another alias unless you pass `--replace`.
 - A missing board repo is created private, so you can look at the board on the Hub first. To publish it, use **Settings → Change visibility** on the repo page, or, with the `hf` CLI 2.0 or later:
 
