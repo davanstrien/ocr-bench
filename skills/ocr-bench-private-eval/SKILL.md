@@ -53,7 +53,7 @@ Never change the visibility of a source, OCR output or results repo. Never publi
    - `share` reads the results repo, and with `--slice-column` also the source dataset, so the token needs read access to both.
    - `share` refuses a board whose models cannot all be ranked against each other, and a results repo whose last judge run did not finish. Slice boards need page images in the source.
 
-## Facts to keep straight
+## Key facts
 
 - Private source → `run` and `judge` create private output and results repos, and stop before writing to an existing public repo.
 - `judge` visits the sample in a random order, so a budget stop judges a random subset of pages.
