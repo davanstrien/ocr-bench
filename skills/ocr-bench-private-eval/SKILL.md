@@ -15,7 +15,7 @@ The full human guide is [docs/private-eval.md](../../docs/private-eval.md). Read
    - OCR: `ocr-bench run ... --dry-run` shows each model's flavor; price from `hf jobs hardware`.
    - Judge: about $0.0014 per comparison (default judge, measured with an 8,000-character text cap). Upper bound: pages × models × (models − 1) / 2; adaptive stopping usually uses fewer. Use `--max-comparisons` as a hard limit; a capped run continues later with the same command.
 2. **Anything public.** `share` creates a missing board repo private; making it public (the repo's Settings page, `hf repos settings <board-repo> --repo-type dataset --public` with `hf` 2.0 or later, or `share --public`) needs the user's OK. Show the `--dry-run` files first.
-3. **Where the pages go.** The default judge (`novita:Qwen/Qwen3.8-27B`) sends each page image to Novita through HF Inference Providers. Say so, and ask whether that is acceptable. If not, the user chooses an endpoint that meets their needs and you pass it with `--model`: an HF Inference Endpoint, a model served on a Job (https://huggingface.co/docs/hub/jobs-serving; `--model https://<job-id>--8000.hf.jobs/v1/:<org>/<model>`; the HF token is sent), or an OpenAI-compatible server that needs no API key. Only the default judge has been checked against ground truth.
+3. **Where the pages go.** The default judge (`novita:Qwen/Qwen3.8-27B`) sends each page image to Novita through HF Inference Providers. Say so, and ask whether that is acceptable. If not, the user chooses an endpoint that meets their needs and you pass it with `--model`: an HF Inference Endpoint, a model served on a Job ([Serve Models on Jobs](https://huggingface.co/docs/hub/jobs-serving); `--model https://<job-id>--8000.hf.jobs/v1/:<org>/<model>`; the HF token is sent), or an OpenAI-compatible server that needs no API key. Only the default judge has been checked against ground truth.
 
 Use full repo ids (`<user>/name`) in every command. For table-dense material, use `--criteria table-fidelity` instead of `body-text` (one criterion per board).
 
@@ -39,7 +39,7 @@ Never change the visibility of a source, OCR output or results repo. Never publi
    ```
 
    - `<version>` is the latest ocr-bench on [PyPI](https://pypi.org/project/ocr-bench/) (0.0.7 or later); use the same version locally (`uv tool install ocr-bench`). `<budget>` is the user's budget ÷ $0.0014. `<cap from audit>` is the cap `audit --screen` suggests (the default is 2,500 characters).
-   - The user must be logged in (`hf auth login` or `HF_TOKEN`); `-s HF_TOKEN` passes that token to the Job. `hf jobs run --help` shows the Job flags; Jobs docs: https://huggingface.co/docs/hub/jobs-overview.
+   - The user must be logged in (`hf auth login` or `HF_TOKEN`); `-s HF_TOKEN` passes that token to the Job. `hf jobs run --help` shows the Job flags; Jobs docs: [Jobs overview](https://huggingface.co/docs/hub/jobs-overview).
    - Always set `--timeout`: a Job stops after 30 minutes by default, and judging runs at about 85 comparisons a minute with `--concurrency 12`.
    - Follow with `hf jobs logs <id>`. Check the end state with `hf jobs inspect <id>`: a timeout shows as `ERROR`, `Job timeout`.
    - If it stopped early, run the same command again: it reuses the checkpoints (every 500 comparisons). The leaderboard is printed at the end.

@@ -7,7 +7,7 @@ Everything runs on the Hugging Face Hub: the OCR models and the judge run as [Jo
 > [!NOTE]
 > ocr-bench is a proof of concept. Before 0.1.0, the CLI, the defaults and the results format can change. The way ocr-bench gets OCR outputs (step 2) is the part most likely to change. `share` needs ocr-bench 0.0.7 or later.
 
-**Before you start**
+## Before you start
 
 - Install the CLI with `uv tool install ocr-bench` (or run a single command with `uvx ocr-bench ...`). Use the latest release from [PyPI](https://pypi.org/project/ocr-bench/), and the same version in the Job commands below.
 - Jobs guides: [overview](https://huggingface.co/docs/hub/jobs-overview), [configuration](https://huggingface.co/docs/hub/jobs-configuration) (hardware flavors, timeout), [managing Jobs](https://huggingface.co/docs/hub/jobs-manage) (logs, cancel) and [pricing](https://huggingface.co/docs/hub/jobs-pricing). `hf jobs --help` lists the CLI commands; the [`hf` CLI guide](https://huggingface.co/docs/huggingface_hub/guides/cli) covers the rest.
@@ -79,6 +79,7 @@ ds.push_to_hub("<you>/my-pages", private=True)
 - **Slices.** `share` ranks a model in a slice only when the model has 10 or more judged pages in it. A failed page (`[OCR ERROR]`) does not count, so plan more than 10 pages for each slice you care about.
 - **Blank pages.** Add some known-blank pages on purpose, and label them (for example `page_type = blank`). Some models write text on blank pages: a description of the image, a stock phrase or another page's text. `audit --screen` counts this.
 - **Order does not matter.** `judge` visits the sample in a random order, so a sorted dataset is fine.
+- **Choose the pages up front.** Adding or replacing pages later means running every model again and a full re-judge: the judged pages are fingerprinted, and each model's output is matched to the pages by row. Adding a model later is cheap (see step 4).
 
 ## 2. Get OCR outputs
 
