@@ -242,6 +242,11 @@ def check_publish_order(api: HfApi, results_repo: str, revision: str | None) -> 
         commit = getattr(info, "last_commit", None)
         if commit is not None:
             last[info.path] = commit.oid
+    if "comparisons" not in last:
+        raise ShareError(
+            f"{results_repo} has no comparisons yet, so there is nothing to share. "
+            "Run `ocr-bench judge` first."
+        )
     missing = [folder for folder in RESULT_FOLDERS if folder not in last]
     if missing:
         raise ShareError(
@@ -282,7 +287,8 @@ def load_slice_values(metadata: dict, slice_column: str) -> list:
     The page fingerprint that judge stored covers the row ids and image bytes of
     the judged sample, so recomputing it on the reference config shows that row
     i is still the page judge compared. This reads every column of one config,
-    images included.
+    images included, or of every config when judge's merge has to be rebuilt
+    (see :func:`_as_judged`).
     """
     expected = metadata.get("source_fingerprint") or ""
     if not expected:
@@ -1062,6 +1068,12 @@ def push_share(
     parent, so it fails if another writer changed the repo in between.
     """
     check_plan(plan)
+    if dest.count("/") != 1 or not all(dest.split("/")):
+        # A bare name would be created under the token's namespace, then not found
+        # again under the bare name, leaving an empty repo behind.
+        raise ShareError(
+            f"Give the board repo as namespace/name (for example me/board), not {dest!r}."
+        )
     if dest.lower() in (results_repo.lower(), plan.source_dataset.lower()):
         raise ShareError(
             f"{dest} is the results repo or the source dataset. Share to a separate repo."

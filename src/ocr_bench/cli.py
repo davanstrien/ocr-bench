@@ -440,7 +440,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Source dataset column that labels each page (for example a document "
-            "type). Adds one board per label with 10 or more judged pages."
+            "type). Adds one board per label with 10 or more judged pages. The "
+            "column name and its labels are published as they are. Downloads the "
+            "judged source config, images included, to check the pages."
         ),
     )
     share.add_argument(
@@ -451,7 +453,7 @@ def build_parser() -> argparse.ArgumentParser:
     share.add_argument(
         "--output-dir",
         default=None,
-        help="Folder for --dry-run (default: ./ocr-bench-share-<alias>)",
+        help="Folder for --dry-run only (default: ./ocr-bench-share-<alias>)",
     )
     share.add_argument(
         "--public",

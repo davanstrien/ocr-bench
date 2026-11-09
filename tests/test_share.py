@@ -480,6 +480,10 @@ class TestPublishOrder:
         with pytest.raises(ShareError, match="did not finish publishing"):
             check_publish_order(FakeHistory(last), RESULTS, "c3")
 
+    def test_a_repo_with_no_comparisons_yet_says_so(self):
+        with pytest.raises(ShareError, match="no comparisons yet"):
+            check_publish_order(FakeHistory({"data": "c2", "metadata": "c3"}), RESULTS, "c3")
+
     def test_a_repo_without_the_judge_folders_is_refused(self):
         with pytest.raises(ShareError, match="last commit of the metadata folder"):
             check_publish_order(FakeHistory({"comparisons": "c1", "data": "c2"}), RESULTS, "c3")
@@ -874,6 +878,13 @@ class TestPush:
 
     def _push(self, api, dest="me/board", **kwargs):
         return push_share(self._plan(), dest, results_repo=RESULTS, api=api, **kwargs)
+
+    @pytest.mark.parametrize("dest", ["board", "me/", "/board", "a/b/c"])
+    def test_a_destination_without_a_namespace_is_refused(self, dest):
+        api = RecordingApi()
+        with pytest.raises(ShareError, match="namespace/name"):
+            self._push(api, dest=dest)
+        assert api.calls == []
 
     def test_a_failed_check_makes_no_hub_call(self):
         plan = self._plan()
