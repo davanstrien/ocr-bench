@@ -15,6 +15,7 @@ current behaviour.
   - A results repo whose earlier run judged only the first rows keeps those comparisons. The random order applies to the rows judged from now on.
   - The order uses its own random stream, derived from `--seed`. Reusing the stream that draws the sample would bias which pages come first.
   - The sample uses a private random generator. It used to seed Python's global random generator; the sample is the same.
+  - Which output is shown to the judge as A and which as B is still drawn at random, but in the new visiting order, so for a given seed it differs from earlier runs.
 
 - `audit --screen` also counts a counting list (`- 1`, `- 2`, `- 3`, …) as a loop: the last 2,000 characters of an output of 500 or more characters hold 50 or more numbers in a row that each count up by one, with the same text between each number and the next. Such a list does not compress, because each line has a new number, so the compression test missed it. In `--json`, these rows are listed under `loop.counting_rows`, and the thresholds include `counting_run`. Peer agreement leaves out these loops, as it does the others.
   - The same-text condition keeps real numbered lists with different entries (a membership roll, a coin catalogue, numbered verse, a list of plates) from being flagged. A real list of 50 or more numbered entries with the same text in each (`1 Ditto`, `2 Ditto`, …, or folio numbers with the same word between them) is still flagged; check such rows in `loop.counting_rows`.
