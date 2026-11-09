@@ -1348,8 +1348,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 "so its rank leaves out those pages."
             )
 
-    # The judged sample, for the text-cap warning and the coverage report.
-    # sample_indices is deterministic, so this matches the rows judged below.
+    # The judged sample: the text-cap warning, the fingerprints and the coverage
+    # report use it in this order. judge visits it in judging_order (below).
     judged_sample = sample_indices(len(ds), args.max_samples, args.seed)
     _warn_text_cap(ds, ocr_columns, judged_sample, args.max_ocr_text_len, normalize)
 
@@ -1370,9 +1370,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
     source_column_fingerprints: dict[str, str] = {}
     pair_provenance_hashes: dict[tuple[str, str], str] = {}
     if results_repo:
-        evaluated_indices = sample_indices(len(ds), args.max_samples, args.seed)
         source_fingerprint, source_column_fingerprints = evaluation_input_fingerprints(
-            ds, ocr_columns, evaluated_indices
+            ds, ocr_columns, judged_sample
         )
         from itertools import combinations as _provenance_pairs
 
@@ -1568,7 +1567,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
 
         # Visit the sample in a random order, so a budget or convergence stop
         # leaves a random subset of pages, not the end of a sorted dataset.
-        all_indices = judging_order(sample_indices(len(ds), args.max_samples, args.seed), args.seed)
+        all_indices = judging_order(judged_sample, args.seed)
         all_model_pairs = {
             _normalize_pair(model_a, model_b) for model_a, model_b in _combs(model_names, 2)
         }
@@ -1772,7 +1771,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
         comparisons = build_comparisons(
             ds,
             ocr_columns,
-            indices=judging_order(sample_indices(len(ds), args.max_samples, args.seed), args.seed),
+            indices=judging_order(judged_sample, args.seed),
             seed=args.seed,
             skip_samples=skip_samples,
             min_chars=args.min_chars,

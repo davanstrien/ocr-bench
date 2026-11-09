@@ -736,9 +736,14 @@ def judging_order(indices: list[int], seed: int = 42) -> list[int]:
     random subset of the sample.
 
     The sample itself, and so the fingerprints, does not change.
+
+    The shuffle uses its own random stream, derived from ``seed``. Reusing the
+    stream that drew the sample would correlate the two: in a 2-page sample of
+    128 sorted rows, the first page visited would fall in the upper half 75% of
+    the time, not 50%.
     """
     order = list(indices)
-    random.Random(seed).shuffle(order)
+    random.Random(f"judging-order:{seed}").shuffle(order)
     return order
 
 

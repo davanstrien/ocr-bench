@@ -1103,6 +1103,14 @@ class TestJudgingOrder:
         assert judging_order(indices, 42) == order
         assert judging_order(indices, 7) != order
 
+    def test_order_of_a_random_sample_has_no_position_bias(self):
+        # Sampling and ordering need separate random streams. With one shared
+        # seed, the first page visited in a 2-page sample of 128 sorted rows fell
+        # in the upper half 75% of the time.
+        seeds = range(4000)
+        upper = sum(judging_order(sample_indices(128, 2, seed), seed)[0] >= 64 for seed in seeds)
+        assert 0.46 < upper / len(seeds) < 0.54
+
     def test_does_not_change_its_input(self):
         indices = [3, 1, 2]
         judging_order(indices, 42)
