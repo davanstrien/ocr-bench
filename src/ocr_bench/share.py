@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -117,6 +118,7 @@ SETTINGS_KEYS = (
     "judged_at",
     "shared_at",
     "ocr_bench_version",
+    "repo",
 )
 SHARE_FILES = ("README.md", "overall.jsonl", "slices.jsonl", "board.json")
 # The results repo folders judge writes, in the order it pushes them.
@@ -126,6 +128,19 @@ LINE_BREAKS = "\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"
 # Markdown that could make a label render as a link, an image, HTML or code.
 MARKDOWN_SPECIAL = "\\`*_[]<>|"
 STATUSES = ("ranked", "degraded", "failed")
+# A model name that is a Hub repo id, with an optional " (label)" after it,
+# gets a link to the repo's model page.
+HUB_MODEL_ID = re.compile(r"(?P<repo>[A-Za-z0-9][\w.-]*/[\w.-]+)(?P<label> \([^()]+\))?")
+# What each judge criteria profile asks the judge to compare.
+CRITERIA_MEANING = {
+    "default": "all visible text counts, including headers, footers, marginalia and stamps",
+    "body-text": (
+        "the main text, headings, footnotes and captions count; running headers and page "
+        "numbers neither help nor hurt an output"
+    ),
+    "table-fidelity": "all visible text counts, and tables must keep their rows and columns",
+    "custom": "a custom prompt",
+}
 
 # A slice board needs as many pages as a resolved ranking does. A smaller slice
 # is left out, which also keeps a per-page column (a page id) from being published.
@@ -584,30 +599,48 @@ def _md(value: object) -> str:
     return "".join("\\" + char if char in MARKDOWN_SPECIAL else char for char in text)
 
 
+def _model_cell(name: str) -> str:
+    """The model name, linked to its Hub page when it is a Hub repo id."""
+    match = HUB_MODEL_ID.fullmatch(name)
+    if not match:
+        return _md(name)
+    repo = match["repo"]
+    return f"[{_md(repo)}](https://huggingface.co/{repo}){_md(match['label'] or '')}"
+
+
 def _table(rows: list[dict]) -> list[str]:
     lines = [
-        "| Rank | Model | Params | ELO | 95% CI | Pages | Wins | Losses | Ties |",
+        "| Rank | Model | Size | Rating | 95% interval | Pages | Wins | Losses | Ties |",
         "|---|---|---|---|---|---|---|---|---|",
     ]
     for row in rows:
         status = row.get("status", "ranked")
         if status == "failed":
             lines.append(
-                f"| — | {_md(row['model'])} | {row['params'] or ''} | FAILED | — | — | — | — | — |"
+                f"| — | {_model_cell(row['model'])} | {row['params'] or ''} | FAILED "
+                "| — | — | — | — | — |"
             )
             continue
         ci = f"{row['elo_low']}–{row['elo_high']}" if row.get("elo_low") is not None else "—"
         mark = " ⚠" if status == "degraded" else ""
         lines.append(
-            f"| {row['rank']} | {_md(row['model'])}{mark} | {row['params'] or ''} "
+            f"| {row['rank']} | {_model_cell(row['model'])}{mark} | {row['params'] or ''} "
             f"| {row['elo']} | {ci} | {row['pages']} | {row['wins']} | {row['losses']} "
             f"| {row['ties']} |"
         )
     return lines
 
 
+def _label(value: object) -> str:
+    """A slice label or column name as inline code, or escaped text if it holds a backtick."""
+    text = "".join(" " if char in LINE_BREAKS else char for char in str(value))
+    return _md(text) if "`" in text else f"`{text}`"
+
+
 def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict]) -> str:
     """The README of the share repo, rendered only from the checked rows and settings."""
+    repo = settings["repo"]
+    ranked = [row for row in overall_rows if row["status"] != "failed"]
     lines = [
         "---",
         "tags:",
@@ -623,65 +656,109 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
     lines += [
         "---",
         "",
-        f"# OCR board: {_md(settings['alias'])}",
+        f"# OCR leaderboard: {_md(settings['alias'])}",
         "",
-        "Pairwise VLM-as-judge ranking of OCR models on a private evaluation set. "
-        "This repo holds scores only: the pages, the OCR outputs and the judge's "
-        "reasons are not published.",
+        f"{len(ranked)} OCR models ranked on {settings['pages']} pages. For each page, a "
+        "vision-language model compared two transcriptions at a time and picked the more "
+        "faithful one. [ocr-bench](https://github.com/davanstrien/ocr-bench) ran the "
+        "comparisons and fitted the ratings. The pages, the transcriptions and the judge's "
+        "reasons stay private: this repo holds scores only.",
         "",
-        f"## Overall ({settings['pages']} pages)",
+        "**How to read it.** A higher rating is better; 1500 is the average rating on each "
+        "board. The 95% interval is where the rating stays when the pages are resampled: "
+        "models whose intervals overlap are not separated by this data. Pages is the number "
+        "of pages a model was compared on. Wins, losses and ties are raw counts that depend "
+        "on how often a model was compared, so compare ratings, not wins.",
+        "",
+        f"## All pages ({settings['pages']})",
         "",
         *_table(overall_rows),
     ]
-    if any(row["status"] == "degraded" for row in overall_rows):
+    degraded = [row for row in overall_rows if row["status"] == "degraded"]
+    if degraded:
+        counts = "; ".join(f"{_md(row['model'])}: {row['failed_outputs']}" for row in degraded)
         lines += [
             "",
-            "⚠ The model returned error placeholders on some pages. Those pages were "
-            "not judged for it, so its rank leaves them out.",
+            "⚠ marks a model that returned an error message (such as `[OCR ERROR]`) instead "
+            "of text on some pages. Those pages were skipped for it, so its rating rests on "
+            f"the pages in the Pages column. Error outputs: {counts}.",
         ]
+    if any(row["status"] == "failed" for row in overall_rows):
+        lines += ["", "FAILED: every output was an error message, so the model has no rating."]
     if slice_rows:
+        column = _label(settings["slice_column"])
         lines += [
             "",
-            f"## By {_md(settings['slice_column'])}",
+            f"## By {column}",
             "",
-            "Each board is fitted on the pages of one label only. Pages shows on how "
-            f"many of them each model is ranked. A model with fewer than {MIN_SLICE_PAGES} "
-            "pages in a slice is left out of its board.",
+            f"One board for each value of the {column} column, fitted only on the pages with "
+            f"that value. A model needs {MIN_SLICE_PAGES} of those pages to appear.",
         ]
         for name, pages in zip(settings["slices"], settings["slice_pages"], strict=True):
             rows = [row for row in slice_rows if row["slice"] == name]
-            lines += ["", f"### {_md(name)} ({pages} pages)", "", *_table(rows)]
+            lines += ["", f"### {_label(name)} (ranked on {pages} pages)", "", *_table(rows)]
         if settings["pages_not_in_a_slice_board"]:
             lines += [
                 "",
-                f"{settings['pages_not_in_a_slice_board']} judged pages are in no slice "
-                f"board: they have no label, their label has fewer than {MIN_SLICE_PAGES} "
-                "judged pages, or the models on them were not compared enough to rank.",
+                f"{settings['pages_not_in_a_slice_board']} pages are in none of these boards: "
+                f"no label, a label with fewer than {MIN_SLICE_PAGES} pages, or only "
+                "comparisons with models left out of that board.",
             ]
     judges = ", ".join(_md(name) for name in settings["judge_models"]) or "not recorded"
+    criteria = settings["criteria"]
+    meaning = CRITERIA_MEANING.get(criteria, "")
+    if settings.get("max_samples"):
+        sample = (
+            f"{settings['max_samples']} pages sampled (seed {settings['seed']}); "
+            f"{settings['pages']} had at least one comparison"
+        )
+    else:
+        sample = f"{settings['pages']} pages with at least one comparison"
     lines += [
         "",
-        "## Settings",
+        "## How this board was made",
         "",
-        f"- **Judge**: {judges}",
-        f"- **Judge criteria**: {_md(settings['criteria'])}",
-        f"- **Judge prompt hash**: `{settings['prompt_hash'] or 'not recorded'}`",
-        f"- **Judge text mode**: {settings['judge_text_mode']}",
-        f"- **OCR text cap**: {settings['max_ocr_text_len']} characters per output",
-        f"- **Judge image cap**: {settings['judge_image_dim']} px on the longer side",
-        f"- **Sample**: {settings['pages']} pages with comparisons "
-        f"(seed {settings['seed']}, at most {settings['max_samples']} pages)",
-        f"- **Comparisons**: {settings['comparisons']} "
-        f"({settings['auto_tied']} identical-output ties); adaptive strategy "
-        f"{settings['adaptive_strategy']}",
-        f"- **Method**: {settings['method']}",
-        f"- **Source fingerprint**: `{settings['source_fingerprint'] or 'not recorded'}` "
-        "(identifies the exact evaluation pages without publishing them)",
-        f"- **Judged**: {settings['judged_at']}; **shared**: {settings['shared_at']}",
+        f"- **Judge**: {judges}, with the `{_md(criteria)}` criteria"
+        + (f" ({meaning})" if meaning else ""),
+        f"- **Pages**: {sample}",
+        f"- **Comparisons**: {settings['comparisons']:,}; {settings['auto_tied']} pairs had "
+        "identical text and were tied without a judge call",
+        "- **Ratings**: a Bradley-Terry fit on an Elo-like scale; 95% intervals from "
+        "resampling pages",
+        f"- **Judged**: {str(settings['judged_at'])[:10] or 'not recorded'}",
         "",
-        "`load_dataset(repo)` gives the overall board"
-        + ('; `load_dataset(repo, "slices")` gives the slice boards.' if slice_rows else ".")
-        + " `board.json` has the settings.",
+        "The full settings (prompt hash, text and image caps, page-set fingerprint) are in "
+        "`board.json`.",
+        "",
+        "## Use the data",
+        "",
+        f'`load_dataset("{repo}")` gives the overall board'
+        + (
+            f'; `load_dataset("{repo}", "slices")` gives the boards by label.'
+            if slice_rows
+            else "."
+        ),
+        "",
+        "<details>",
+        "<summary>Query with DuckDB</summary>",
+        "",
+        "Each row is one model on one board. `elo` is the rating, and `elo_low` and "
+        "`elo_high` are its 95% interval.",
+        "",
+        "```sql",
+        f"SELECT rank, model, elo, elo_low, elo_high, pages "
+        f"FROM 'hf://datasets/{repo}/overall.jsonl' ORDER BY rank;",
+    ]
+    if slice_rows:
+        lines += [
+            "-- the top model for each label",
+            f"SELECT slice, model, elo, elo_low, elo_high "
+            f"FROM 'hf://datasets/{repo}/slices.jsonl' WHERE rank = 1 ORDER BY slice;",
+        ]
+    lines += [
+        "```",
+        "",
+        "</details>",
         "",
         f"*Generated by [ocr-bench](https://github.com/davanstrien/ocr-bench) "
         f"{settings['ocr_bench_version']}*",
@@ -775,12 +852,23 @@ def check_structure(files: dict[str, bytes], allowed: frozenset[str]) -> None:
         )
 
 
-def check_no_private_ids(files: dict[str, bytes], private_ids: Iterable[str]) -> None:
-    """Refuse when any file names the results repo or the source dataset."""
+def check_no_private_ids(
+    files: dict[str, bytes], private_ids: Iterable[str], board_repo: str = ""
+) -> None:
+    """Refuse when any file names the results repo or the source dataset.
+
+    The board's own repo id is removed first: it is the published repo name, and
+    a name such as ``me/scans-board`` contains a source id such as ``me/scans``.
+    """
     ids = [repo_id.lower() for repo_id in private_ids if repo_id]
     for path, data in files.items():
         for view in _file_views(path, data):
-            if any(repo_id in view.lower() for repo_id in ids):
+            text = view.lower()
+            if board_repo:
+                # Whole ids only: a board me/a must not hide a results repo me/a-results.
+                own = re.escape(board_repo.lower())
+                text = re.sub(rf"(?<![\w.-]){own}(?![\w.-])", " ", text)
+            if any(repo_id in text for repo_id in ids):
                 raise PrivacyError(
                     f"{path} names the results repo or the source dataset. Nothing was written."
                 )
@@ -843,11 +931,21 @@ def private_texts(comparisons: Iterable[ComparisonResult]) -> list[str]:
 def check_plan(plan: SharePlan) -> None:
     """All privacy checks, on the exact bytes that would be written."""
     check_structure(plan.files, plan.allowed_strings)
-    check_no_private_ids(plan.files, plan.private_ids)
+    check_no_private_ids(plan.files, plan.private_ids, plan.settings["repo"])
     check_no_page_text(plan.files, plan.private_texts)
 
 
 # --- plan and push -----------------------------------------------------------
+
+
+def _check_dest(dest: str) -> str:
+    if dest.count("/") != 1 or not all(dest.split("/")):
+        # A bare name would be created under the token's namespace, then not found
+        # again under the bare name, leaving an empty repo behind.
+        raise ShareError(
+            f"Give the board repo as namespace/name (for example me/board), not {dest!r}."
+        )
+    return dest
 
 
 def _check_alias(alias: str) -> str:
@@ -870,10 +968,23 @@ def plan_share(
     slice_column: str | None = None,
     slice_values: Callable[[dict, str], list] | None = None,
     now: str | None = None,
+    board_repo: str,
 ) -> SharePlan:
-    """Fit the boards, build the files and check them. Makes no Hub writes."""
+    """Fit the boards, build the files and check them. Makes no Hub writes.
+
+    ``board_repo`` is the repo the board is for. The card names it in its data
+    snippets, and ``push_share`` writes the plan to that repo only.
+    """
+    board_repo = _check_dest(board_repo)
     alias = _check_alias(alias)
     metadata = evaluation.metadata
+    if board_repo.lower() in (
+        results_repo.lower(),
+        str(metadata.get("source_dataset", "")).lower(),
+    ):
+        raise ShareError(
+            f"{board_repo} is the results repo or the source dataset. Share to a separate repo."
+        )
     models, failed_models = split_models(evaluation.leaderboard)
     comparisons = in_grid(evaluation.comparisons, models)
     if not comparisons:
@@ -948,6 +1059,7 @@ def plan_share(
         "judged_at": metadata.get("timestamp") or "",
         "shared_at": now or datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
         "ocr_bench_version": __version__,
+        "repo": board_repo,
     }
     allowed = frozenset(
         {
@@ -1068,15 +1180,14 @@ def push_share(
     parent, so it fails if another writer changed the repo in between.
     """
     check_plan(plan)
-    if dest.count("/") != 1 or not all(dest.split("/")):
-        # A bare name would be created under the token's namespace, then not found
-        # again under the bare name, leaving an empty repo behind.
-        raise ShareError(
-            f"Give the board repo as namespace/name (for example me/board), not {dest!r}."
-        )
+    _check_dest(dest)
     if dest.lower() in (results_repo.lower(), plan.source_dataset.lower()):
         raise ShareError(
             f"{dest} is the results repo or the source dataset. Share to a separate repo."
+        )
+    if plan.settings["repo"] != dest:
+        raise ShareError(
+            f"The board was built for {plan.settings['repo']}, not {dest}. Share again to {dest}."
         )
     api = api or HfApi()
     existing = _destination_files(api, dest, plan.alias, replace)

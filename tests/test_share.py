@@ -125,6 +125,7 @@ def _evaluation(results, models=MODELS, *, n_rows=None, failed_models=(), failed
 
 def _plan(evaluation, **kwargs):
     kwargs.setdefault("alias", "gov-scans-v1")
+    kwargs.setdefault("board_repo", "me/board")
     return plan_share(evaluation, results_repo=RESULTS, now=NOW, **kwargs)
 
 
@@ -256,6 +257,27 @@ class TestBoards:
         with pytest.raises(ShareError, match="won \\(or lost\\)"):
             _plan(_evaluation(results, ["org/a", "org/b"]))
 
+    def test_hub_model_ids_link_to_their_model_pages(self):
+        models = ["org/model-good", "tesseract-5", "org/model-x (tiled)"]
+        readme = _plan(_evaluation(_results(range(20), models), models)).files["README.md"].decode()
+        assert "[org/model-good](https://huggingface.co/org/model-good)" in readme
+        assert "huggingface.co/tesseract-5" not in readme
+        # A " (label)" suffix links the base repo and keeps the label as text.
+        assert "[org/model-x](https://huggingface.co/org/model-x) (tiled)" in readme
+
+    def test_error_outputs_are_counted_in_the_note(self):
+        evaluation = _evaluation(_results(range(20)), failed_outputs={"org/model-weak": 3})
+        readme = _plan(evaluation).files["README.md"].decode()
+        assert "⚠ marks a model" in readme
+        assert "Error outputs: org/model-weak: 3." in readme
+
+    def test_the_card_names_the_board_repo_in_its_data_snippets(self):
+        plan = _plan(_evaluation(_results(range(20))), board_repo="me/board")
+        readme = plan.files["README.md"].decode()
+        assert 'load_dataset("me/board")' in readme
+        assert "hf://datasets/me/board/overall.jsonl" in readme
+        assert plan.settings["repo"] == "me/board"
+
     @pytest.mark.parametrize(
         "alias", ["", "   ", "x" * 65, "two\nlines", "carriage\rreturn", "line\u2028separator"]
     )
@@ -384,8 +406,16 @@ class TestSlices:
         label = "[x](https://example.com)<img src=x>"
         plan = self._plan({label: range(0, 20), "forms": range(20, 40)})
         readme = plan.files["README.md"].decode()
-        assert "\\[x\\](https://example.com)\\<img src=x\\>" in readme
-        assert not re.search(r"(?<!\\)\[x|(?<!\\)<img", readme)  # no unescaped markup
+        # The label is inline code, where markdown and HTML do not render.
+        assert f"### `{label}` (ranked on" in readme
+        assert readme.count("<img src=x>") == readme.count(f"`{label}`")
+
+    def test_a_label_with_a_backtick_is_escaped_text(self):
+        label = "a`b<i>"
+        plan = self._plan({label: range(0, 20), "forms": range(20, 40)})
+        readme = plan.files["README.md"].decode()
+        assert "### a\\`b\\<i\\> (ranked on" in readme
+        assert not re.search(r"(?<!\\)<i>", readme)
 
     def test_comparisons_outside_the_drawn_sample_are_refused(self):
         drawn = sorted(sample_indices(100, 40, 42))
@@ -886,6 +916,38 @@ class TestPush:
             self._push(api, dest=dest)
         assert api.calls == []
 
+    def test_a_board_named_after_the_source_can_be_shared(self):
+        # The repo name is published anyway; only other mentions of the source count.
+        plan = _plan(_evaluation(_results(range(20))), board_repo=f"{SOURCE}-board")
+        assert f'load_dataset("{SOURCE}-board")' in plan.files["README.md"].decode()
+
+    def test_the_source_id_in_the_alias_is_still_refused_with_such_a_board(self):
+        with pytest.raises(PrivacyError, match="names the results repo or the source"):
+            _plan(_evaluation(_results(range(20))), board_repo=f"{SOURCE}-board", alias=SOURCE)
+
+    def test_a_board_id_inside_the_results_id_does_not_hide_it(self):
+        # Board me/private would otherwise mask me/private-results in the alias.
+        with pytest.raises(PrivacyError, match="names the results repo or the source"):
+            _plan(_evaluation(_results(range(20))), board_repo="me/private", alias=RESULTS)
+
+    @pytest.mark.parametrize("board_repo", [RESULTS, SOURCE.upper()])
+    def test_the_results_repo_or_source_as_board_is_refused_before_any_file(self, board_repo):
+        with pytest.raises(ShareError, match="is the results repo or the source dataset"):
+            _plan(_evaluation(_results(range(20))), board_repo=board_repo)
+
+    def test_a_board_built_for_another_repo_is_refused(self):
+        plan = plan_share(
+            _evaluation(_results(range(20))),
+            results_repo=RESULTS,
+            alias="gov-scans-v1",
+            now=NOW,
+            board_repo="me/other-board",
+        )
+        api = RecordingApi()
+        with pytest.raises(ShareError, match="built for me/other-board"):
+            push_share(plan, "me/board", results_repo=RESULTS, api=api)
+        assert api.calls == []
+
     def test_a_failed_check_makes_no_hub_call(self):
         plan = self._plan()
         plan.files["README.md"] += plan.private_texts[0].encode() * 3
@@ -1022,7 +1084,7 @@ class TestCli:
         out = tmp_path / "board"
         self._dry_run(monkeypatch, "v1", "--output-dir", str(out))
         assert sorted(p.name for p in out.iterdir()) == sorted(BOARD_FILES)
-        assert "# OCR board: v1" in (out / "README.md").read_text()
+        assert "# OCR leaderboard: v1" in (out / "README.md").read_text()
 
     def test_dry_run_with_slices_prints_and_writes_the_slice_boards(
         self, monkeypatch, tmp_path, capsys

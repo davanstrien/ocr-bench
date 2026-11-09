@@ -2267,6 +2267,7 @@ def cmd_share(args: argparse.Namespace) -> None:
         results_repo=args.results,
         alias=args.alias,
         slice_column=args.slice_column,
+        board_repo=args.dest,
     )
     _print_share_board(f"{plan.alias}: overall ({plan.settings['pages']} pages)", plan.overall_rows)
     for name in plan.settings["slices"]:
