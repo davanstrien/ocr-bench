@@ -1,0 +1,11 @@
+# Markdown lint and format, ruff-style: `uvx rumdl check` in CI, `uvx rumdl fmt` locally.
+[global]
+# Long lines are fine in prose; wrapping only adds diff noise.
+extend_disable = ["MD013"]
+# Frozen experiment reports: kept as they were written.
+exclude = ["experiments/**"]
+
+# Align table columns (off by default).
+[MD060]
+enabled = true
+style = "aligned"
