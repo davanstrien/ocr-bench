@@ -106,7 +106,7 @@ def evaluation_input_fingerprints(
     for column in ocr_columns:
         digest = hashlib.sha256()
         values = selected[column]
-        for source_idx, value in zip(indices, values):
+        for source_idx, value in zip(indices, values, strict=True):
             _hash_value(digest, source_idx)
             _hash_value(digest, value)
         column_fingerprints[column] = digest.hexdigest()
@@ -245,7 +245,7 @@ def alignment_keys_identify_rows(ds: Dataset, keys: list[str]) -> bool:
         return False
     columns = [ds[key] for key in keys]
     identities: list[tuple[object, ...]] = []
-    for values in zip(*columns):
+    for values in zip(*columns, strict=True):
         if all(_alignment_value_missing(value) for value in values):
             return False
         identities.append(tuple(_alignment_value_key(value) for value in values))
@@ -453,9 +453,7 @@ def discover_pr_configs(
             newest[config] = disc.num
         else:
             older, newer = sorted((newest[config], disc.num))
-            logger.warning(
-                "duplicate_pr_config", config=config, using_pr=newer, ignoring_pr=older
-            )
+            logger.warning("duplicate_pr_config", config=config, using_pr=newer, ignoring_pr=older)
             newest[config] = newer
             older_prs.setdefault(config, []).append(older)
 
@@ -571,7 +569,7 @@ def _find_image_mismatch(reference: list[str] | None, other: Dataset) -> int | N
         return None
     if sorted(reference) != sorted(fingerprints):
         return "unverified"
-    return next(i for i, (a, b) in enumerate(zip(reference, fingerprints)) if a != b)
+    return next(i for i, (a, b) in enumerate(zip(reference, fingerprints, strict=True)) if a != b)
 
 
 def check_config_alignment(loaded: list[LoadedConfig]) -> AlignmentResult:

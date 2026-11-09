@@ -403,9 +403,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --- publish subcommand ---
     publish = sub.add_parser("publish", help="Deploy results viewer as a Hugging Face Space")
     publish.add_argument("results", help="HF results dataset repo id to view in the Space")
-    publish.add_argument(
-        "--space", default=None, help="Space repo id (default: {results}-viewer)"
-    )
+    publish.add_argument("--space", default=None, help="Space repo id (default: {results}-viewer)")
     publish.add_argument("--private", action="store_true", help="Make the Space private")
 
     # --- bench subcommand (run → judge → view in one shot) ---
@@ -571,9 +569,7 @@ def _decisions_for_board(
     """Classify the board's adjacent pairs under the selected stopping rule."""
     return classify_adjacent_pairs(
         board,
-        comparison_pair_counts(
-            comparisons if comparisons is not None else board.comparison_log
-        ),
+        comparison_pair_counts(comparisons if comparisons is not None else board.comparison_log),
         size_tie_ratio=size_tie_ratio,
         size_tie_min_samples=size_tie_min_samples,
         parameter_counts=model_parameter_counts(),
@@ -721,9 +717,7 @@ def _warn_text_cap(
     The suggested cap comes from the ``audit --screen`` checks, run on the
     judged sample. This only prints; the run keeps ``max_ocr_text_len``.
     """
-    exposure = truncation_exposure(
-        ds, ocr_columns, indices, max_ocr_text_len, normalize=normalize
-    )
+    exposure = truncation_exposure(ds, ocr_columns, indices, max_ocr_text_len, normalize=normalize)
     if not exposure.warn:
         return
     console.print(
@@ -764,9 +758,7 @@ def _warn_text_cap(
     )
 
 
-def _merge_auto_ties(
-    comparisons: list[Comparison], judged: list[dict]
-) -> list[dict]:
+def _merge_auto_ties(comparisons: list[Comparison], judged: list[dict]) -> list[dict]:
     """Interleave judge outputs with pre-decided auto-ties, in original order.
 
     ``judged`` holds one result per comparison whose ``auto_result`` is None
@@ -813,7 +805,7 @@ def _convert_results(
 ) -> list[ComparisonResult]:
     """Convert judged comparisons + aggregated outputs into ComparisonResult list."""
     results: list[ComparisonResult] = []
-    for comp, result in zip(comparisons, aggregated):
+    for comp, result in zip(comparisons, aggregated, strict=True):
         # Skip failures: empty dict (single judge failed) and 0/0 "ties"
         # (every judge in a jury failed) — neither is a real verdict.
         if not result or result.get("agreement") == "0/0":
@@ -1053,9 +1045,7 @@ def _resolve_criteria(args: argparse.Namespace) -> tuple[str, str, str]:
     criteria = getattr(args, "criteria", None)
     criteria_file = getattr(args, "criteria_file", None)
     if criteria_file and criteria is not None:
-        raise DatasetError(
-            "--criteria and --criteria-file are mutually exclusive; pass only one"
-        )
+        raise DatasetError("--criteria and --criteria-file are mutually exclusive; pass only one")
     if criteria_file:
         try:
             template = Path(criteria_file).read_text(encoding="utf-8")
@@ -1336,9 +1326,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
     # Partial failures remain rankable on their successful outputs with a
     # degraded warning, while the audit still blocks rates over its threshold.
     failed_models = sorted(
-        stat.model
-        for stat in model_stats
-        if stat.n_rows > 0 and stat.n_sentinel == stat.n_rows
+        stat.model for stat in model_stats if stat.n_rows > 0 and stat.n_sentinel == stat.n_rows
     )
     for stat in model_stats:
         if stat.sentinel_rate > SENTINEL_FLAG_RATE:
@@ -1397,9 +1385,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     column: source_column_fingerprints[column] for column in pair
                 },
                 source_columns={column: ocr_columns[column] for column in pair},
-                source_output_columns={
-                    column: source_output_columns[column] for column in pair
-                },
+                source_output_columns={column: source_output_columns[column] for column in pair},
                 judge_specs=model_specs,
                 seed=args.seed,
                 max_samples=requested_max_samples,
@@ -1504,9 +1490,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 if expected is None or result.provenance_hash != expected:
                     mismatched.append(result)
             if mismatched:
-                recorded = ", ".join(
-                    sorted({result.provenance_hash[:12] for result in mismatched})
-                )
+                recorded = ", ".join(sorted({result.provenance_hash[:12] for result in mismatched}))
                 console.print(
                     f"[red]Error:[/red] resume provenance mismatch for "
                     f"[bold]{results_repo}[/bold] — existing comparison hash(es) "
@@ -1521,9 +1505,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
             if existing_results:
                 skip_samples = {}
                 for r in existing_results:
-                    skip_samples.setdefault(
-                        _normalize_pair(r.model_a, r.model_b), set()
-                    ).add(r.sample_idx)
+                    skip_samples.setdefault(_normalize_pair(r.model_a, r.model_b), set()).add(
+                        r.sample_idx
+                    )
                 console.print(
                     f"\nIncremental mode: {len(existing_results)} reusable existing "
                     f"comparisons across {len(skip_samples)} model pairs — skipping "
@@ -1583,8 +1567,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
 
         all_indices = sample_indices(len(ds), args.max_samples, args.seed)
         all_model_pairs = {
-            _normalize_pair(model_a, model_b)
-            for model_a, model_b in _combs(model_names, 2)
+            _normalize_pair(model_a, model_b) for model_a, model_b in _combs(model_names, 2)
         }
         n_pairs = len(all_model_pairs)
         batch_samples = 5
@@ -1609,17 +1592,13 @@ def cmd_judge(args: argparse.Namespace) -> None:
         # a first board, so it never starts from a disconnected sparse graph.
         active_pairs: set[tuple[str, str]] | None = None
         existing_models = {
-            model
-            for result in existing_results
-            for model in (result.model_a, result.model_b)
+            model for result in existing_results for model in (result.model_a, result.model_b)
         }
         existing_pair_counts = comparison_pair_counts(existing_results)
         missing_pair_evidence = {
             pair for pair in all_model_pairs if existing_pair_counts.get(pair, 0) == 0
         }
-        can_resume_targeted = (
-            existing_models == current_models and not missing_pair_evidence
-        )
+        can_resume_targeted = existing_models == current_models and not missing_pair_evidence
         if (
             adaptive_strategy == "targeted"
             and len(existing_results) >= min_before_check
@@ -1648,11 +1627,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     "stopping criteria.[/green]"
                 )
                 all_indices = []
-        elif (
-            adaptive_strategy == "targeted"
-            and existing_results
-            and not can_resume_targeted
-        ):
+        elif adaptive_strategy == "targeted" and existing_results and not can_resume_targeted:
             missing = sorted(current_models - existing_models)
             reason = (
                 f"new models: {', '.join(missing)}"
@@ -1786,9 +1761,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
         judged_valid = len(new_results) - n_auto_total
         console.print(f"\n{judged_valid}/{total_comparisons} valid comparisons")
         if n_auto_total:
-            console.print(
-                f"[dim]{n_auto_total} identical outputs auto-tied (no judge call)[/dim]"
-            )
+            console.print(f"[dim]{n_auto_total} identical outputs auto-tied (no judge call)[/dim]")
     else:
         # --- Standard single-pass flow ---
         comparisons = build_comparisons(
@@ -1924,9 +1897,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
         judged_valid = len(new_results) - n_auto_total
         console.print(f"\n{judged_valid}/{total_comparisons} valid comparisons")
         if n_auto_total:
-            console.print(
-                f"[dim]{n_auto_total} identical outputs auto-tied (no judge call)[/dim]"
-            )
+            console.print(f"[dim]{n_auto_total} identical outputs auto-tied (no judge call)[/dim]")
 
     # No new verdicts and nothing already on file → don't publish an empty
     # (all-1500 ELO) board. The standard path guards before judging; this also
@@ -1934,9 +1905,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
     # aggressive --min-chars on a blank-heavy dataset) or a budget so small
     # everything was trimmed. Budget-exhausted WITH results still publishes.
     if not new_results and not existing_results:
-        console.print(
-            "[yellow]No valid comparisons — check that OCR columns have text.[/yellow]"
-        )
+        console.print("[yellow]No valid comparisons — check that OCR columns have text.[/yellow]")
         return
 
     # A run that lands EXACTLY on the budget (e.g. the final batch fills it, or a
@@ -2575,9 +2544,7 @@ def _print_screen(screen: ScreenReport) -> None:
     )
     suggested = screen.suggested_max_ocr_text_len
     if suggested is None:
-        console.print(
-            f"Text cap: --max-ocr-text-len {screen.max_ocr_text_len} fits all of them."
-        )
+        console.print(f"Text cap: --max-ocr-text-len {screen.max_ocr_text_len} fits all of them.")
     else:
         console.print(
             f"[yellow]Text cap:[/yellow] --max-ocr-text-len {screen.max_ocr_text_len} "

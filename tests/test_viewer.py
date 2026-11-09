@@ -200,9 +200,7 @@ class TestImageLoaderUsesJudgedConfigs:
         mock_discover.return_value = (["dots-ocr"], {"dots-ocr": "refs/pr/22"})
         mock_load.side_effect = [self._probe(), [{"image": "page"}]]
 
-        loader = ImageLoader(
-            "user/source", from_prs=True, source_configs=["glm-ocr", "dots-ocr"]
-        )
+        loader = ImageLoader("user/source", from_prs=True, source_configs=["glm-ocr", "dots-ocr"])
         assert loader.get(4) == "page"
 
         assert mock_discover.call_args.kwargs["only"] == ["glm-ocr", "dots-ocr"]

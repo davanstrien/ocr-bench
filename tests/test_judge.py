@@ -198,9 +198,7 @@ class TestNormalizeForJudge:
         assert out == "Before\nAfter"
 
     def test_template_content_suppressed(self):
-        out = normalize_for_judge(
-            "<p>Before</p><template><td>hidden</td></template><p>After</p>"
-        )
+        out = normalize_for_judge("<p>Before</p><template><td>hidden</td></template><p>After</p>")
         assert out == "Before\nAfter"
 
     # --- Fix 3: never-raises honours non-str input ---
@@ -524,7 +522,7 @@ class TestParseJudgeOutput:
         result = parse_judge_output('{"winner": "C", "reason": "confused"}')
         assert result == {}
 
-    @pytest.mark.parametrize("text", ['{}', '{"reason": "unsure"}'])
+    @pytest.mark.parametrize("text", ["{}", '{"reason": "unsure"}'])
     def test_missing_winner_returns_empty(self, text):
         assert parse_judge_output(text) == {}
 
@@ -826,9 +824,7 @@ class TestBuildComparisons:
         ]
         ocr_columns = {"col_a": "ModelA", "col_b": "ModelB"}
         # Skip in reverse pair order.
-        comps = build_comparisons(
-            ds, ocr_columns, skip_samples={("ModelB", "ModelA"): {0}}
-        )
+        comps = build_comparisons(ds, ocr_columns, skip_samples={("ModelB", "ModelA"): {0}})
         assert len(comps) == 0
 
     def test_skip_samples_tops_up_unjudged_samples(self):
@@ -919,9 +915,7 @@ class TestBuildComparisons:
         from unittest.mock import patch
 
         with patch("ocr_bench.judge.image_to_base64") as mock_img:
-            build_comparisons(
-                ds, ocr_columns, skip_samples={("ModelA", "ModelB"): {0}}
-            )
+            build_comparisons(ds, ocr_columns, skip_samples={("ModelA", "ModelB"): {0}})
             mock_img.assert_not_called()
 
     def test_truncation_flags_default_false(self):
@@ -956,9 +950,7 @@ class TestBuildComparisons:
             },
         ]
         with patch("ocr_bench.judge.image_to_base64", return_value="b64") as mock_img:
-            build_comparisons(
-                ds, {"col_a": "A", "col_b": "B"}, judge_image_dim=1536, min_chars=0
-            )
+            build_comparisons(ds, {"col_a": "A", "col_b": "B"}, judge_image_dim=1536, min_chars=0)
             mock_img.assert_called_once()
             assert mock_img.call_args.kwargs["max_dim"] == 1536
 
@@ -1004,9 +996,7 @@ class TestBlankPairFiltering:
         assert comps[0].auto_result is None
 
     def test_both_long_distinct_kept_for_judging(self):
-        comps = build_comparisons(
-            self._ds(self.LONG_A, self.LONG_B), {"col_a": "A", "col_b": "B"}
-        )
+        comps = build_comparisons(self._ds(self.LONG_A, self.LONG_B), {"col_a": "A", "col_b": "B"})
         assert len(comps) == 1
         assert comps[0].auto_result is None
         assert comps[0].messages  # image + prompt built
@@ -1050,9 +1040,7 @@ class TestAutoTie:
         from unittest.mock import patch
 
         with patch("ocr_bench.judge.image_to_base64") as mock_img:
-            comps = build_comparisons(
-                self._ds(self.LONG, self.LONG), {"col_a": "A", "col_b": "B"}
-            )
+            comps = build_comparisons(self._ds(self.LONG, self.LONG), {"col_a": "A", "col_b": "B"})
             mock_img.assert_not_called()
         assert comps[0].auto_result is not None
 

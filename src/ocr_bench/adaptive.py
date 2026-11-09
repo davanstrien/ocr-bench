@@ -6,6 +6,7 @@ import re
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from itertools import pairwise
 from typing import Literal, cast
 
 from ocr_bench.elo import Leaderboard
@@ -99,7 +100,7 @@ def classify_adjacent_pairs(
     decisions: list[AdjacentPairDecision] = []
     ranked = board.ranked
 
-    for (higher_model, _), (lower_model, _) in zip(ranked, ranked[1:]):
+    for (higher_model, _), (lower_model, _) in pairwise(ranked):
         pair = normalize_model_pair(higher_model, lower_model)
         direct = pair_counts.get(pair, 0)
         higher_ci = board.elo_ci.get(higher_model)

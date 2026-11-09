@@ -54,9 +54,7 @@ class TestComputeColumnStats:
     def test_normalized_mode_measures_content_not_html_markup(self):
         html = "<table><tr><td>alpha</td><td>beta</td></tr></table>"
         normalized = compute_column_stats("cfg", "m", [html], max_ocr_text_len=20)
-        raw = compute_column_stats(
-            "cfg", "m", [html], max_ocr_text_len=20, normalize=False
-        )
+        raw = compute_column_stats("cfg", "m", [html], max_ocr_text_len=20, normalize=False)
         assert normalized.max_len == len("alpha | beta")
         assert normalized.n_over_max == 0
         assert raw.max_len == len(html)
@@ -256,7 +254,9 @@ class TestAuditRepo:
         mock_pr.return_value = ([], {})
         mock_main.return_value = ["cfg_a", "cfg_b", "cfg_c"]
         no_text = LoadedConfig(
-            config="cfg_c", model_id="model-c", ds=Dataset.from_dict({"inference_info": ["{}"]}),
+            config="cfg_c",
+            model_id="model-c",
+            ds=Dataset.from_dict({"inference_info": ["{}"]}),
             text_col=None,
         )
         mock_load.return_value = [
@@ -449,8 +449,7 @@ _PAGES = [
 
 def _three_configs(names=("cfg_a", "cfg_b", "cfg_c")):
     return [
-        _loaded_config(name, f"model-{name}", list(_PAGES), {"b_number": [1, 2]})
-        for name in names
+        _loaded_config(name, f"model-{name}", list(_PAGES), {"b_number": [1, 2]}) for name in names
     ]
 
 
@@ -574,9 +573,7 @@ class TestAuditScreen:
         mock_main.return_value = ["cfg_a", "cfg_b", "cfg_c"]
         loaded = _three_configs(("cfg_a", "cfg_b"))
         loaded.append(
-            _loaded_config(
-                "cfg_c", "model-c", ["[OCR ERROR]", "[OCR ERROR]"], {"b_number": [1, 2]}
-            )
+            _loaded_config("cfg_c", "model-c", ["[OCR ERROR]", "[OCR ERROR]"], {"b_number": [1, 2]})
         )
         mock_load.return_value = loaded
         report = audit_repo("user/repo", screen=True)
