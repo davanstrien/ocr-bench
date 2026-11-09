@@ -152,7 +152,7 @@ ocr-bench share <you>/my-pages-results <you>/my-ocr-board \
 - The board has the overall ranking, one board per slice label, the judge settings and a fingerprint of the page set. It has no page text, OCR outputs, judge reasons, page ids, or the names of your repos. `--alias` is the public name of your page set.
 - Before it writes anything, `share` checks the final files: only allowed columns and values, and no fragment of any compared output or judge reason. If a check fails, nothing is written.
 - Use a new or empty repo for the board. `share` refuses a repo with files that it did not write, and a repo with the board of another alias unless you pass `--replace`.
-- A missing board repo is created private, so you can look at the board on the Hub first. `share` then prints the command that publishes it:
+- A missing board repo is created private, so you can look at the board on the Hub first. To publish it, use **Settings → Change visibility** on the repo page, or, with the `hf` CLI 2.0 or later:
 
   ```bash
   hf repos settings <you>/my-ocr-board --repo-type dataset --public
