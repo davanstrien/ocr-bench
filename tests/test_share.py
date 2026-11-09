@@ -363,6 +363,20 @@ class TestBoards:
         readme = _plan(evaluation).files["README.md"].decode()
         assert "- **Pages**: 20 pages with at least one comparison\n" in readme
 
+    def test_the_judge_line_links_the_prompts_at_the_share_version(self):
+        plan = _plan(_evaluation(_results(range(20))))
+        version = plan.settings["ocr_bench_version"]
+        url = f"https://github.com/davanstrien/ocr-bench/blob/v{version}/src/ocr_bench/judge.py"
+        assert f"[the prompts in ocr-bench {version}]({url})" in plan.files["README.md"].decode()
+
+    def test_a_custom_prompt_has_no_prompts_link(self):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata["criteria"] = "custom:my-rubric.txt"
+        readme = _plan(evaluation).files["README.md"].decode()
+        assert "with a custom prompt" in readme
+        assert "judge.py" not in readme
+        assert "my-rubric" not in readme
+
     def test_error_outputs_are_counted_in_the_note(self):
         evaluation = _evaluation(_results(range(20)), failed_outputs={"org/model-weak": 3})
         readme = _plan(evaluation).files["README.md"].decode()
@@ -390,6 +404,18 @@ class TestSlices:
         results = results or _results(pages or range(40))
         evaluation = _evaluation(results, n_rows=n_rows, **kwargs)
         return _plan(evaluation, slice_column="doc_type", slice_values=lambda m, c: values)
+
+    def test_hub_sizes_also_fill_the_slice_boards(self):
+        values = _labels(40, {"letters": range(0, 20), "forms": range(20, 40)})
+        evaluation = _evaluation(_results(range(40)), n_rows=40)
+        plan = _plan(
+            evaluation,
+            slice_column="doc_type",
+            slice_values=lambda m, c: values,
+            model_sizes=lambda names: dict.fromkeys(names, "1.2B"),
+        )
+        assert plan.slice_rows
+        assert all(row["params"] == "1.2B" for row in plan.slice_rows)
 
     def test_one_board_per_label_with_enough_pages(self):
         plan = self._plan({"letters": range(0, 15), "forms": range(15, 30), "maps": range(30, 33)})
