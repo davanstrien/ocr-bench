@@ -37,6 +37,7 @@ import structlog
 from datasets import Image, load_dataset
 from huggingface_hub import CommitOperationAdd, CommitOperationDelete, DatasetCard, HfApi
 from huggingface_hub.errors import RepositoryNotFoundError
+from huggingface_hub.utils import HFValidationError, validate_repo_id
 
 from ocr_bench import __version__
 from ocr_bench.dataset import (
@@ -133,26 +134,6 @@ STATUSES = ("ranked", "degraded", "failed")
 # gets a link to the repo's model page.
 REPO_ID = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}/[A-Za-z0-9][A-Za-z0-9_.-]{0,95}"
 HUB_MODEL_ID = re.compile(rf"(?P<repo>{REPO_ID})(?P<label> \([^()]+\))?")
-# A board repo id: the characters a Hub repo id may hold, so it is safe in the card.
-BOARD_REPO_ID = re.compile(REPO_ID)
-# What each judge criteria profile asks the judge to compare.
-CRITERIA_MEANING = {
-    "default": (
-        "In order: no invented text, then completeness (all visible text, including "
-        "headers, footers, marginalia and stamps), then accuracy, reading order and "
-        "formatting."
-    ),
-    "body-text": (
-        "In order: no invented text, then completeness (the main text, headings, "
-        "footnotes and captions; running headers and page numbers neither help nor "
-        "hurt), then accuracy, reading order and formatting."
-    ),
-    "table-fidelity": (
-        "In order: no invented text, then completeness (all visible text), table "
-        "structure, accuracy and reading order."
-    ),
-    "custom": "A custom prompt.",
-}
 
 # A slice board needs as many pages as a resolved ranking does. A smaller slice
 # is left out, which also keeps a per-page column (a page id) from being published.
@@ -454,8 +435,9 @@ def _format_size(total: int) -> str:
 def hub_model_sizes(models: Iterable[str], api: HfApi | None = None) -> dict[str, str]:
     """Sizes from the Hub's safetensors metadata, for model names that are repo ids.
 
-    A name with a " (label)" after the id uses the id. A model that is not on the
-    Hub, is gated, has no safetensors files, or cannot be read gets no size.
+    A name with a " (label)" after the id uses the id. Only public repos are read.
+    A model that is not on the Hub, is private or gated, has no safetensors files,
+    or cannot be read gets no size.
     """
     api = api or HfApi()
     sizes: dict[str, str] = {}
@@ -464,7 +446,8 @@ def hub_model_sizes(models: Iterable[str], api: HfApi | None = None) -> dict[str
         if not match:
             continue
         try:
-            info = api.model_info(match["repo"], expand=["safetensors"])
+            # No token: a private model's size is not published.
+            info = api.model_info(match["repo"], expand=["safetensors"], token=False)
         except Exception as error:  # an optional column: never stop a share for it
             logger.info("share.size_not_found", model=name, error=type(error).__name__)
             continue
@@ -474,9 +457,9 @@ def hub_model_sizes(models: Iterable[str], api: HfApi | None = None) -> dict[str
 
 
 def _fill_sizes(rows: list[dict], sizes: dict[str, str]) -> None:
+    """The Hub's count where there is one, so every size is measured the same way."""
     for row in rows:
-        if not row["params"]:
-            row["params"] = sizes.get(row["model"])
+        row["params"] = sizes.get(row["model"]) or row["params"]
 
 
 def _overall_rows(board: Leaderboard, failed_models: list[str], failed_outputs: dict) -> list[dict]:
@@ -717,6 +700,8 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         "**How to read it.** A higher rating is better; 1500 is the average rating on each "
         "board. The 95% interval is where the rating stays when the pages are resampled: "
         "when two intervals overlap, this data does not clearly separate those models. "
+        "Size is the parameter count the Hub reports for the model's weights, where it "
+        "has one (all experts, for a mixture-of-experts model). "
         "Pages is the number of pages a model was compared on. Wins, losses and ties are "
         "raw counts that depend on how often a model was compared, so compare ratings, "
         "not wins.",
@@ -732,7 +717,7 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
             "",
             "⚠ marks a model that returned an error message (such as `[OCR ERROR]`) instead "
             "of text on some pages. Those pages were skipped for it, so its rating rests on "
-            f"the pages in the Pages column. Error outputs in the sample: {counts}.",
+            f"the pages in the Pages column. Error outputs in the source dataset: {counts}.",
         ]
     if any(row["status"] == "failed" for row in overall_rows):
         lines += ["", "FAILED: every output was an error message, so the model has no rating."]
@@ -758,7 +743,18 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
             ]
     judges = ", ".join(_md(name) for name in settings["judge_models"]) or "not recorded"
     criteria = settings["criteria"]
-    meaning = CRITERIA_MEANING.get(criteria, "")
+    if criteria == "custom":
+        judge_line = f"- **Judge**: {judges}, with a custom prompt"
+    else:
+        # A link, not a paraphrase: judge reasons echo the prompt's wording, and the
+        # page-text check refuses a card that repeats them.
+        prompts = (
+            "https://github.com/davanstrien/ocr-bench/blob/"
+            f"v{settings['ocr_bench_version']}/src/ocr_bench/judge.py"
+        )
+        judge_line = (
+            f"- **Judge**: {judges}, with the `{_md(criteria)}` criteria ([the prompts]({prompts}))"
+        )
     if settings["sampled_pages"]:
         sample = (
             f"{settings['sampled_pages']} pages sampled (seed {settings['seed']}); "
@@ -775,9 +771,9 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         "",
         "## How this board was made",
         "",
-        f"- **Judge**: {judges}, `{_md(criteria)}` criteria." + (f" {meaning}" if meaning else ""),
+        judge_line,
         f"- **Pages**: {sample}",
-        f"- **Comparisons**: {settings['comparisons']:,}; {settings['auto_tied']} pairs had "
+        f"- **Comparisons**: {settings['comparisons']:,}; {settings['auto_tied']} of them had "
         "identical text and were tied without a judge call",
         "- **Ratings**: a Bradley-Terry fit on an Elo-like scale; 95% intervals from "
         "resampling pages",
@@ -1014,8 +1010,13 @@ def check_plan(plan: SharePlan) -> None:
 def _check_dest(dest: str) -> str:
     # A bare name would be created under the token's namespace, then not found again
     # under the bare name, leaving an empty repo behind. The card shows the id, so it
-    # must hold only the characters of a Hub repo id.
-    if not BOARD_REPO_ID.fullmatch(dest):
+    # must be a valid Hub repo id; validate_repo_id lets a trailing newline through.
+    try:
+        validate_repo_id(dest)
+        valid = dest.count("/") == 1 and dest == dest.strip()
+    except HFValidationError:
+        valid = False
+    if not valid:
         raise ShareError(
             f"Give the board repo as namespace/name (for example me/board), not {dest!r}."
         )
@@ -1060,8 +1061,8 @@ def plan_share(
 
     ``board_repo`` is the repo the board is for. The card names it in its data
     snippets, and ``push_share`` writes the plan to that repo only.
-    ``model_sizes`` gives sizes for the models the built-in registry does not
-    know (the CLI passes ``hub_model_sizes``).
+    ``model_sizes`` gives each model's size (the CLI passes ``hub_model_sizes``).
+    A model it gives no size for keeps the built-in registry's size, if any.
     """
     board_repo = _check_dest(board_repo)
     alias = _check_alias(alias)
@@ -1120,9 +1121,8 @@ def plan_share(
             slice_pages.append(len(ranked_pages))
             not_in_a_slice += len(pages) - len(ranked_pages)
 
-    unknown = sorted({row["model"] for row in overall_rows if not row["params"]})
-    if model_sizes and unknown:
-        sizes = model_sizes(unknown)
+    if model_sizes:
+        sizes = model_sizes(sorted({row["model"] for row in overall_rows}))
         _fill_sizes(overall_rows, sizes)
         _fill_sizes(slice_rows, sizes)
 

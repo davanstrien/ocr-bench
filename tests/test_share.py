@@ -283,8 +283,19 @@ class TestBoards:
         by_model = {row["model"]: row["params"] for row in plan.overall_rows}
         assert by_model["org/model-good"] == "0.85B"
         assert by_model["org/model-x (tiled)"] == "3.3B"
-        assert "tesseract-5" not in asked  # the registry gives it n/a
+        assert by_model["tesseract-5"] == "n/a"  # no Hub size: the registry's stays
+        assert sorted(asked) == sorted(models)
         assert "| 0.85B |" in plan.files["README.md"].decode()
+
+    def test_the_hub_size_replaces_the_registry_size(self):
+        models = ["zai-org/GLM-OCR", "org/model-weak"]  # the registry says 0.9B for GLM-OCR
+        plan = _plan(
+            _evaluation(_results(range(20), models), models),
+            model_sizes=lambda names: {"zai-org/GLM-OCR": "1.3B"},
+        )
+        assert {row["model"]: row["params"] for row in plan.overall_rows}[
+            "zai-org/GLM-OCR"
+        ] == "1.3B"
 
     @pytest.mark.parametrize(
         ("total", "shown"),
@@ -302,7 +313,8 @@ class TestBoards:
 
     def test_hub_sizes_skip_models_the_hub_cannot_give(self):
         class Api:
-            def model_info(self, repo, expand=None):
+            def model_info(self, repo, expand=None, token=None):
+                assert token is False  # only public repos are read
                 if repo == "org/gone":
                     raise RepositoryNotFoundError("gone")
                 safetensors = (
@@ -355,7 +367,7 @@ class TestBoards:
         evaluation = _evaluation(_results(range(20)), failed_outputs={"org/model-weak": 3})
         readme = _plan(evaluation).files["README.md"].decode()
         assert "⚠ marks a model" in readme
-        assert "Error outputs in the sample: org/model-weak: 3." in readme
+        assert "Error outputs in the source dataset: org/model-weak: 3." in readme
 
     def test_the_card_names_the_board_repo_in_its_data_snippets(self):
         plan = _plan(_evaluation(_results(range(20))), board_repo="me/board")
@@ -1037,7 +1049,16 @@ class TestPush:
             _plan(_evaluation(_results(range(20))), board_repo="public/me", alias=alias)
 
     @pytest.mark.parametrize(
-        "board_repo", ["me/board`<img src=x>`", "me/bo\nard", "me/bo ard", "me/börd", "-me/board"]
+        "board_repo",
+        [
+            "me/board`<img src=x>`",
+            "me/bo\nard",
+            "me/bo ard",
+            "me/board\n",
+            "board",
+            "me/a--b",
+            "-me/board",
+        ],
     )
     def test_a_board_repo_that_is_not_a_hub_id_is_refused(self, board_repo):
         with pytest.raises(ShareError, match="namespace/name"):
