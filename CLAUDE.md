@@ -10,19 +10,19 @@ Inspired by [Datalab's Benchmarks + Evals](https://www.datalab.to/blog/datalab-b
 
 ## Architecture
 
-| Module | What it does |
-|--------|-------------|
-| `elo.py` | Bradley-Terry MLE via scipy, page-level bootstrap 95% CIs, ELO scale |
-| `judge.py` | Criteria-profile/custom judge prompts, HTML normalization, truncation disclosure, Comparison dataclass, structured output schema |
-| `dataset.py` | Flat, config-per-model, PR-based dataset loading, OCR column discovery |
-| `backends.py` | API backends: InferenceProvider + OpenAI-compatible, concurrent calls |
-| `publish.py` | Publish comparisons + leaderboard to Hub; incremental load from existing results |
-| `run.py` | Orchestrator: launch N OCR models via HF Jobs |
-| `validate.py` | Human A/B validation data layer, agreement stats, human ELO |
-| `viewer.py` | Data loading for results viewer (pure functions) |
-| `web.py` | FastAPI + HTMX unified viewer (browse + validate in one app) |
-| `integrity.py` | Input-integrity checks shared by judge guards + `audit`: sentinel/empty/length stats, per-model failure counts, audit report |
-| `cli.py` | CLI: `judge` (incremental + `--full-rejudge`), `run`, `view`, `audit` |
+| Module         | What it does                                                                                                                     |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `elo.py`       | Bradley-Terry MLE via scipy, page-level bootstrap 95% CIs, ELO scale                                                             |
+| `judge.py`     | Criteria-profile/custom judge prompts, HTML normalization, truncation disclosure, Comparison dataclass, structured output schema |
+| `dataset.py`   | Flat, config-per-model, PR-based dataset loading, OCR column discovery                                                           |
+| `backends.py`  | API backends: InferenceProvider + OpenAI-compatible, concurrent calls                                                            |
+| `publish.py`   | Publish comparisons + leaderboard to Hub; incremental load from existing results                                                 |
+| `run.py`       | Orchestrator: launch N OCR models via HF Jobs                                                                                    |
+| `validate.py`  | Human A/B validation data layer, agreement stats, human ELO                                                                      |
+| `viewer.py`    | Data loading for results viewer (pure functions)                                                                                 |
+| `web.py`       | FastAPI + HTMX unified viewer (browse + validate in one app)                                                                     |
+| `integrity.py` | Input-integrity checks shared by judge guards + `audit`: sentinel/empty/length stats, per-model failure counts, audit report     |
+| `cli.py`       | CLI: `judge` (incremental + `--full-rejudge`), `run`, `view`, `audit`                                                            |
 
 ## Tooling
 
@@ -36,11 +36,12 @@ Inspired by [Datalab's Benchmarks + Evals](https://www.datalab.to/blog/datalab-b
 uv sync --dev --extra viewer
 uv run ruff check src/ tests/
 uv run ruff format src/ tests/
+uvx rumdl@0.3.2 fmt .   # Markdown (config: .rumdl.toml)
 uv run ty check src/
 uv run pytest tests/ -x -q
 ```
 
-CI also checks `ruff format --check`, and that `uv.lock` resolves from https://pypi.org/simple only and records no `exclude-newer` setting. A local uv config (another index, or `exclude-newer`) can leak into the lock. Relock with `uv lock --no-config`.
+CI also checks `ruff format --check`, `rumdl check` (Markdown, with aligned tables), and that `uv.lock` resolves from <https://pypi.org/simple> only and records no `exclude-newer` setting. A local uv config (another index, or `exclude-newer`) can leak into the lock. Relock with `uv lock --no-config`.
 
 Branch protection is on — all changes go through PRs with CI checks.
 

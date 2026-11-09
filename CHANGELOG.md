@@ -52,7 +52,7 @@ ocr-bench is experimental, so these go without a transition release.
 ### Other
 
 - Code that pairs lists that must have the same length now uses `zip(..., strict=True)`, so a mismatch raises an error instead of dropping rows silently. This covers judge results and comparisons, jury votes, fingerprints and alignment columns.
-- Development: `ty` is pinned to 0.0.97 and ruff to 0.15.4. ruff also checks the `B` rules. `src/` and `tests/` are formatted with `ruff format`. CI checks the format. CI also checks that `uv.lock` resolves from https://pypi.org/simple only and records no `exclude-newer` setting.
+- Development: `ty` is pinned to 0.0.97 and ruff to 0.15.4. ruff also checks the `B` rules. `src/` and `tests/` are formatted with `ruff format`. CI checks the format. CI also checks that `uv.lock` resolves from <https://pypi.org/simple> only and records no `exclude-newer` setting.
 
 ## [0.0.6] - 2026-11-04
 
