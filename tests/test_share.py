@@ -1200,6 +1200,7 @@ class TestCli:
     def _dry_run(self, monkeypatch, alias, *extra):
         evaluation = _evaluation(_results(range(20)))
         monkeypatch.setattr(share, "load_private_evaluation", lambda repo: evaluation)
+        monkeypatch.setattr(share, "hub_model_sizes", lambda models: {})  # no network in tests
 
         def no_push(*args, **kwargs):
             raise AssertionError("dry run must not push")
