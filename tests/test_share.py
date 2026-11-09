@@ -1057,6 +1057,7 @@ class TestPush:
             "me/board\n",
             "board",
             "me/a--b",
+            "me/börd",
             "-me/board",
         ],
     )

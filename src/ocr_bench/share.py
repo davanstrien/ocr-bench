@@ -753,7 +753,8 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
             f"v{settings['ocr_bench_version']}/src/ocr_bench/judge.py"
         )
         judge_line = (
-            f"- **Judge**: {judges}, with the `{_md(criteria)}` criteria ([the prompts]({prompts}))"
+            f"- **Judge**: {judges}, with the `{_md(criteria)}` criteria "
+            f"([the prompts in ocr-bench {settings['ocr_bench_version']}]({prompts}))"
         )
     if settings["sampled_pages"]:
         sample = (
