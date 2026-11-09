@@ -13,15 +13,15 @@ The full human guide is [docs/private-eval.md](../../docs/private-eval.md). Read
 
 1. **Each paid step.** OCR Jobs (`run`) and the judge Job. Give the estimate first:
    - OCR: `ocr-bench run ... --dry-run` shows each model's flavor; price from `hf jobs hardware`.
-   - Judge: about $0.0014 per comparison (default judge, 8,000-character cap). Upper bound: pages × models × (models − 1) / 2; adaptive stopping usually uses fewer. Use `--max-comparisons` as a hard limit; a capped run continues later with the same command.
+   - Judge: about $0.0014 per comparison (default judge, measured with an 8,000-character text cap). Upper bound: pages × models × (models − 1) / 2; adaptive stopping usually uses fewer. Use `--max-comparisons` as a hard limit; a capped run continues later with the same command.
 2. **Anything public.** `share` creates a missing board repo private; making it public (the repo's Settings page, `hf repos settings <board-repo> --repo-type dataset --public` with `hf` 2.0 or later, or `share --public`) needs the user's OK. Show the `--dry-run` files first.
-3. **Where the pages go.** The default judge (`novita:Qwen/Qwen3.8-27B`) sends each page image to Novita through HF Inference Providers. Say so, and ask whether that is acceptable. If not, the user chooses an endpoint that meets their needs and you pass it with `--model`: an HF Inference Endpoint or a Jobs-served model (the HF token is sent), or an OpenAI-compatible server that needs no API key.
+3. **Where the pages go.** The default judge (`novita:Qwen/Qwen3.8-27B`) sends each page image to Novita through HF Inference Providers. Say so, and ask whether that is acceptable. If not, the user chooses an endpoint that meets their needs and you pass it with `--model`: an HF Inference Endpoint, a model served on a Job (https://huggingface.co/docs/hub/jobs-serving; `--model https://<job-id>--8000.hf.jobs/v1/:<org>/<model>`; the HF token is sent), or an OpenAI-compatible server that needs no API key. Only the default judge has been checked against ground truth.
 
 Never change the visibility of a source, OCR output or results repo. Never publish the OCR output repo or the results repo: they contain page text and judge reasons that quote the page.
 
 ## Steps
 
-1. **Pages.** A private dataset, one row per page: `image` (required), `page_id` (recommended), and optional slice columns (`collection`, `decade`, `doc_type`). The slice column name and its labels are published by `share` as they are: check with the user that they may be public. At most 50 labels per slice column. Aim for 300–500 pages, one or a few per document, more than 10 pages per slice the user cares about (a model needs 10 judged pages in a slice to be ranked there), and a few labelled blank pages.
+1. **Pages.** A private dataset, one row per page: `image` (required), `page_id` (recommended), and optional slice columns (`collection`, `decade`, `doc_type`). From a local folder: a `metadata.csv` with a `file_name` column plus the user's columns, then `load_dataset("imagefolder", data_dir=...)` and `push_to_hub(..., private=True)`. Split multi-page TIFFs or PDFs into one image per page first. The slice column name and its labels are published by `share` as they are: check with the user that they may be public. At most 50 labels per slice column. Aim for 300–500 pages, one or a few per document, more than 10 pages per slice the user cares about (a model needs 10 judged pages in a slice to be ranked there), and a few labelled blank pages.
 2. **OCR outputs.** Either:
    - **Recipes on Jobs:** `ocr-bench run <source> <ocr-repo> --models ... --dry-run`, then the same with `--no-wait`. Models: `ocr-bench run --list-models`. Each model becomes a PR config on `<ocr-repo>`. Wait until every Job has finished (`hf jobs ps`, `hf jobs logs <id>`) before the audit. Use `--from-prs` in later steps.
    - **Bring your own:** one dataset with `image` and one text column per model. The column name is the model's name, and `share` publishes it: check it may be public. `"[OCR ERROR]"` marks a failed page. Use `--columns <names>` in later steps.
@@ -36,7 +36,8 @@ Never change the visibility of a source, OCR output or results repo. Never publi
        --max-comparisons <budget> --save-results <results-repo> --private
    ```
 
-   - The user must be logged in (`hf auth login` or `HF_TOKEN`); `-s HF_TOKEN` passes that token to the Job.
+   - `<version>` is the latest ocr-bench on [PyPI](https://pypi.org/project/ocr-bench/) (0.0.7 or later); use the same version locally (`uv tool install ocr-bench`). `<budget>` is the user's budget ÷ $0.0014. `<cap from audit>` is the cap `audit --screen` suggests (the default is 2,500 characters).
+   - The user must be logged in (`hf auth login` or `HF_TOKEN`); `-s HF_TOKEN` passes that token to the Job. `hf jobs run --help` shows the Job flags; Jobs docs: https://huggingface.co/docs/hub/jobs-overview.
    - Always set `--timeout`: a Job stops after 30 minutes by default, and judging runs at about 85 comparisons a minute with `--concurrency 12`.
    - Follow with `hf jobs logs <id>`. Check the end state with `hf jobs inspect <id>`: a timeout shows as `ERROR`, `Job timeout`.
    - If it stopped early, run the same command again: it reuses the checkpoints (every 500 comparisons). The leaderboard is printed at the end.

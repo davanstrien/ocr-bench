@@ -7,6 +7,12 @@ Everything runs on the Hugging Face Hub: the OCR models and the judge run as [Jo
 > [!NOTE]
 > ocr-bench is a proof of concept. Before 0.1.0, the CLI, the defaults and the results format can change. The way ocr-bench gets OCR outputs (step 2) is the part most likely to change. `share` needs ocr-bench 0.0.7 or later.
 
+**Before you start**
+
+- Install the CLI with `uv tool install ocr-bench` (or run a single command with `uvx ocr-bench ...`). Use the latest release from [PyPI](https://pypi.org/project/ocr-bench/), and the same version in the Job commands below.
+- Jobs guides: [overview](https://huggingface.co/docs/hub/jobs-overview), [configuration](https://huggingface.co/docs/hub/jobs-configuration) (hardware flavors, timeout), [managing Jobs](https://huggingface.co/docs/hub/jobs-manage) (logs, cancel) and [pricing](https://huggingface.co/docs/hub/jobs-pricing). `hf jobs --help` lists the CLI commands; the [`hf` CLI guide](https://huggingface.co/docs/huggingface_hub/guides/cli) covers the rest.
+- Working with an AI agent? `hf skills add` installs a skill that teaches it the `hf` CLI, and this repo's [agent skill](../skills/ocr-bench-private-eval/SKILL.md) gives it these steps with stop points.
+
 ## The steps
 
 | Step | Command | Cost |
@@ -37,7 +43,7 @@ Decide this first.
 
 The default judge is `novita:Qwen/Qwen3.8-27B` through [HF Inference Providers](https://huggingface.co/docs/inference-providers/index), so Novita processes the page images.
 
-**If you need to control where your pages are sent, pass `--model` with an endpoint that meets your privacy needs.** It can be a [Hugging Face Inference Endpoint](https://huggingface.co/docs/inference-endpoints) URL or a model you serve on Jobs; ocr-bench sends your HF token to both. It can also be an OpenAI-compatible server that needs no API key (`https://host/v1/:org/model`).
+**If you need to control where your pages are sent, pass `--model` with an endpoint that meets your privacy needs.** It can be a [Hugging Face Inference Endpoint](https://huggingface.co/docs/inference-endpoints) URL, or a model you serve yourself on a Job ([Serve Models on Jobs](https://huggingface.co/docs/hub/jobs-serving)), passed as `--model https://<job-id>--8000.hf.jobs/v1/:<org>/<model>`; ocr-bench sends your HF token to both. Only the default judge has been checked against ground truth, so look at some of another judge's verdicts in `view` before you trust its board. It can also be an OpenAI-compatible server that needs no API key (`https://host/v1/:org/model`).
 
 Boards judged by different judges, or by the same model on different providers, are not comparable.
 
@@ -55,12 +61,13 @@ ocr-bench reads one Hub dataset with one row per page:
 
 Slice columns let `share` publish a board per label. **`share` publishes the column name and its labels as they are**, so use a column name and labels that may be public: `doc_type` with `typescript` or `1950s`, not a person's name, a client's name or a page's title. A slice column can have at most 50 different labels on the judged pages, so do not use a per-page or per-document column.
 
-A simple way to build it: put the images in a folder with a `metadata.csv` (`file_name,page_id,collection,decade`) and push it as a private dataset:
+A simple way to build it: put the images in a folder with a `metadata.csv` and push it as a private dataset. The CSV needs a `file_name` column with each image's file name (relative to the folder), then your own columns, for example `file_name,page_id,collection,decade`. TIFF, PNG and JPEG all work; split multi-page TIFFs or PDFs into one image per page first.
 
 ```python
 from datasets import load_dataset
 
 ds = load_dataset("imagefolder", data_dir="my-pages", split="train")
+print(ds)  # check: an `image` column, your columns, one row per page
 ds.push_to_hub("<you>/my-pages", private=True)
 ```
 
@@ -86,7 +93,7 @@ ocr-bench run <you>/my-pages <you>/my-pages-ocr --models glm-ocr lighton-ocr-2 d
 ocr-bench run <you>/my-pages <you>/my-pages-ocr --models glm-ocr lighton-ocr-2 dots-ocr --no-wait
 ```
 
-With `--no-wait`, `run` prints one Job per model and exits. Check them with `hf jobs ps` and `hf jobs logs <job-id>`. Each finished model appears as a pull request on the OCR output repo. Wait for all of them before step 3.
+Without `--models`, `run` uses the default set listed in the [README](../README.md#available-models). With `--no-wait`, `run` prints one Job per model and exits. In the proof of concept (425 pages), each model took between about 5 and 40 minutes. Check them with `hf jobs ps` and `hf jobs logs <job-id>`. Each finished model appears as a pull request on the OCR output repo. Wait for all of them before step 3.
 
 `--dry-run` shows the GPU flavor and the arguments for each model. The cost is the flavor's price (`hf jobs hardware`) times the run time. The output repo is created private when the source is private.
 
@@ -131,9 +138,10 @@ hf jobs run --detach --timeout 3h --flavor cpu-upgrade -s HF_TOKEN \
 
 For a private source, the results repo is private automatically. Pass `--private` when the source is public and the results must stay private.
 
-**Set `--timeout`.** A Job stops after 30 minutes by default, and a few thousand comparisons take longer: the proof of concept judged about 85 a minute with `--concurrency 12` (the default is 8). `judge` pushes a checkpoint every 500 comparisons (not under `--full-rejudge`), so if a Job stops early, run the same command again: it reuses the checkpointed comparisons and judges the rest. Comparisons made after the last checkpoint are lost and paid for again.
+**Set `--timeout`.** A Job stops after 30 minutes by default ([Job timeout](https://huggingface.co/docs/hub/jobs-configuration#timeout)), and a few thousand comparisons take longer: the proof of concept judged about 85 a minute with `--concurrency 12` (the default is 8). `judge` pushes a checkpoint every 500 comparisons (not under `--full-rejudge`), so if a Job stops early, run the same command again: it reuses the checkpointed comparisons and judges the rest. Comparisons made after the last checkpoint are lost and paid for again.
 
-- **Cost.** About $0.0014 per comparison with the default judge, an 8,000-character cap and 1,024 px images (billed in the proof of concept). A run is at most pages × models × (models − 1) / 2 comparisons; adaptive stopping usually uses fewer. `--max-comparisons N` sets a hard limit. A run stopped by the limit can be continued later with the same command and a higher limit.
+- **Cost.** About $0.0014 per comparison with the default judge, an 8,000-character cap and 1,024 px images (billed in the proof of concept). A run is at most pages × models × (models − 1) / 2 comparisons; adaptive stopping usually uses fewer. `--max-comparisons N` sets a hard limit: your budget divided by $0.0014, for example about 7,000 comparisons for $10.
+- **Text cap.** `--max-ocr-text-len` is 2,500 characters by default; longer outputs are cut before the judge sees them. Use the cap that `audit --screen` suggests (the proof of concept used 8,000 for dense pages). A run stopped by the limit can be continued later with the same command and a higher limit.
 - **`--criteria body-text`** asks the judge to compare the body text and to ignore page furniture (running heads, page numbers).
 - **`--max-samples N`** judges a random sample of N pages.
 - **Adding a model later:** run the OCR for the new model, then run the same `judge` command again. Only the new pairs are judged. If an input changed (a re-run model, other pages, another judge setting), `judge` stops and tells you to pass `--full-rejudge` or use a new results repo. A re-run of one model counts as a change, so the whole board is judged again.
