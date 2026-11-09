@@ -119,6 +119,7 @@ SETTINGS_KEYS = (
     "shared_at",
     "ocr_bench_version",
     "repo",
+    "sampled_pages",
 )
 SHARE_FILES = ("README.md", "overall.jsonl", "slices.jsonl", "board.json")
 # The results repo folders judge writes, in the order it pushes them.
@@ -130,7 +131,10 @@ MARKDOWN_SPECIAL = "\\`*_[]<>|"
 STATUSES = ("ranked", "degraded", "failed")
 # A model name that is a Hub repo id, with an optional " (label)" after it,
 # gets a link to the repo's model page.
-HUB_MODEL_ID = re.compile(r"(?P<repo>[A-Za-z0-9][\w.-]*/[\w.-]+)(?P<label> \([^()]+\))?")
+REPO_ID = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}/[A-Za-z0-9][A-Za-z0-9_.-]{0,95}"
+HUB_MODEL_ID = re.compile(rf"(?P<repo>{REPO_ID})(?P<label> \([^()]+\))?")
+# A board repo id: the characters a Hub repo id may hold, so it is safe in the card.
+BOARD_REPO_ID = re.compile(REPO_ID)
 # What each judge criteria profile asks the judge to compare.
 CRITERIA_MEANING = {
     "default": "all visible text counts, including headers, footers, marginalia and stamps",
@@ -430,6 +434,41 @@ def check_board_matches(board: Leaderboard, leaderboard: list[dict], results_rep
             )
 
 
+def _format_size(total: int) -> str:
+    """A parameter count in the registry's style: 0.85B, 3.3B, 34.5M."""
+    if total >= 100_000_000:
+        return f"{total / 1e9:.2g}B"
+    return f"{total / 1e6:.3g}M"
+
+
+def hub_model_sizes(models: Iterable[str], api: HfApi | None = None) -> dict[str, str]:
+    """Sizes from the Hub's safetensors metadata, for model names that are repo ids.
+
+    A name with a " (label)" after the id uses the id. A model that is not on the
+    Hub, is gated, has no safetensors files, or cannot be read gets no size.
+    """
+    api = api or HfApi()
+    sizes: dict[str, str] = {}
+    for name in models:
+        match = HUB_MODEL_ID.fullmatch(name)
+        if not match:
+            continue
+        try:
+            info = api.model_info(match["repo"], expand=["safetensors"])
+        except Exception as error:  # an optional column: never stop a share for it
+            logger.info("share.size_not_found", model=name, error=type(error).__name__)
+            continue
+        if info.safetensors and info.safetensors.total:
+            sizes[name] = _format_size(info.safetensors.total)
+    return sizes
+
+
+def _fill_sizes(rows: list[dict], sizes: dict[str, str]) -> None:
+    for row in rows:
+        if not row["params"]:
+            row["params"] = sizes.get(row["model"])
+
+
 def _overall_rows(board: Leaderboard, failed_models: list[str], failed_outputs: dict) -> list[dict]:
     rows = []
     rank = 0
@@ -707,10 +746,15 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
     judges = ", ".join(_md(name) for name in settings["judge_models"]) or "not recorded"
     criteria = settings["criteria"]
     meaning = CRITERIA_MEANING.get(criteria, "")
-    if settings.get("max_samples"):
+    if settings["sampled_pages"]:
         sample = (
-            f"{settings['max_samples']} pages sampled (seed {settings['seed']}); "
+            f"{settings['sampled_pages']} pages sampled (seed {settings['seed']}); "
             f"{settings['pages']} had at least one comparison"
+        )
+    elif settings["max_samples"]:
+        sample = (
+            f"{settings['pages']} pages with at least one comparison, from a sample of at "
+            f"most {settings['max_samples']} (seed {settings['seed']})"
         )
     else:
         sample = f"{settings['pages']} pages with at least one comparison"
@@ -852,26 +896,40 @@ def check_structure(files: dict[str, bytes], allowed: frozenset[str]) -> None:
         )
 
 
+def _spans(text: str, needle: str) -> Iterator[tuple[int, int]]:
+    start = text.find(needle)
+    while start != -1:
+        yield start, start + len(needle)
+        start = text.find(needle, start + 1)
+
+
 def check_no_private_ids(
     files: dict[str, bytes], private_ids: Iterable[str], board_repo: str = ""
 ) -> None:
     """Refuse when any file names the results repo or the source dataset.
 
-    The board's own repo id is removed first: it is the published repo name, and
-    a name such as ``me/scans-board`` contains a source id such as ``me/scans``.
+    A mention inside the board's own repo id is allowed: that id is the published
+    repo name, and a name such as ``me/scans-board`` contains a source id such as
+    ``me/scans``. Every other mention, also one that overlaps the board id, is refused.
     """
     ids = [repo_id.lower() for repo_id in private_ids if repo_id]
+    own = re.escape(board_repo.lower())
     for path, data in files.items():
         for view in _file_views(path, data):
             text = view.lower()
-            if board_repo:
-                # Whole ids only: a board me/a must not hide a results repo me/a-results.
-                own = re.escape(board_repo.lower())
-                text = re.sub(rf"(?<![\w.-]){own}(?![\w.-])", " ", text)
-            if any(repo_id in text for repo_id in ids):
-                raise PrivacyError(
-                    f"{path} names the results repo or the source dataset. Nothing was written."
-                )
+            # Whole ids only: a board me/a is not a mention inside me/a-results.
+            allowed = (
+                [m.span() for m in re.finditer(rf"(?<![\w.-]){own}(?![\w.-])", text)]
+                if board_repo
+                else []
+            )
+            for repo_id in ids:
+                for found in _spans(text, repo_id):
+                    if not any(lo <= found[0] and found[1] <= hi for lo, hi in allowed):
+                        raise PrivacyError(
+                            f"{path} names the results repo or the source dataset. "
+                            "Nothing was written."
+                        )
 
 
 def _chunks(text: str) -> Iterator[str]:
@@ -939,9 +997,10 @@ def check_plan(plan: SharePlan) -> None:
 
 
 def _check_dest(dest: str) -> str:
-    if dest.count("/") != 1 or not all(dest.split("/")):
-        # A bare name would be created under the token's namespace, then not found
-        # again under the bare name, leaving an empty repo behind.
+    # A bare name would be created under the token's namespace, then not found again
+    # under the bare name, leaving an empty repo behind. The card shows the id, so it
+    # must hold only the characters of a Hub repo id.
+    if not BOARD_REPO_ID.fullmatch(dest):
         raise ShareError(
             f"Give the board repo as namespace/name (for example me/board), not {dest!r}."
         )
@@ -953,6 +1012,17 @@ def _check_alias(alias: str) -> str:
     if not alias or len(alias) > MAX_LABEL_LENGTH or _has_line_break(alias):
         raise ShareError(f"--alias must be 1–{MAX_LABEL_LENGTH} characters on one line.")
     return alias
+
+
+def _sampled_pages(metadata: dict) -> int | None:
+    """The size of the judged sample, from the coverage judge records (0.0.6 and later)."""
+    try:
+        coverage = json.loads(metadata.get("model_coverage") or "{}")
+    except json.JSONDecodeError:
+        return None
+    counts = [entry.get("sampled_pages") for entry in coverage.values() if isinstance(entry, dict)]
+    counts = [count for count in counts if isinstance(count, int) and count > 0]
+    return max(counts) if counts else None
 
 
 def _public_criteria(criteria: str) -> str:
@@ -969,11 +1039,14 @@ def plan_share(
     slice_values: Callable[[dict, str], list] | None = None,
     now: str | None = None,
     board_repo: str,
+    model_sizes: Callable[[list[str]], dict[str, str]] | None = None,
 ) -> SharePlan:
     """Fit the boards, build the files and check them. Makes no Hub writes.
 
     ``board_repo`` is the repo the board is for. The card names it in its data
     snippets, and ``push_share`` writes the plan to that repo only.
+    ``model_sizes`` gives sizes for the models the built-in registry does not
+    know (the CLI passes ``hub_model_sizes``).
     """
     board_repo = _check_dest(board_repo)
     alias = _check_alias(alias)
@@ -1032,6 +1105,12 @@ def plan_share(
             slice_pages.append(len(ranked_pages))
             not_in_a_slice += len(pages) - len(ranked_pages)
 
+    unknown = sorted({row["model"] for row in overall_rows if not row["params"]})
+    if model_sizes and unknown:
+        sizes = model_sizes(unknown)
+        _fill_sizes(overall_rows, sizes)
+        _fill_sizes(slice_rows, sizes)
+
     judge_models = json.loads(metadata.get("judge_models") or "[]")
     judge_spec_hashes = json.loads(metadata.get("judge_spec_hashes") or "[]")
     settings = {
@@ -1060,6 +1139,7 @@ def plan_share(
         "shared_at": now or datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
         "ocr_bench_version": __version__,
         "repo": board_repo,
+        "sampled_pages": _sampled_pages(metadata),
     }
     allowed = frozenset(
         {

@@ -2258,7 +2258,13 @@ def _print_share_board(title: str, rows: list[dict]) -> None:
 
 def cmd_share(args: argparse.Namespace) -> None:
     """Write a scores-only board from a results repo to a separate repo."""
-    from ocr_bench.share import load_private_evaluation, plan_share, push_share, write_local
+    from ocr_bench.share import (
+        hub_model_sizes,
+        load_private_evaluation,
+        plan_share,
+        push_share,
+        write_local,
+    )
 
     console.print(f"Reading [bold]{args.results}[/bold]...")
     evaluation = load_private_evaluation(args.results)
@@ -2268,6 +2274,7 @@ def cmd_share(args: argparse.Namespace) -> None:
         alias=args.alias,
         slice_column=args.slice_column,
         board_repo=args.dest,
+        model_sizes=hub_model_sizes,
     )
     _print_share_board(f"{plan.alias}: overall ({plan.settings['pages']} pages)", plan.overall_rows)
     for name in plan.settings["slices"]:

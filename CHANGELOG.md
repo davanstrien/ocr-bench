@@ -13,7 +13,9 @@ current behaviour.
 
 - The `share` card is easier to read. It starts with what the board is and how to read a rating and its interval, calls the rating a rating (a Bradley-Terry fit on an Elo-like scale), and links each model name that is a Hub repo id (a ` (label)` after the id, as in `baidu/Unlimited-OCR-2 (tiled)`, links the id). The ⚠ note gives each model's number of error outputs. A FAILED row has a note. Slice labels are shown as code. The settings section keeps the judge, its criteria in words, the sample, the comparisons and the judge date; the prompt hash, caps and fingerprint stay in `board.json`. A collapsed section has DuckDB queries on the board's files.
 - `plan_share` takes the board repo (`board_repo=`), and `board.json` records it as `repo`. The card names it in its `load_dataset` and DuckDB examples. `push_share` refuses to push a board to a repo other than the one it was built for. A board repo that is the results repo or the source is refused when the board is built, so a dry run does not write it either.
-- The check that no file names the results repo or the source skips the board's own repo id, so a board repo such as `me/scans-board` for a source `me/scans` can be shared. Only the whole id is skipped: any other mention of a private repo is still refused.
+- The check that no file names the results repo or the source allows a mention inside the board's own repo id, so a board repo such as `me/scans-board` for a source `me/scans` can be shared. Any other mention of a private repo, also one that overlaps the board id, is still refused. The board repo must be a Hub repo id (`namespace/name`, letters, digits, `_`, `.` and `-`), also in a dry run.
+- The card gives the size of the sample that was judged (from the coverage that `judge` records). Without it, `--max-samples` is shown as a cap.
+- `share` fills the Size column for models the built-in registry does not know, from the parameter count the Hub records for the model's safetensors files. A model name with a ` (label)` after its repo id uses the id. A model that is not on the Hub, or has no safetensors files, has no size.
 
 ## [0.0.7] - 2026-11-09
 

@@ -29,9 +29,11 @@ from ocr_bench.share import (
     PrivacyError,
     PrivateEvaluation,
     ShareError,
+    _format_size,
     check_no_page_text,
     check_plan,
     check_publish_order,
+    hub_model_sizes,
     load_private_evaluation,
     load_slice_values,
     plan_share,
@@ -264,6 +266,64 @@ class TestBoards:
         assert "huggingface.co/tesseract-5" not in readme
         # A " (label)" suffix links the base repo and keeps the label as text.
         assert "[org/model-x](https://huggingface.co/org/model-x) (tiled)" in readme
+
+    def test_sizes_the_registry_does_not_know_come_from_model_sizes(self):
+        models = ["org/model-good", "org/model-x (tiled)", "tesseract-5"]
+        asked = []
+
+        def sizes(names):
+            asked.extend(names)
+            return {"org/model-good": "0.85B", "org/model-x (tiled)": "3.3B"}
+
+        plan = _plan(_evaluation(_results(range(20), models), models), model_sizes=sizes)
+        by_model = {row["model"]: row["params"] for row in plan.overall_rows}
+        assert by_model["org/model-good"] == "0.85B"
+        assert by_model["org/model-x (tiled)"] == "3.3B"
+        assert "tesseract-5" not in asked  # the registry gives it n/a
+        assert "| 0.85B |" in plan.files["README.md"].decode()
+
+    @pytest.mark.parametrize(
+        ("total", "shown"),
+        [
+            (852_985_920, "0.85B"),
+            (3_343_978_497, "3.3B"),
+            (34_500_000, "34.5M"),
+            (269_944_416, "0.27B"),
+        ],
+    )
+    def test_size_format(self, total, shown):
+        assert _format_size(total) == shown
+
+    def test_hub_sizes_skip_models_the_hub_cannot_give(self):
+        class Api:
+            def model_info(self, repo, expand=None):
+                if repo == "org/gone":
+                    raise RepositoryNotFoundError("gone")
+                safetensors = (
+                    None if repo == "org/no-st" else type("S", (), {"total": 1_200_000_000})()
+                )
+                return type("I", (), {"safetensors": safetensors})()
+
+        sizes = hub_model_sizes(
+            ["org/ok (tiled)", "org/gone", "org/no-st", "local-model"], api=Api()
+        )
+        assert sizes == {"org/ok (tiled)": "1.2B"}
+
+    def test_the_card_gives_the_drawn_sample_size(self):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata["model_coverage"] = json.dumps(
+            {"org/model-good": {"sampled_pages": 20, "ranked_pages": 20}}
+        )
+        readme = _plan(evaluation).files["README.md"].decode()
+        assert "20 pages sampled (seed" in readme
+
+    def test_without_coverage_the_cap_is_shown_as_a_cap(self):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata.pop("model_coverage", None)
+        evaluation.metadata["max_samples"] = 1000
+        plan = _plan(evaluation)
+        assert plan.settings["sampled_pages"] is None
+        assert "from a sample of at most 1000" in plan.files["README.md"].decode()
 
     def test_error_outputs_are_counted_in_the_note(self):
         evaluation = _evaluation(_results(range(20)), failed_outputs={"org/model-weak": 3})
@@ -933,6 +993,20 @@ class TestPush:
     @pytest.mark.parametrize("board_repo", [RESULTS, SOURCE.upper()])
     def test_the_results_repo_or_source_as_board_is_refused_before_any_file(self, board_repo):
         with pytest.raises(ShareError, match="is the results repo or the source dataset"):
+            _plan(_evaluation(_results(range(20))), board_repo=board_repo)
+
+    @pytest.mark.parametrize("case", ["lower", "upper"])
+    def test_a_private_id_overlapping_the_board_id_is_refused(self, case):
+        # Board public/me must not hide me/private-source in "public/me/private-source".
+        alias = f"public/{SOURCE}" if case == "lower" else f"PUBLIC/{SOURCE.upper()}"
+        with pytest.raises(PrivacyError, match="names the results repo or the source"):
+            _plan(_evaluation(_results(range(20))), board_repo="public/me", alias=alias)
+
+    @pytest.mark.parametrize(
+        "board_repo", ["me/board`<img src=x>`", "me/bo\nard", "me/bo ard", "me/börd", "-me/board"]
+    )
+    def test_a_board_repo_that_is_not_a_hub_id_is_refused(self, board_repo):
+        with pytest.raises(ShareError, match="namespace/name"):
             _plan(_evaluation(_results(range(20))), board_repo=board_repo)
 
     def test_a_board_built_for_another_repo_is_refused(self):
