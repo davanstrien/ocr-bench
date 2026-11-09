@@ -21,7 +21,7 @@ Never change the visibility of a source, OCR output or results repo. Never publi
 
 ## Steps
 
-1. **Pages.** A private dataset, one row per page: `image` (required), `page_id` (recommended), and optional slice columns (`collection`, `decade`, `doc_type`). Slice labels are published by `share` as they are: check with the user that they may be public. At most 50 labels per slice column. Aim for 300–500 pages, one or a few per document, more than 10 pages per slice the user cares about (a model needs 10 judged pages in a slice to be ranked there), and a few labelled blank pages.
+1. **Pages.** A private dataset, one row per page: `image` (required), `page_id` (recommended), and optional slice columns (`collection`, `decade`, `doc_type`). The slice column name and its labels are published by `share` as they are: check with the user that they may be public. At most 50 labels per slice column. Aim for 300–500 pages, one or a few per document, more than 10 pages per slice the user cares about (a model needs 10 judged pages in a slice to be ranked there), and a few labelled blank pages.
 2. **OCR outputs.** Either:
    - **Recipes on Jobs:** `ocr-bench run <source> <ocr-repo> --models ... --dry-run`, then the same with `--no-wait`. Models: `ocr-bench run --list-models`. Each model becomes a PR config on `<ocr-repo>`. Wait until every Job has finished (`hf jobs ps`, `hf jobs logs <id>`) before the audit. Use `--from-prs` in later steps.
    - **Bring your own:** one dataset with `image` and one text column per model. The column name is the model's name, and `share` publishes it: check it may be public. `"[OCR ERROR]"` marks a failed page. Use `--columns <names>` in later steps.

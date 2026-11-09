@@ -53,7 +53,7 @@ ocr-bench reads one Hub dataset with one row per page:
 | `page_id` | recommended | a stable, unique id for the page, for example `collection/item:page` |
 | slice columns | optional | labels for reporting, for example `collection`, `decade`, `doc_type` |
 
-Slice columns let `share` publish a board per label. **`share` publishes the labels as they are**, so use labels that may be public: `typescript` or `1950s`, not a person's name or a page's title. A slice column can have at most 50 different labels on the judged pages, so do not use a per-page or per-document column.
+Slice columns let `share` publish a board per label. **`share` publishes the column name and its labels as they are**, so use a column name and labels that may be public: `doc_type` with `typescript` or `1950s`, not a person's name, a client's name or a page's title. A slice column can have at most 50 different labels on the judged pages, so do not use a per-page or per-document column.
 
 A simple way to build it: put the images in a folder with a `metadata.csv` (`file_name,page_id,collection,decade`) and push it as a private dataset:
 
