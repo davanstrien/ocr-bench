@@ -415,6 +415,60 @@ def build_parser() -> argparse.ArgumentParser:
     publish.add_argument("--space", default=None, help="Space repo id (default: {results}-viewer)")
     publish.add_argument("--private", action="store_true", help="Make the Space private")
 
+    # --- share subcommand ---
+    share = sub.add_parser(
+        "share",
+        help="Write a scores-only board from a results repo to a separate repo",
+        description=(
+            "Read a results repo written by judge (it may be private) and write "
+            "ratings only to a separate dataset repo: no page text, OCR outputs or "
+            "judge reasons. A missing destination is created private (--public to "
+            "create it public). An existing one keeps its visibility."
+        ),
+    )
+    share.add_argument("results", help="Results repo written by `ocr-bench judge`")
+    share.add_argument(
+        "dest", help="Dataset repo for the board; not the results repo or the source"
+    )
+    share.add_argument(
+        "--alias",
+        required=True,
+        help="Public name of the evaluation set. The source repo id is not published.",
+    )
+    share.add_argument(
+        "--slice-column",
+        default=None,
+        help=(
+            "Source dataset column that labels each page (for example a document "
+            "type). Adds one board per label with 10 or more judged pages. The "
+            "column name and its labels are published as they are. Downloads the "
+            "judged source config, images included, to check the pages."
+        ),
+    )
+    share.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Write the files to a local folder (--output-dir) and push nothing",
+    )
+    share.add_argument(
+        "--output-dir",
+        default=None,
+        help="Folder for --dry-run only (default: ./ocr-bench-share-<alias>)",
+    )
+    share.add_argument(
+        "--public",
+        action="store_true",
+        help=(
+            "Create a missing destination repo public (default: private, so you can "
+            "look at the board on the Hub before you publish it)"
+        ),
+    )
+    share.add_argument(
+        "--replace",
+        action="store_true",
+        help="Replace a board of another alias in the destination repo",
+    )
+
     # --- bench subcommand (run → judge → view in one shot) ---
     bench = sub.add_parser(
         "bench", help="Run → judge → view in one command (the 'just try it' path)"
@@ -2185,6 +2239,80 @@ def cmd_view(args: argparse.Namespace) -> None:
     uvicorn.run(app, host=args.host, port=args.port)
 
 
+def _print_share_board(title: str, rows: list[dict]) -> None:
+    table = Table(title=title)
+    for column in ("Rank", "Model", "ELO", "95% CI", "Pages", "Status"):
+        table.add_column(column)
+    for row in rows:
+        ci = f"{row['elo_low']}–{row['elo_high']}" if row.get("elo_low") is not None else "—"
+        table.add_row(
+            str(row["rank"] or "—"),
+            row["model"],
+            str(row["elo"] if row["elo"] is not None else "—"),
+            ci,
+            str(row["pages"]),
+            row.get("status", ""),
+        )
+    console.print(table)
+
+
+def cmd_share(args: argparse.Namespace) -> None:
+    """Write a scores-only board from a results repo to a separate repo."""
+    from ocr_bench.share import load_private_evaluation, plan_share, push_share, write_local
+
+    console.print(f"Reading [bold]{args.results}[/bold]...")
+    evaluation = load_private_evaluation(args.results)
+    plan = plan_share(
+        evaluation,
+        results_repo=args.results,
+        alias=args.alias,
+        slice_column=args.slice_column,
+    )
+    _print_share_board(f"{plan.alias}: overall ({plan.settings['pages']} pages)", plan.overall_rows)
+    for name in plan.settings["slices"]:
+        _print_share_board(
+            f"{plan.alias}: {name}", [row for row in plan.slice_rows if row["slice"] == name]
+        )
+    if args.slice_column:
+        console.print(
+            f"{len(plan.settings['slices'])} slice boards; "
+            f"{plan.settings['pages_not_in_a_slice_board']} judged pages are in none."
+        )
+    console.print(
+        "[green]Privacy checks passed[/green]: allowed columns and values only, and no "
+        "copied fragment of 63 or more characters from a compared output or judge "
+        "reason (text with little variety, such as a repeated character, is not "
+        "checked). The alias, slice labels and model names are published as they "
+        "are: check them."
+    )
+
+    if args.dry_run:
+        slug = "".join(c if c.isalnum() or c in "._-" else "-" for c in plan.alias).strip(".")
+        out_dir = Path(args.output_dir or f"ocr-bench-share-{slug or 'board'}")
+        written = write_local(plan, out_dir)
+        console.print(
+            f"Dry run: wrote {len(written)} files to [bold]{out_dir}[/bold]. Nothing was pushed."
+        )
+        return
+
+    result = push_share(
+        plan, args.dest, results_repo=args.results, public=args.public, replace=args.replace
+    )
+    state = "created" if result.created else "updated"
+    visibility = "private" if result.private else "public"
+    console.print(f"Board {state}: https://huggingface.co/datasets/{result.repo_id} ({visibility})")
+    if result.private:
+        # The settings page works for every client version. The hf command needs
+        # huggingface_hub 2.x: 1.x has no --public on `hf repos settings`.
+        console.print(
+            "The board is private. Look at it on the Hub, then publish it under "
+            "Settings → Change visibility:\n"
+            f"  https://huggingface.co/datasets/{result.repo_id}/settings\n"
+            "or, with the hf CLI 2.0 or later:\n"
+            f"  hf repos settings {result.repo_id} --repo-type dataset --public"
+        )
+
+
 SPACE_TEMPLATE = "davanstrien/ocr-bench-space-template"
 
 
@@ -2597,6 +2725,8 @@ def main() -> None:
             cmd_bench(args)
         elif args.command == "audit":
             cmd_audit(args)
+        elif args.command == "share":
+            cmd_share(args)
     except DatasetError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         sys.exit(1)

@@ -232,7 +232,7 @@ def _config_is_absent(repo_id: str, config_name: str) -> bool:
     return not any(path.startswith(f"{config_name}/") for path in files)
 
 
-def load_existing_comparisons(repo_id: str) -> list[ComparisonResult]:
+def load_existing_comparisons(repo_id: str, revision: str | None = None) -> list[ComparisonResult]:
     """Load existing comparisons without failing open on uncertain read errors.
 
     The stored winner is already unswapped (canonical), so ``swapped=False``.
@@ -241,7 +241,7 @@ def load_existing_comparisons(repo_id: str) -> list[ComparisonResult]:
     cannot replace history with a partial current run.
     """
     try:
-        ds = load_dataset(repo_id, name="comparisons", split="train")
+        ds = load_dataset(repo_id, name="comparisons", split="train", revision=revision)
         results = []
         for row in ds:
             results.append(
@@ -275,10 +275,10 @@ def load_existing_comparisons(repo_id: str) -> list[ComparisonResult]:
     return results
 
 
-def load_existing_metadata(repo_id: str) -> list[dict]:
+def load_existing_metadata(repo_id: str, revision: str | None = None) -> list[dict]:
     """Load metadata, returning empty only for a genuinely absent config."""
     try:
-        ds = load_dataset(repo_id, name="metadata", split="train")
+        ds = load_dataset(repo_id, name="metadata", split="train", revision=revision)
         return [dict(row) for row in ds]
     except Exception as exc:
         if _config_is_absent(repo_id, "metadata"):
