@@ -44,5 +44,6 @@ jobs:
       - run: uv sync --locked --dev --extra viewer
       - run: uv run ruff check src/ tests/
       - run: uv run ruff format --check src/ tests/
+      - run: uvx rumdl@0.3.2 check .  # Markdown: tables aligned, see .rumdl.toml
       - run: uv run ty check src/
       - run: uv run pytest tests/ -x -q
