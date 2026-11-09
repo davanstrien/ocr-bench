@@ -29,14 +29,14 @@ Never change the visibility of a source, OCR output or results repo. Never publi
 4. **Judge, as a Job** (after the cost OK):
 
    ```bash
-   hf jobs run --detach --flavor cpu-upgrade -s HF_TOKEN \
+   hf jobs run --detach --timeout 3h --flavor cpu-upgrade -s HF_TOKEN \
      ghcr.io/astral-sh/uv:python3.12-bookworm \
      uvx "ocr-bench==<version>" judge <ocr-repo> --from-prs \
        --criteria body-text --max-ocr-text-len <cap from audit> \
        --max-comparisons <budget> --save-results <results-repo> --private
    ```
 
-   Follow with `hf jobs logs <id>`. The leaderboard is printed at the end. To add a model later, get its outputs and run the same command: only the new pairs are judged. If `judge` says the inputs changed (for example, one model was re-run), ask the user before `--full-rejudge` or a new results repo: either costs a full run.
+   Always set `--timeout`: a Job stops after 30 minutes by default, and judging runs at about 85 comparisons a minute with `--concurrency 12`. Follow with `hf jobs logs <id>`, and check the end state with `hf jobs inspect <id>` (a timeout shows as `ERROR`, `Job timeout`). If it stopped early, run the same command again: it reuses the checkpoints (every 500 comparisons). The leaderboard is printed at the end. To add a model later, get its outputs and run the same command: only the new pairs are judged. If `judge` says the inputs changed (for example, one model was re-run), ask the user before `--full-rejudge` or a new results repo: either costs a full run.
 5. **Report.** The leaderboard with confidence intervals, the Pages column (a model ranked on fewer pages has failed pages), and which models overlap. Do not call models with overlapping intervals different. Suggest `ocr-bench view <results-repo>` (local, needs `ocr-bench[viewer]` and a login that can read the results and the source) to read comparisons and vote.
 6. **Share (only if the user wants a public board).** `ocr-bench share <results-repo> <board-repo> --alias <public name> [--slice-column <col>] --dry-run`. Show the user the files in `./ocr-bench-share-<alias>`. Publish only after they agree, with the same command without `--dry-run`. Use a new or empty board repo.
 

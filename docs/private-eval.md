@@ -114,7 +114,7 @@ Fix or drop a model with many failures before you pay for the judge.
 The judge compares two transcriptions of the same page at a time and picks the better one. A board of 8 models on 400 pages is several thousand comparisons, so run it as a Job, not on your laptop:
 
 ```bash
-hf jobs run --detach --flavor cpu-upgrade -s HF_TOKEN \
+hf jobs run --detach --timeout 3h --flavor cpu-upgrade -s HF_TOKEN \
   ghcr.io/astral-sh/uv:python3.12-bookworm \
   uvx "ocr-bench==0.0.7" judge <you>/my-pages-ocr --from-prs \
     --criteria body-text --max-ocr-text-len 8000 \
@@ -122,6 +122,8 @@ hf jobs run --detach --flavor cpu-upgrade -s HF_TOKEN \
 ```
 
 `--private` is automatic for a private source; passing it also stops the run if the results repo would be public.
+
+**Set `--timeout`.** A Job stops after 30 minutes by default, and a few thousand comparisons take longer: the proof of concept judged about 85 a minute with `--concurrency 12` (the default is 8). `judge` pushes a checkpoint every 500 comparisons (not under `--full-rejudge`), so if a Job stops early, run the same command again: it reuses the checkpointed comparisons and judges the rest. Comparisons made after the last checkpoint are lost and paid for again.
 
 - **Cost.** About $0.0014 per comparison with the default judge, an 8,000-character cap and 1,024 px images (billed in the proof of concept). A run is at most pages × models × (models − 1) / 2 comparisons; adaptive stopping usually uses fewer. `--max-comparisons N` sets a hard limit. A run stopped by the limit can be continued later with the same command and a higher limit.
 - **`--criteria body-text`** asks the judge to compare the body text and to ignore page furniture (running heads, page numbers).
