@@ -288,6 +288,10 @@ class TestAuditParser:
         assert args.screen is False
         assert args.json is False
 
+    def test_audit_columns(self):
+        args = build_parser().parse_args(["audit", "user/data", "--columns", "vendor", "mine"])
+        assert args.columns == ["vendor", "mine"]
+
     def test_audit_selection_and_screen_flags(self):
         args = build_parser().parse_args(
             ["audit", "user/data", "--from-prs", "--configs", "a", "b", "--screen", "--json"]

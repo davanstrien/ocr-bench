@@ -533,6 +533,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     audit.add_argument(
+        "--columns",
+        nargs="+",
+        default=None,
+        help=(
+            "Audit these text columns of a flat dataset (one column per model, named "
+            "after the model), as in 'judge --columns'. Ignored with --configs."
+        ),
+    )
+    audit.add_argument(
         "--from-prs",
         action="store_true",
         help="Audit the configs in open PRs (newest open PR per config), as in 'judge'.",
@@ -2407,6 +2416,7 @@ def cmd_audit(args: argparse.Namespace) -> None:
                 configs=args.configs,
                 from_prs=args.from_prs,
                 screen=args.screen,
+                columns=args.columns,
             )
     except (DatasetError, DatasetsError, OSError, OpenAIError, ValueError) as exc:
         # Couldn't even run the check (repo missing, no OCR columns, network /

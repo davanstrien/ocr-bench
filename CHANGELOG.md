@@ -25,6 +25,7 @@ current behaviour.
 
 ### New
 
+- `audit --columns` reads the named text columns of a flat dataset (one column per model, named after the model), as `judge --columns` does. Before, `audit` found flat columns only from an `inference_info` column or from column names that contain `markdown`, `ocr` or `text`, so it could miss bring-your-own outputs. `--configs` takes precedence, as in `judge`.
 - `judge` and `bench` report on how many pages each model is ranked. The leaderboard has a Pages column, N/M: M is the number of pages in the judged sample (`--max-samples`, or every row), and N is the number of those pages where the model took part in at least one judged or auto-tied comparison. A footnote names each model with error sentinels (placeholders such as `[OCR ERROR]`) in the sample. The results card has a Coverage section, and each new `metadata` row has `model_coverage` (JSON: `sampled_pages`, `ranked_pages` and `sentinel_pages` per model).
 - `judge` prints a note when a model has error sentinels at a rate of 10% or less: they are excluded from judging, so its rank leaves out those pages. Before, only rates over 10% were reported. The threshold and the exclusion do not change.
 - Before judging, `judge` and `bench` warn when `--max-ocr-text-len` truncates more than half of the outputs in the judged sample, overall or for any one model. The warning suggests a cap from the `audit --screen` checks (a cap that fits every output that no check flags), when 3 or more models have output. The default cap does not change.
