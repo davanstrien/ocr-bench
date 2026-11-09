@@ -422,8 +422,8 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Read a results repo written by judge (it may be private) and write "
             "ratings only to a separate dataset repo: no page text, OCR outputs or "
-            "judge reasons. A missing destination is created public unless --private "
-            "is set. An existing one keeps its visibility."
+            "judge reasons. A missing destination is created private (--public to "
+            "create it public). An existing one keeps its visibility."
         ),
     )
     share.add_argument("results", help="Results repo written by `ocr-bench judge`")
@@ -2297,8 +2297,13 @@ def cmd_share(args: argparse.Namespace) -> None:
     visibility = "private" if result.private else "public"
     console.print(f"Board {state}: https://huggingface.co/datasets/{result.repo_id} ({visibility})")
     if result.private:
+        # The settings page works for every client version. The hf command needs
+        # huggingface_hub 2.x: 1.x has no --public on `hf repos settings`.
         console.print(
-            "The board is private. Look at it on the Hub; to publish it, run:\n"
+            "The board is private. Look at it on the Hub, then publish it under "
+            "Settings → Change visibility:\n"
+            f"  https://huggingface.co/datasets/{result.repo_id}/settings\n"
+            "or, with the hf CLI 2.0 or later:\n"
             f"  hf repos settings {result.repo_id} --repo-type dataset --public"
         )
 
