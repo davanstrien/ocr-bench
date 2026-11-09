@@ -18,7 +18,9 @@ Everything runs on the Hugging Face Hub: the OCR models and the judge run as [Jo
 | 5. Look at the results | `ocr-bench view` | free |
 | 6. Publish the scores | `ocr-bench share` | free |
 
-In the 425-page proof of concept, 8 OCR models and the judge Jobs used about $4.50 of Jobs time. The judge calls (about 6,400 comparisons) cost about $9.30.
+In the 425-page proof of concept, 8 OCR models ran and 7 were judged. The OCR and judge Jobs used about $4.50 of Jobs time, and the judge calls (about 6,400) cost about $9.30.
+
+Log in first (`hf auth login`, or export `HF_TOKEN`): `-s HF_TOKEN` in the Job commands below passes that token to the Job.
 
 ## Who sees your pages
 
@@ -33,7 +35,11 @@ Decide this first.
 | The judge model | each page image and two transcriptions | depends on the judge you choose |
 | The board repo (`share`) | ratings, settings and a fingerprint of the page set | private until you publish it |
 
-The default judge is `novita:Qwen/Qwen3.8-27B` through [HF Inference Providers](https://huggingface.co/docs/inference-providers/index), so Novita processes the page images. **If you need to control where your pages are sent, pass `--model` with an endpoint that meets your privacy needs**: a [Hugging Face Inference Endpoint](https://huggingface.co/docs/inference-endpoints) URL or a model you serve on Jobs (ocr-bench sends your HF token to both), or an OpenAI-compatible server that needs no API key (`https://host/v1/:org/model`). Boards judged by different judges, or by the same model on different providers, are not comparable.
+The default judge is `novita:Qwen/Qwen3.8-27B` through [HF Inference Providers](https://huggingface.co/docs/inference-providers/index), so Novita processes the page images.
+
+**If you need to control where your pages are sent, pass `--model` with an endpoint that meets your privacy needs.** It can be a [Hugging Face Inference Endpoint](https://huggingface.co/docs/inference-endpoints) URL or a model you serve on Jobs; ocr-bench sends your HF token to both. It can also be an OpenAI-compatible server that needs no API key (`https://host/v1/:org/model`).
+
+Boards judged by different judges, or by the same model on different providers, are not comparable.
 
 `run`, `judge` and `bench` never make a private repo public, and they stop before writing to an existing public repo for a private source. Do not change the visibility of an output or results repo yourself: they contain page text.
 
@@ -47,7 +53,7 @@ ocr-bench reads one Hub dataset with one row per page:
 | `page_id` | recommended | a stable, unique id for the page, for example `collection/item:page` |
 | slice columns | optional | labels for reporting, for example `collection`, `decade`, `doc_type` |
 
-Slice columns let `share` publish a board per label. **`share` publishes the labels as they are**, so use labels that may be public: `typescript` or `1950s`, not a person's name or a page's title. A slice column can have at most 50 labels, so do not use a per-page or per-document column.
+Slice columns let `share` publish a board per label. **`share` publishes the labels as they are**, so use labels that may be public: `typescript` or `1950s`, not a person's name or a page's title. A slice column can have at most 50 different labels on the judged pages, so do not use a per-page or per-document column.
 
 A simple way to build it: put the images in a folder with a `metadata.csv` (`file_name,page_id,collection,decade`) and push it as a private dataset:
 
@@ -79,6 +85,8 @@ ocr-bench run --list-models
 ocr-bench run <you>/my-pages <you>/my-pages-ocr --models glm-ocr lighton-ocr-2 dots-ocr --dry-run
 ocr-bench run <you>/my-pages <you>/my-pages-ocr --models glm-ocr lighton-ocr-2 dots-ocr --no-wait
 ```
+
+With `--no-wait`, `run` prints one Job per model and exits. Check them with `hf jobs ps` and `hf jobs logs <job-id>`. Each finished model appears as a pull request on the OCR output repo. Wait for all of them before step 3.
 
 `--dry-run` shows the GPU flavor and the arguments for each model. The cost is the flavor's price (`hf jobs hardware`) times the run time. The output repo is created private when the source is private.
 
@@ -121,7 +129,7 @@ hf jobs run --detach --timeout 3h --flavor cpu-upgrade -s HF_TOKEN \
     --save-results <you>/my-pages-results --private
 ```
 
-`--private` is automatic for a private source; passing it also stops the run if the results repo would be public.
+For a private source, the results repo is private automatically. Pass `--private` when the source is public and the results must stay private.
 
 **Set `--timeout`.** A Job stops after 30 minutes by default, and a few thousand comparisons take longer: the proof of concept judged about 85 a minute with `--concurrency 12` (the default is 8). `judge` pushes a checkpoint every 500 comparisons (not under `--full-rejudge`), so if a Job stops early, run the same command again: it reuses the checkpointed comparisons and judges the rest. Comparisons made after the last checkpoint are lost and paid for again.
 
@@ -147,7 +155,7 @@ ocr-bench share <you>/my-pages-results <you>/my-ocr-board \
   --alias "gov-typescripts-v1" --slice-column decade --dry-run
 ```
 
-`--dry-run` writes the board to a local folder (`./ocr-bench-share-<alias>`) and pushes nothing. Read the files. When they are right, run the same command without `--dry-run`. This creates the board repo private; look at it on the Hub, then publish it (below).
+`--dry-run` writes the board to a local folder (`./ocr-bench-share-<alias>`) and pushes nothing. Read the files. When they are right, run the same command without `--dry-run`. This creates the board repo private; look at it on the Hub, then publish it (below). `share` reads the results repo and the source dataset (for the slice labels and the page fingerprint), so your token needs read access to both.
 
 - The board has the overall ranking, one board per slice label, the judge settings and a fingerprint of the page set. It has no page text, OCR outputs, judge reasons, page ids, or the names of your repos. `--alias` is the public name of your page set.
 - Before it writes anything, `share` checks the final files: only allowed columns and values, and no fragment of any compared output or judge reason. If a check fails, nothing is written.

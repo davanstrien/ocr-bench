@@ -23,7 +23,7 @@ Never change the visibility of a source, OCR output or results repo. Never publi
 
 1. **Pages.** A private dataset, one row per page: `image` (required), `page_id` (recommended), and optional slice columns (`collection`, `decade`, `doc_type`). Slice labels are published by `share` as they are: check with the user that they may be public. At most 50 labels per slice column. Aim for 300–500 pages, one or a few per document, more than 10 pages per slice the user cares about (a model needs 10 judged pages in a slice to be ranked there), and a few labelled blank pages.
 2. **OCR outputs.** Either:
-   - **Recipes on Jobs:** `ocr-bench run <source> <ocr-repo> --models ... --dry-run`, then the same with `--no-wait`. Models: `ocr-bench run --list-models`. Each model becomes a PR config on `<ocr-repo>`. Use `--from-prs` in later steps.
+   - **Recipes on Jobs:** `ocr-bench run <source> <ocr-repo> --models ... --dry-run`, then the same with `--no-wait`. Models: `ocr-bench run --list-models`. Each model becomes a PR config on `<ocr-repo>`. Wait until every Job has finished (`hf jobs ps`, `hf jobs logs <id>`) before the audit. Use `--from-prs` in later steps.
    - **Bring your own:** one dataset with `image` and one text column per model. The column name is the model's name, and `share` publishes it: check it may be public. `"[OCR ERROR]"` marks a failed page. Use `--columns <names>` in later steps.
 3. **Audit (free).** `ocr-bench audit <ocr-repo> --from-prs --screen --json` (or `--columns ...`). Report to the user: models with many empty outputs, error placeholders, loops, text on blank pages, and the suggested text cap. Exit code 1 means the outputs would break a judge run; 2 means the audit could not run.
 4. **Judge, as a Job** (after the cost OK):
@@ -36,9 +36,14 @@ Never change the visibility of a source, OCR output or results repo. Never publi
        --max-comparisons <budget> --save-results <results-repo> --private
    ```
 
-   Always set `--timeout`: a Job stops after 30 minutes by default, and judging runs at about 85 comparisons a minute with `--concurrency 12`. Follow with `hf jobs logs <id>`, and check the end state with `hf jobs inspect <id>` (a timeout shows as `ERROR`, `Job timeout`). If it stopped early, run the same command again: it reuses the checkpoints (every 500 comparisons). The leaderboard is printed at the end. To add a model later, get its outputs and run the same command: only the new pairs are judged. If `judge` says the inputs changed (for example, one model was re-run), ask the user before `--full-rejudge` or a new results repo: either costs a full run.
+   - The user must be logged in (`hf auth login` or `HF_TOKEN`); `-s HF_TOKEN` passes that token to the Job.
+   - Always set `--timeout`: a Job stops after 30 minutes by default, and judging runs at about 85 comparisons a minute with `--concurrency 12`.
+   - Follow with `hf jobs logs <id>`. Check the end state with `hf jobs inspect <id>`: a timeout shows as `ERROR`, `Job timeout`.
+   - If it stopped early, run the same command again: it reuses the checkpoints (every 500 comparisons). The leaderboard is printed at the end.
+   - To add a model later, get its outputs and run the same command: only the new pairs are judged.
+   - If `judge` says the inputs changed (for example, one model was re-run), ask the user before `--full-rejudge` or a new results repo: either costs a full run.
 5. **Report.** The leaderboard with confidence intervals, the Pages column (a model ranked on fewer pages has failed pages), and which models overlap. Do not call models with overlapping intervals different. Suggest `ocr-bench view <results-repo>` (local, needs `ocr-bench[viewer]` and a login that can read the results and the source) to read comparisons and vote.
-6. **Share (only if the user wants a public board).** `ocr-bench share <results-repo> <board-repo> --alias <public name> [--slice-column <col>] --dry-run`. Show the user the files in `./ocr-bench-share-<alias>`. Then run the same command without `--dry-run`: the board repo is created private. Give the user its URL to check. Make it public only after they agree, as `share` prints: the repo's Settings page, or `hf repos settings ... --public` (`hf` 2.0 or later; check with `hf version`). Use a new or empty board repo.
+6. **Share (only if the user wants a public board).** `ocr-bench share <results-repo> <board-repo> --alias <public name> [--slice-column <col>] --dry-run`. Show the user the files in `./ocr-bench-share-<alias>`. (`share` reads the results repo and the source dataset, so the token needs read access to both.) Then run the same command without `--dry-run`: the board repo is created private. Give the user its URL to check. Make it public only after they agree, as `share` prints: the repo's Settings page, or `hf repos settings ... --public` (`hf` 2.0 or later; check with `hf version`). Use a new or empty board repo.
 
 ## Facts to keep straight
 
