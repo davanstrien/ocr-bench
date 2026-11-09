@@ -1013,7 +1013,8 @@ def _check_dest(dest: str) -> str:
     # must be a valid Hub repo id; validate_repo_id lets a trailing newline through.
     try:
         validate_repo_id(dest)
-        valid = dest.count("/") == 1 and dest == dest.strip()
+        # validate_repo_id's \w also matches non-ASCII letters, which the Hub refuses.
+        valid = dest.count("/") == 1 and dest == dest.strip() and dest.isascii()
     except HFValidationError:
         valid = False
     if not valid:
