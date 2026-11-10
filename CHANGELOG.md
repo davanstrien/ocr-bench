@@ -22,6 +22,9 @@ current behaviour.
 - A `judge` run on a results repo that already met the adaptive stopping rule judged one more batch of five pages before it stopped. Each such run added comparisons to a board that needed none. This was in `--adaptive-strategy balanced` (the default), which checked the rule only after a batch. `targeted` already checked it on the stored comparisons first.
   - `balanced` now also checks the rule on the stored comparisons before the first batch. When they meet it, the run makes no judge call and prints `Existing comparisons already meet the adaptive stopping criteria.`
   - A run with a new model still judges: a model with no comparisons has no interval, so the rule is not met.
+- A 16-bit greyscale page image reached the judge as a white image. This applied to images that Pillow loads in mode `I;16` (also `I;16L` and `I;16B`), `I` or `F`, for example a 16-bit greyscale TIFF or PNG. The conversion to RGB set every value above 255 to white, so the judge compared the two outputs without the page.
+  - `judge` now maps the range of such an image, from its darkest to its lightest value, onto 0 to 255 before the conversion. Images in other modes are sent as before, and so are images in these modes whose values are all 255 or below.
+  - Stored comparisons are not changed. To judge such pages again with the image, use `--full-rejudge`.
 
 ### New
 

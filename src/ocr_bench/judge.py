@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from itertools import combinations
-from typing import Any
+from typing import Any, cast
 
 from PIL import Image
 
@@ -598,10 +598,48 @@ def _apply_cap(text: str, max_len: int) -> tuple[str, bool]:
 # --- Image helpers ---
 
 
+# PIL greyscale modes that hold values above 255: 16-bit integer (in its
+# three byte-order spellings), 32-bit integer and 32-bit float.
+_WIDE_GREY_MODES = frozenset({"I;16", "I;16L", "I;16B", "I", "F"})
+
+
+def _wide_grey_to_8bit(image: Image.Image) -> Image.Image:
+    """Bring a 16-bit, 32-bit or float greyscale image into the 8-bit range.
+
+    ``Image.convert("RGB")`` clips these modes: every value above 255 becomes
+    255. A 16-bit scan with paper near 30000 and ink near 2000, converted that
+    way, is a white image with no text on it.
+
+    When the image holds a value above 255, its own range is mapped linearly
+    onto 0 to 255: the darkest pixel becomes black and the lightest white.
+    The result is an ``L`` image. An image whose values are all 255 or below
+    is already in the 8-bit range, and an image with one value everywhere has
+    no range to map; both are returned unchanged. So is an image in any other
+    mode.
+    """
+    if image.mode not in _WIDE_GREY_MODES:
+        return image
+    # "F" holds the values of all these modes. getextrema and point do not
+    # accept "I;16L" and "I;16B", but they accept "F".
+    as_float = image.convert("F")
+    # A single-band image has one (min, max) pair.
+    low, high = cast(tuple[float, float], as_float.getextrema())
+    if high <= 255 or high == low:
+        return image
+    scale = 255.0 / (high - low)
+    # The conversion from "F" to "L" drops the fraction, so add 0.5 to round.
+    offset = 0.5 - low * scale
+    return as_float.point(lambda value: value * scale + offset).convert("L")
+
+
 def image_to_base64(image: Image.Image, max_dim: int = MAX_IMAGE_DIM) -> str:
-    """Convert a PIL image to a base64-encoded JPEG string, resizing if needed."""
+    """Convert a PIL image to a base64-encoded JPEG string, resizing if needed.
+
+    16-bit, 32-bit and float greyscale images are scaled into the 8-bit range
+    first (see :func:`_wide_grey_to_8bit`).
+    """
     if image.mode != "RGB":
-        image = image.convert("RGB")
+        image = _wide_grey_to_8bit(image).convert("RGB")
     if max(image.size) > max_dim:
         ratio = max_dim / max(image.size)
         new_size = (int(image.width * ratio), int(image.height * ratio))
