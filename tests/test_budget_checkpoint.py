@@ -574,6 +574,79 @@ class TestFailedModelStatus:
         assert metadata.failed_models == ["model-a"]
         assert metadata.failed_outputs == {"model-a": 10}
 
+    @pytest.mark.parametrize("flags", [[], ["--max-samples", "10"], ["--max-samples", "50"]])
+    def test_whole_dataset_run_counts_every_row(self, flags):
+        # Without --max-samples below the dataset length, the judged sample is
+        # every row, so the counts are those of the whole dataset.
+        ds, ocr = make_ds(n=10)
+        ds._columns["col_a"] = ["[OCR ERROR]"] * 10
+        ds._columns["col_b"][3] = "[OCR ERROR]"
+        ds._columns["col_b"][7] = "[OCR ERROR]"
+
+        _, m_publish, _ = _run_judge(["--no-adaptive", "--checkpoint-every", "0", *flags], ds, ocr)
+
+        metadata = _published_metadata(m_publish)
+        assert metadata.failed_models == ["model-a"]
+        assert metadata.failed_outputs == {"model-a": 10, "model-b": 2}
+
+    def test_status_and_counts_follow_the_judged_sample(self, capsys):
+        # 40 rows, 10 of them judged. model-x has an error sentinel on every
+        # judged row and text on the others. model-y is the other way round.
+        from ocr_bench.publish import build_leaderboard_rows
+
+        ds, ocr = make_ds(n=40, models=("a", "b", "x", "y"))
+        sample = set(cli.sample_indices(40, 10, 42))
+        for row in range(40):
+            failing_column = "col_x" if row in sample else "col_y"
+            ds._columns[failing_column][row] = "[OCR ERROR]"
+
+        _, m_publish, _ = _run_judge(
+            ["--no-adaptive", "--checkpoint-every", "0", "--max-samples", "10"], ds, ocr
+        )
+
+        board = m_publish.call_args.args[1]
+        metadata = _published_metadata(m_publish)
+        assert metadata.failed_models == ["model-x"]
+        assert metadata.failed_outputs == {"model-x": 10}
+        assert metadata.failed_outputs_scope == "sample"
+        assert "model-x" not in board.elo
+        rows = {
+            row["model"]: row
+            for row in build_leaderboard_rows(
+                board, metadata.failed_models, metadata.failed_outputs
+            )
+        }
+        assert rows["model-x"]["status"] == "failed"
+        assert rows["model-x"]["elo"] is None
+        assert rows["model-y"]["status"] == "ranked"
+        assert rows["model-y"]["failed_outputs"] == 0
+        assert rows["model-y"]["wins"] + rows["model-y"]["losses"] + rows["model-y"]["ties"] == 20
+        # The counts agree with the coverage report, which is per sample.
+        for model, entry in metadata.model_coverage.items():
+            assert entry["sentinel_pages"] == metadata.failed_outputs.get(model, 0)
+        assert metadata.model_coverage["model-x"]["ranked_pages"] == 0
+        assert metadata.model_coverage["model-y"]["ranked_pages"] == 10
+        out = " ".join(capsys.readouterr().out.split())  # undo console line wrapping
+        assert "model-x: 10/10 outputs in the judged sample are error sentinels (100%)" in out
+        assert "this run is marked FAILED" in out
+        assert "model-y:" not in out
+
+    def test_model_failed_on_the_sample_does_not_block_adaptive_stopping(self):
+        # model-x has text only on rows outside the judged sample. In the model
+        # grid it would have no comparison and no interval, and a model with no
+        # interval keeps the adaptive stopping rule from being met.
+        ds, ocr = make_ds(n=80, models=("a", "b", "c", "x"))
+        for row in cli.sample_indices(80, 40, 42):
+            ds._columns["col_x"][row] = "[OCR ERROR]"
+
+        judge, m_publish, _ = _run_judge(
+            ["--max-samples", "40", "--checkpoint-every", "0"], ds, ocr, judge=NameOrderJudge()
+        )
+
+        assert _published_metadata(m_publish).failed_models == ["model-x"]
+        # Two batches of 5 pages x 3 pairs, then the rule is met.
+        assert judge.judged == 30
+
 
 def _prose_ds(n: int, lengths: dict[str, int]):
     """A FakeDataset whose outputs are distinct prose of a set length per model."""
@@ -607,7 +680,7 @@ class TestCoverageReport:
             "model-c": {"sampled_pages": 10, "ranked_pages": 10, "sentinel_pages": 0},
         }
         out = " ".join(capsys.readouterr().out.split())  # undo console line wrapping
-        assert "Note: model-b: 1/10 outputs are error sentinels (10.0%)" in out
+        assert "Note: model-b: 1/10 outputs in the judged sample are error sentinels (10.0%)" in out
         assert "its rank leaves out those pages" in out
         assert "9/10" in out  # the Pages column
         assert "model-b: ranked on 9 of 10 pages; 1 error sentinel(s) left out" in out
@@ -638,7 +711,7 @@ class TestCoverageReport:
         ds._columns["col_b"][1] = "[OCR ERROR]"  # 20%
         _run_judge(["--no-adaptive", "--checkpoint-every", "0"], ds, ocr)
         out = " ".join(capsys.readouterr().out.split())
-        assert "model-b: 2/10 outputs are error sentinels (20%)" in out
+        assert "model-b: 2/10 outputs in the judged sample are error sentinels (20%)" in out
         assert "Note: model-b" not in out
 
 

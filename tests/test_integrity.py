@@ -112,6 +112,23 @@ class TestComputeModelStats:
         stats = compute_model_stats(ds, {"col": "model-x"})
         assert stats[0].n_sentinel == 1
 
+    def test_indices_limit_the_rows_counted(self):
+        ds = Dataset.from_dict(
+            {
+                "image": [None] * 4,
+                "cfg_a": ["[OCR ERROR]", "good text one", "[OCR ERROR]", "good text two"],
+                "cfg_b": ["good text one", "[OCR ERROR]", "good text two", "[OCR ERROR]"],
+            }
+        )
+        columns = {"cfg_a": "model-a", "cfg_b": "model-b"}
+        by_model = {s.model: s for s in compute_model_stats(ds, columns, indices=[2, 0])}
+        assert (by_model["model-a"].n_rows, by_model["model-a"].n_sentinel) == (2, 2)
+        assert (by_model["model-b"].n_rows, by_model["model-b"].n_sentinel) == (2, 0)
+        # Without indices, every row is counted.
+        whole = {s.model: s for s in compute_model_stats(ds, columns)}
+        assert (whole["model-a"].n_rows, whole["model-a"].n_sentinel) == (4, 2)
+        assert (whole["model-b"].n_rows, whole["model-b"].n_sentinel) == (4, 2)
+
 
 class TestFailedOutputCounts:
     def test_only_nonzero(self):
