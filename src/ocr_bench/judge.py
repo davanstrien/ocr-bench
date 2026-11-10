@@ -605,7 +605,8 @@ _WIDE_GREY_MODES = frozenset({"I;16", "I;16L", "I;16B", "I;16N", "I", "F"})
 
 
 # Rows converted at a time. The page is scaled in strips, so the extra memory
-# is one strip in float64 plus the 8-bit result, not several full-size copies.
+# is a strip or two in float64 plus the 8-bit result, not several full-size
+# float copies.
 _STRIP_ROWS = 256
 
 
