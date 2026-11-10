@@ -383,6 +383,31 @@ class TestBoards:
         assert "⚠ marks a model" in readme
         assert "Error outputs in the source dataset: org/model-weak: 3." in readme
 
+    def test_counts_over_the_judged_sample_are_named_so(self):
+        # judge records the scope when it counts error outputs over the sample.
+        evaluation = _evaluation(_results(range(20)), failed_outputs={"org/model-weak": 3})
+        evaluation.metadata["failed_outputs_scope"] = "sample"
+        plan = _plan(evaluation)
+        assert plan.settings["failed_outputs_scope"] == "judged sample"
+        assert json.loads(plan.files["board.json"])["failed_outputs_scope"] == "judged sample"
+        readme = plan.files["README.md"].decode()
+        assert "Error outputs in the judged sample: org/model-weak: 3." in readme
+        assert "in the source dataset" not in readme
+
+    @pytest.mark.parametrize("stored", ["missing", None, "", "something-else"])
+    def test_counts_with_no_recorded_scope_are_over_the_source_dataset(self, stored):
+        # Results judged before the field existed counted over every row. The
+        # metadata rows of such a run have no key, or None after alignment.
+        evaluation = _evaluation(_results(range(20)), failed_outputs={"org/model-weak": 3})
+        if stored != "missing":
+            evaluation.metadata["failed_outputs_scope"] = stored
+        plan = _plan(evaluation)
+        assert plan.settings["failed_outputs_scope"] == "source dataset"
+        assert json.loads(plan.files["board.json"])["failed_outputs_scope"] == "source dataset"
+        readme = plan.files["README.md"].decode()
+        assert "Error outputs in the source dataset: org/model-weak: 3." in readme
+        assert "in the judged sample" not in readme
+
     def test_the_card_names_the_board_repo_in_its_data_snippets(self):
         plan = _plan(_evaluation(_results(range(20))), board_repo="me/board")
         readme = plan.files["README.md"].decode()

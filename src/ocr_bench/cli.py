@@ -1401,19 +1401,29 @@ def cmd_judge(args: argparse.Namespace) -> None:
     for col, model in ocr_columns.items():
         console.print(f"  {col} → {model}")
 
+    # The judged sample: the sentinel counts, the text-cap warning, the
+    # fingerprints and the coverage report use it in this order. judge visits
+    # it in judging_order (below).
+    judged_sample = sample_indices(len(ds), args.max_samples, args.seed)
+
     # --- Input integrity: sentinel outputs (issue #46) ---
     # Error sentinels (e.g. "[OCR ERROR]") are excluded from judging by
     # build_comparisons; here we count them per model for the metadata + card
-    # and warn loudly when a model's run largely failed on this corpus.
+    # and warn loudly when a model's run largely failed on this corpus. The
+    # counts are over the judged sample, the only rows that can be judged, so
+    # they agree with the coverage report. An output on a row outside the
+    # sample does not change a model's status.
     model_stats = compute_model_stats(
         ds,
         ocr_columns,
         max_ocr_text_len=args.max_ocr_text_len,
         normalize=normalize,
+        indices=judged_sample,
     )
     failed_outputs = failed_output_counts(model_stats)
-    # A fully sentinel-backed run has no comparable OCR output at all. Keep it
-    # visible as FAILED, but never assign it an arbitrary disconnected ELO/rank.
+    # A model whose every sampled output is a sentinel has no comparable OCR
+    # output to judge. Keep it visible as FAILED, but never assign it an
+    # arbitrary disconnected ELO/rank.
     # Partial failures remain rankable on their successful outputs with a
     # degraded warning, while the audit still blocks rates over its threshold.
     failed_models = sorted(
@@ -1426,21 +1436,18 @@ def cmd_judge(args: argparse.Namespace) -> None:
             else:
                 consequence = "its rank uses successful outputs only and is marked degraded"
             console.print(
-                f"[yellow]⚠ {stat.model}: {stat.n_sentinel}/{stat.n_rows} outputs are "
-                f"error sentinels ({stat.sentinel_rate:.0%}) — excluded from judging; "
-                f"{consequence}.[/yellow]"
+                f"[yellow]⚠ {stat.model}: {stat.n_sentinel}/{stat.n_rows} outputs in the "
+                f"judged sample are error sentinels ({stat.sentinel_rate:.0%}) — excluded "
+                f"from judging; {consequence}.[/yellow]"
             )
         elif stat.n_sentinel:
             # Under the warning rate, but its rank still rests on fewer pages.
             console.print(
-                f"Note: {stat.model}: {stat.n_sentinel}/{stat.n_rows} outputs are error "
-                f"sentinels ({stat.sentinel_rate:.1%}). They are excluded from judging, "
-                "so its rank leaves out those pages."
+                f"Note: {stat.model}: {stat.n_sentinel}/{stat.n_rows} outputs in the judged "
+                f"sample are error sentinels ({stat.sentinel_rate:.1%}). They are excluded "
+                "from judging, so its rank leaves out those pages."
             )
 
-    # The judged sample: the text-cap warning, the fingerprints and the coverage
-    # report use it in this order. judge visits it in judging_order (below).
-    judged_sample = sample_indices(len(ds), args.max_samples, args.seed)
     _warn_text_cap(ds, ocr_columns, judged_sample, args.max_ocr_text_len, normalize)
 
     # Stable ordering matters when ELOs tie: adjacency drives targeted sampling.

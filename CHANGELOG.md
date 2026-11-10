@@ -25,6 +25,11 @@ current behaviour.
 - A 16-bit greyscale page image reached the judge as a white image. This applied to images that Pillow loads in mode `I;16` (also `I;16L` and `I;16B`), `I` or `F`, for example a 16-bit greyscale TIFF or PNG. The conversion to RGB set every value above 255 to white, so the judge compared the two outputs without the page.
   - `judge` now maps the range of such an image, from its darkest to its lightest value, onto 0 to 255 before the conversion. Images in other modes are sent as before, and so are images in these modes whose values are all 255 or below.
   - Stored comparisons are not changed. To judge such pages again with the image, use `--full-rejudge`.
+- With `--max-samples` below the dataset length, `judge` counted error outputs (such as `[OCR ERROR]`) over every row of the dataset, but it judges only the sampled rows. A model with an error output on every sampled row and text on some other row was not marked FAILED. It was published with rating 1500, no interval and no comparisons, in rank among the other models, and adaptive mode could not stop. A model with error outputs only outside the sample was published as `degraded` (⚠).
+  - `judge` now counts over the judged sample. A model is FAILED when every output in the sample is an error output, and `degraded` when some are. `failed_outputs`, in the leaderboard and in the metadata, is the count in the sample: the same number as in the Coverage section of the results card. A run without `--max-samples` gives the same counts as before.
+  - The warning that `judge` prints and the results card say that the count is for the judged sample.
+  - Each row of the `metadata` config records `failed_outputs_scope`, with the value `sample`. Rows written by earlier versions have no value: their counts are over the whole dataset.
+  - `share` reads that field. `board.json` records `failed_outputs_scope` as `judged sample` or `source dataset`, and the card says "Error outputs in the judged sample" or "Error outputs in the source dataset". A board shared from results judged by an earlier version keeps the "source dataset" wording, and its counts and statuses are not changed.
 
 ### New
 
