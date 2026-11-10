@@ -205,6 +205,21 @@ class TestImageToBase64:
         # the finite pixels (0 to 30000, zero stays black).
         assert scaled.tolist() == [[17, 0, 255, 0, 255, 128]]
 
+    def test_wide_grey_float_page_takes_its_range_from_every_strip(self):
+        # The lightest value is in the first strip, the darkest in the last,
+        # and a whole strip in between has no finite pixel.
+        import numpy as np
+
+        values = np.full((800, 4), 20000.0, dtype=np.float32)
+        values[0, :] = 40000.0
+        values[256:512, :] = np.nan
+        values[799, :] = -40000.0
+        scaled = np.asarray(_wide_grey_to_8bit(Image.fromarray(values)))
+        assert scaled[0].tolist() == [255] * 4
+        assert scaled[799].tolist() == [0] * 4
+        assert scaled[100].tolist() == [191] * 4  # 60000 of 80000
+        assert scaled[300].tolist() == [0] * 4
+
     def test_wide_grey_float_page_with_no_finite_pixel_does_not_fail(self):
         import numpy as np
 

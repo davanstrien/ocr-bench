@@ -996,8 +996,11 @@ def _string_list(value: object) -> list[str] | None:
 
 # Printed when a run finds that the stored comparisons need no more judging.
 _ALREADY_MEETS_STOPPING_RULE = (
-    "[green]Existing comparisons already meet the adaptive stopping criteria.[/green] "
-    "To judge more pages anyway, run with [bold]--no-adaptive[/bold] (add "
+    "[green]Existing comparisons already meet the adaptive stopping criteria.[/green]"
+)
+# Added in balanced mode. Targeted mode cannot be combined with --no-adaptive.
+_HOW_TO_JUDGE_MORE = (
+    " To judge more pages anyway, run with [bold]--no-adaptive[/bold] (add "
     "[bold]--max-comparisons N[/bold] to judge N more comparisons)."
 )
 
@@ -1821,7 +1824,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 ):
                     _, stored_decisions = _stopping_decisions(existing_results)
                     if not unresolved_pairs(stored_decisions):
-                        console.print(_ALREADY_MEETS_STOPPING_RULE)
+                        console.print(_ALREADY_MEETS_STOPPING_RULE + _HOW_TO_JUDGE_MORE)
                         break
 
             # Trim the final batch to land exactly on the budget: the run stops
