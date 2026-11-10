@@ -829,9 +829,10 @@ class TestLoadExistingComparisons:
         assert [r["shown_first"] for r in board.comparison_log] == ["B", "A", "", "", "", ""]
 
     @patch("ocr_bench.publish.load_dataset")
-    def test_backward_compat_missing_truncation_flags(self, mock_load):
-        # Old published rows predate the truncation flags — they must load
-        # cleanly, defaulting the flags to False rather than raising.
+    def test_rows_without_truncation_flags_load_as_not_recorded(self, mock_load):
+        # Old published rows predate the truncation flags. They must load
+        # cleanly, and "not recorded" (None) must stay apart from "not cut"
+        # (False): share reports a count only where it is known.
         mock_ds = MagicMock()
         mock_ds.__iter__ = lambda self: iter(
             [
@@ -851,8 +852,8 @@ class TestLoadExistingComparisons:
         )
         mock_load.return_value = mock_ds
         results = load_existing_comparisons("user/results")
-        assert results[0].truncated_a is False
-        assert results[0].truncated_b is False
+        assert results[0].truncated_a is None
+        assert results[0].truncated_b is None
 
     @patch("ocr_bench.publish.load_dataset")
     def test_reads_truncation_flags(self, mock_load):

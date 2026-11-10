@@ -21,6 +21,16 @@ ShownFirst = Literal["A", "B", ""]
 # identical pages give zero-width intervals. Do not call a ranking resolved below this.
 MIN_PAGES_TO_RESOLVE = 10
 
+# The paired bootstrap test behind the rank ranges calls two equally good models
+# apart too often on few pages: in simulations about 9% of the time at 10 pages,
+# 7% at 20, 6% at 30 and 5% at 300, against the 5% it is set to. A model on
+# fewer pages than this is not tested against any model.
+MIN_PAGES_FOR_RANK_RANGE = 20
+
+# A percentile bound from a few replicates is close to the smallest one, so the
+# rank ranges are left out below this number of replicates.
+MIN_REPLICATES_FOR_RANK_RANGE = 100
+
 
 @dataclass
 class ComparisonResult:
@@ -46,8 +56,10 @@ class ComparisonResult:
     text_b: str = ""
     col_a: str = ""
     col_b: str = ""
-    truncated_a: bool = False
-    truncated_b: bool = False
+    # Whether the judge read a cut version of the output. None on a stored row
+    # that does not record it.
+    truncated_a: bool | None = False
+    truncated_b: bool | None = False
     # Hash of the source/judge/sampling provenance for safe incremental resume.
     # Historical rows lack it and must not be silently reused.
     provenance_hash: str = ""
@@ -64,6 +76,10 @@ class Leaderboard:
     comparison_log: list[dict[str, object]] = field(default_factory=list)
     elo_ci: dict[str, tuple[float, float]] = field(default_factory=dict)
     pages_by_model: dict[str, int] = field(default_factory=dict)
+    # model → its rank range (first rank, last rank), from the paired bootstrap
+    # of rating differences (see ``_rank_ranges``). Empty without a bootstrap,
+    # with too few resamples, or with fewer than two models on enough pages.
+    rank_range: dict[str, tuple[int, int]] = field(default_factory=dict)
 
     def has_enough_pages_to_resolve(self, model: str) -> bool:
         """False when a model's interval rests on too few pages to stop on.
@@ -213,31 +229,31 @@ def _theta_to_elo(theta: dict[str, float], center: float = 1500.0) -> dict[str, 
     return {name: 400.0 * math.log10(t / geo_mean) + center for name, t in theta.items()}
 
 
-def _bootstrap_ci(
+def _bootstrap_replicates(
     results: list[ComparisonResult],
     model_names: list[str],
     n_bootstrap: int = 1000,
-    ci: float = 0.95,
     seed: int = 42,
-) -> dict[str, tuple[float, float]]:
-    """Compute bootstrap confidence intervals for ELO ratings.
+) -> list[dict[str, float]]:
+    """Fit the ratings on ``n_bootstrap`` resamples of the pages.
 
-    Resamples whole pages with replacement, fits BT-MLE each time, and
-    returns percentile-based CIs. Comparisons from one page share that page's
-    image and difficulty, so a page is the independent unit.
+    Resamples whole pages with replacement and fits BT-MLE each time.
+    Comparisons from one page share that page's image and difficulty, so a page
+    is the independent unit. Each replicate maps the models it holds to their
+    ratings, shifted onto the scale of the fit on all pages.
     """
     if not results or not model_names:
-        return {}
+        return []
 
     rng = random.Random(seed)
     results_by_page: dict[int, list[ComparisonResult]] = {}
     for result in results:
         results_by_page.setdefault(result.sample_idx, []).append(result)
     pages = [results_by_page[page_idx] for page_idx in sorted(results_by_page)]
-    elo_samples: dict[str, list[float]] = {name: [] for name in model_names}
     full_win_counts, _ = _build_win_matrix(results)
     full_elos = _theta_to_elo(_bt_mle(full_win_counts, model_names))
 
+    replicates: list[dict[str, float]] = []
     for _ in range(n_bootstrap):
         boot = [result for page in rng.choices(pages, k=len(pages)) for result in page]
         # A model absent from every resampled page has no evidence in this
@@ -252,23 +268,130 @@ def _bootstrap_ci(
         scale_shift = sum(full_elos[name] - elos[name] for name in replicate_models) / len(
             replicate_models
         )
-        for name in replicate_models:
-            elo_samples[name].append(elos[name] + scale_shift)
+        replicates.append({name: elos[name] + scale_shift for name in replicate_models})
+    return replicates
 
+
+def _percentile_bounds(samples: list[float], ci: float = 0.95) -> tuple[float, float]:
+    """The lower and upper percentile of ``samples`` for a ``ci`` interval."""
+    ordered = sorted(samples)
     alpha = (1.0 - ci) / 2.0
     lo_pct = alpha * 100
     hi_pct = (1.0 - alpha) * 100
+    lo_idx = int(len(ordered) * lo_pct / 100)
+    hi_idx = min(int(len(ordered) * hi_pct / 100), len(ordered) - 1)
+    return ordered[lo_idx], ordered[hi_idx]
 
+
+def _intervals(
+    replicates: list[dict[str, float]], model_names: list[str], ci: float = 0.95
+) -> dict[str, tuple[float, float]]:
+    """Percentile interval of each model's rating over the bootstrap replicates."""
     cis: dict[str, tuple[float, float]] = {}
     for name in model_names:
-        samples = sorted(elo_samples[name])
-        if not samples:
-            continue
-        lo_idx = int(len(samples) * lo_pct / 100)
-        hi_idx = min(int(len(samples) * hi_pct / 100), len(samples) - 1)
-        cis[name] = (samples[lo_idx], samples[hi_idx])
-
+        samples = [replicate[name] for replicate in replicates if name in replicate]
+        if samples:
+            cis[name] = _percentile_bounds(samples, ci)
     return cis
+
+
+def _bootstrap_ci(
+    results: list[ComparisonResult],
+    model_names: list[str],
+    n_bootstrap: int = 1000,
+    ci: float = 0.95,
+    seed: int = 42,
+) -> dict[str, tuple[float, float]]:
+    """Compute bootstrap confidence intervals for ELO ratings.
+
+    Percentile intervals over page-level resamples (see
+    :func:`_bootstrap_replicates`).
+    """
+    replicates = _bootstrap_replicates(results, model_names, n_bootstrap=n_bootstrap, seed=seed)
+    return _intervals(replicates, model_names, ci)
+
+
+def _clearly_above(
+    higher: str, lower: str, replicates: list[dict[str, float]], ci: float = 0.95
+) -> bool:
+    """Whether ``higher`` is rated above ``lower`` on this data, beyond resampling noise.
+
+    The difference is taken within each replicate, where both ratings come
+    from the same resampled pages, and it is clear when its percentile interval
+    lies above zero.
+
+    This test can call two models apart whose own intervals overlap. On boards
+    of three or more models the rule "the two intervals do not overlap" is
+    stricter: in simulations it called equally good models apart about 1% of
+    the time, against 6 to 7% for this test, and separated fewer models that
+    do differ. On a board of two models the two rules gave the same answer
+    (about 4%). Neither rule implies the other for every set of replicates.
+    """
+    differences = [
+        replicate[higher] - replicate[lower]
+        for replicate in replicates
+        if higher in replicate and lower in replicate
+    ]
+    if not differences:
+        return False
+    low, _ = _percentile_bounds(differences, ci)
+    return low > 0
+
+
+def _rank_ranges(
+    elo: dict[str, float],
+    replicates: list[dict[str, float]],
+    pages_by_model: dict[str, int],
+    ci: float = 0.95,
+) -> dict[str, tuple[int, int]]:
+    """The rank range of each model: (first rank, last rank).
+
+    A model's best rank is one more than the number of models clearly above it;
+    its worst rank is the number of models minus those clearly below it (see
+    :func:`_clearly_above`). The range is then widened, if needed, to include
+    the model's rank in the fit on all pages.
+
+    A range of one rank means the model is clearly apart from every other
+    model in ``elo``. A wider range does not say which models tested clearly
+    above or below it, and the widening to the fitted rank can hide how many
+    did. Two ranges do not decide a pair: two models with overlapping ranges
+    can be clearly apart, and two models with ranges that do not overlap can
+    fail the test for that pair (A tests clearly above C and D, C and D test
+    clearly above B, and the difference between A and B is still not clear).
+
+    A model on fewer than ``MIN_PAGES_FOR_RANK_RANGE`` pages is not tested
+    against any model, which can only widen the other ranges. There are no
+    ranges when fewer than two models have that many pages (no pair can be
+    tested), or with fewer than ``MIN_REPLICATES_FOR_RANK_RANGE`` replicates.
+
+    The tests are one per pair at the 95% level, with no correction for the
+    number of pairs. The rate at which equally good models are called apart
+    depends on the data: two models with the same rating in every replicate
+    are never called apart, and in simulations (Bradley-Terry results, every
+    pair on every page, 20 pages or more) it was 4 to 7% of pairs. In the same
+    simulations about 99% of models had their true rank inside their range.
+    """
+    if len(replicates) < MIN_REPLICATES_FOR_RANK_RANGE:
+        return {}
+    names = sorted(elo, key=lambda name: (-elo[name], name))
+    enough_pages = {name: pages_by_model.get(name, 0) >= MIN_PAGES_FOR_RANK_RANGE for name in names}
+    if sum(enough_pages.values()) < 2:
+        return {}
+    ranges: dict[str, tuple[int, int]] = {}
+    for position, name in enumerate(names, start=1):
+        clearly_above_it = 0
+        clearly_below_it = 0
+        for other in names:
+            if other == name or not (enough_pages[name] and enough_pages[other]):
+                continue
+            if _clearly_above(other, name, replicates, ci):
+                clearly_above_it += 1
+            elif _clearly_above(name, other, replicates, ci):
+                clearly_below_it += 1
+        best = min(1 + clearly_above_it, position)
+        worst = max(len(names) - clearly_below_it, position)
+        ranges[name] = (best, worst)
+    return ranges
 
 
 def rankings_resolved(board: Leaderboard) -> bool:
@@ -375,11 +498,13 @@ def compute_elo(
 
     # Bootstrap CIs
     if n_bootstrap > 0 and results:
-        board.elo_ci = _bootstrap_ci(results, model_names, n_bootstrap=n_bootstrap)
+        replicates = _bootstrap_replicates(results, model_names, n_bootstrap=n_bootstrap)
+        board.elo_ci = _intervals(replicates, model_names)
         pages_seen: dict[str, set[int]] = {name: set() for name in model_names}
         for result in results:
             pages_seen.setdefault(result.model_a, set()).add(result.sample_idx)
             pages_seen.setdefault(result.model_b, set()).add(result.sample_idx)
         board.pages_by_model = {name: len(pages) for name, pages in pages_seen.items()}
+        board.rank_range = _rank_ranges(board.elo, replicates, board.pages_by_model)
 
     return board

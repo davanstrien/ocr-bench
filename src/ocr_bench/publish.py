@@ -275,8 +275,8 @@ def load_existing_comparisons(repo_id: str, revision: str | None = None) -> list
                     text_b=row.get("text_b", ""),
                     col_a=row.get("col_a", ""),
                     col_b=row.get("col_b", ""),
-                    truncated_a=row.get("truncated_a", False),
-                    truncated_b=row.get("truncated_b", False),
+                    truncated_a=row.get("truncated_a"),
+                    truncated_b=row.get("truncated_b"),
                     provenance_hash=row.get("provenance_hash", ""),
                 )
             )

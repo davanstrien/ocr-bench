@@ -1272,3 +1272,363 @@ class TestCli:
             cli.main()
         assert exc.value.code == 1
         assert "holds text from a compared page" in capsys.readouterr().out
+
+
+class TestRankRangeAndCoverage:
+    """What the card says beyond a rating: rank range, pages per pair, cut outputs."""
+
+    @pytest.fixture(autouse=True)
+    def _enough_resamples_for_rank_ranges(self, monkeypatch):
+        monkeypatch.setattr(share, "N_BOOTSTRAP", 200)
+
+    def test_rows_and_card_give_the_rank_range_of_the_fit(self):
+        results = _results(range(40))
+        plan = _plan(_evaluation(results))
+        expected = compute_elo(results, MODELS, n_bootstrap=200).rank_range
+        assert set(expected.values()) == {(1, 2), (3, 3)}  # not all the same, not all (rank, rank)
+        assert {
+            row["model"]: (row["rank_low"], row["rank_high"]) for row in plan.overall_rows
+        } == expected
+        card = plan.files["README.md"].decode()
+        assert "| Rank | Rank range | Model |" in card
+        assert "| 1 | 1–2 | [org/model-mid]" in card
+        assert "| 3 | 3 | [org/model-weak]" in card
+        # The whole paragraph, word for word. Every sentence was checked against
+        # boards; a changed number or a dropped "not" must fail here.
+        assert (
+            "**Rank range** shows how firmly a model holds its rank. Pairs of ranked models "
+            "are tested on the difference between their ratings, taken on the same resampled "
+            "pages: one model tests clearly above another when the 95% interval of that "
+            "difference is above zero. A model's range starts at one more than the number of "
+            "models that test clearly above it, and ends at the number of ranked models minus "
+            "those that test clearly below it. It is widened, if needed, to include the "
+            "model's own rank. A range of one rank means the model tested clearly apart from "
+            "every other ranked model. A wider range does not always show which models it is "
+            "apart from, and two ranges that are both wider than one rank do not always decide "
+            "a pair. This test can separate two models whose own 95% intervals overlap. Each "
+            "pair is tested on its own, with no correction for the number of pairs: in "
+            "simulations, 4 to 7 in 100 pairs of equally good models tested apart by chance "
+            "on 20 pages or more. A model on fewer than 20 pages is not tested against any "
+            "model, which can only widen the ranges. A board with fewer than two models on 20 "
+            "pages or more has no rank ranges (—).\n"
+        ) in card
+        assert "Pairs of ranked models are tested on the difference between their ratings" in card
+        assert (
+            "A range of one rank means the model tested clearly apart from every other ranked "
+            "model."
+        ) in card
+        assert "in simulations, 4 to 7 in 100 pairs of equally good models tested apart" in card
+        # The page gate of the rank ranges (20), not the 10-page minimum of a slice board.
+        assert "A model on fewer than 20 pages is not tested against any model" in card
+        # Statements that reviewers showed to be false in some case stay off the card.
+        for withdrawn in (
+            "ranges do not overlap are clearly apart",
+            "when two intervals overlap, this data does not clearly separate those models",
+            "two ranges do not decide a pair",
+            "move together",
+            "at least 1 pair in 20",
+            "adds one rank",
+            "added together",
+        ):
+            assert withdrawn not in card
+        first = json.loads(plan.files["overall.jsonl"].decode().splitlines()[0])
+        assert list(first)[:3] == ["rank", "rank_low", "rank_high"]
+
+    def test_a_range_of_one_rank_is_shown_as_that_rank(self):
+        row = {"rank_low": 2, "rank_high": 2}
+        assert share._rank_range_cell(row) == "2"
+        assert share._rank_range_cell({"rank_low": 3, "rank_high": 5}) == "3–5"
+        assert share._rank_range_cell({"rank_low": None, "rank_high": None}) == "—"
+
+    def test_slice_rows_give_the_rank_range_of_their_own_board(self):
+        results = _results(range(60))
+        labels = _labels(60, {"print": range(30), "typed": range(30, 60)})
+        plan = _plan(_evaluation(results), slice_column="kind", slice_values=lambda *_: labels)
+        for name, pages in (("print", range(30)), ("typed", range(30, 60))):
+            expected = compute_elo(
+                [r for r in results if r.sample_idx in pages], MODELS, n_bootstrap=200
+            ).rank_range
+            rows = [row for row in plan.slice_rows if row["slice"] == name]
+            assert {row["model"]: (row["rank_low"], row["rank_high"]) for row in rows} == expected
+        overall = {row["model"]: (row["rank_low"], row["rank_high"]) for row in plan.overall_rows}
+        by_slice = [
+            {
+                row["model"]: (row["rank_low"], row["rank_high"])
+                for row in plan.slice_rows
+                if row["slice"] == name
+            }
+            for name in ("print", "typed")
+        ]
+        assert any(ranges != overall for ranges in by_slice)  # a slice board has its own ranges
+
+    def test_no_rank_range_from_a_few_resamples(self, monkeypatch):
+        monkeypatch.setattr(share, "N_BOOTSTRAP", 20)
+        plan = _plan(_evaluation(_results(range(40))))
+        assert {(row["rank_low"], row["rank_high"]) for row in plan.overall_rows} == {(None, None)}
+        assert "| 1 | — | [org/model-" in plan.files["README.md"].decode()
+
+    def test_a_failed_model_has_no_rank_range_and_no_cut_pages(self):
+        models = [*MODELS, "org/model-broken"]
+        evaluation = _evaluation(
+            _results(range(20)),
+            models,
+            failed_models=("org/model-broken",),
+            failed_outputs={"org/model-broken": 20},
+        )
+        plan = _plan(evaluation)
+        failed = next(row for row in plan.overall_rows if row["status"] == "failed")
+        assert (failed["rank_low"], failed["rank_high"], failed["truncated_pages"]) == (
+            None,
+            None,
+            None,
+        )
+        card = plan.files["README.md"].decode()
+        assert "| — | — | [org/model-broken](https://huggingface.co/org/model-broken) |" in card
+
+    def test_the_card_gives_the_range_of_pages_per_pair(self):
+        # good and mid are compared on every page; weak is compared on 15 of the 20.
+        results = [r for r in _results(range(20)) if "org/model-weak" not in (r.model_a, r.model_b)]
+        results += [r for r in _results(range(15)) if "org/model-weak" in (r.model_a, r.model_b)]
+        plan = _plan(_evaluation(results))
+        assert (plan.settings["pair_pages_min"], plan.settings["pair_pages_max"]) == (15, 20)
+        card = plan.files["README.md"].decode()
+        assert "a pair of ranked models was compared on 15 to 20 pages" in card
+        assert "both outputs are shorter than 10 characters" in card
+
+    def test_one_page_count_when_every_pair_has_the_same(self):
+        plan = _plan(_evaluation(_results(range(20))))
+        assert (
+            "each pair of ranked models was compared on 20 pages"
+            in plan.files["README.md"].decode()
+        )
+
+    def test_pair_page_counts_include_a_pair_that_was_never_compared(self):
+        results = _results(range(12), pairs=[("org/model-good", "org/model-mid")])
+        assert sorted(share.pair_page_counts(MODELS, results)) == [0, 0, 12]
+
+    def test_pair_page_counts_do_not_depend_on_which_model_is_model_a(self):
+        # The same pair stored both ways round, on different pages.
+        one_way = _results(range(8), pairs=[("org/model-good", "org/model-mid")])
+        other_way = _results(range(8, 12), pairs=[("org/model-mid", "org/model-good")])
+        assert sorted(share.pair_page_counts(MODELS, one_way + other_way)) == [0, 0, 12]
+
+    def test_the_card_counts_the_pairs_that_were_never_compared(self):
+        # A targeted run: good and weak are each compared with mid, never with each other.
+        results = _results(
+            range(30),
+            pairs=[("org/model-good", "org/model-mid"), ("org/model-mid", "org/model-weak")],
+        )
+        plan = _plan(_evaluation(results))
+        assert plan.settings["pairs_never_compared"] == 1
+        assert (plan.settings["pair_pages_min"], plan.settings["pair_pages_max"]) == (30, 30)
+        card = plan.files["README.md"].decode()
+        # "each pair of models" would be false: one pair has no comparison.
+        assert (
+            "the pairs of ranked models that were compared were compared on 30 pages each; 1 pair "
+            "of ranked models had no direct comparison, and their ratings come from comparisons "
+            "with other models"
+        ) in card
+        assert "each pair of models was compared" not in card
+
+    def test_a_pair_compared_on_one_page_is_not_a_pair_never_compared(self):
+        results = _results(
+            range(30),
+            pairs=[("org/model-good", "org/model-mid"), ("org/model-mid", "org/model-weak")],
+        )
+        results += _results([0], pairs=[("org/model-good", "org/model-weak")])
+        plan = _plan(_evaluation(results))
+        assert plan.settings["pairs_never_compared"] == 0
+        assert (plan.settings["pair_pages_min"], plan.settings["pair_pages_max"]) == (1, 30)
+        assert (
+            "a pair of ranked models was compared on 1 to 30 pages."
+            in plan.files["README.md"].decode()
+        )
+
+    def test_without_a_recorded_text_cap_the_note_gives_no_number(self):
+        results = _results(range(20))
+        results[0].truncated_a = True
+        evaluation = _evaluation(results)
+        evaluation.metadata["max_ocr_text_len"] = None
+        card = _plan(evaluation).files["README.md"].decode()
+        assert "The judge's copy of a long output is cut. Pages where" in card
+        assert "characters." not in card.split("The judge's copy")[1].split("Pages where")[0]
+
+    def test_unequal_page_counts_with_a_pair_never_compared(self):
+        settings = {
+            "pair_pages_min": 15,
+            "pair_pages_max": 30,
+            "pairs_never_compared": 1,
+            "min_chars": 20,
+        }
+        line = share._pair_pages_line(settings)
+        assert "compared on 15 to 30 pages; 1 pair of ranked models had no direct" in line
+        assert "pages each" not in line
+
+    def test_the_cut_note_does_not_describe_how_the_text_was_prepared(self):
+        # Older results do not record the text mode, so the card makes no
+        # statement about it.
+        results = _results(range(20))
+        results[0].truncated_a = True
+        evaluation = _evaluation(results)
+        del evaluation.metadata["judge_text_mode"]
+        card = _plan(evaluation).files["README.md"].decode()
+        assert "The judge's copy of an output is cut at 8,000 characters. Pages where" in card
+        assert "flattened" not in card
+
+    @pytest.mark.parametrize(
+        ("pages", "never", "expected"),
+        [
+            (1, 0, "each pair of ranked models was compared on 1 page."),
+            (1, 1, "compared on 1 page each; 1 pair of ranked models had no direct comparison,"),
+            (
+                30,
+                2,
+                "compared on 30 pages each; 2 pairs of ranked models had no direct comparison,",
+            ),
+        ],
+    )
+    def test_the_pages_per_pair_line_counts_one_page_and_one_pair_correctly(
+        self, pages, never, expected
+    ):
+        settings = {
+            "pair_pages_min": pages,
+            "pair_pages_max": pages,
+            "pairs_never_compared": never,
+            "min_chars": 20,
+        }
+        assert expected in share._pair_pages_line(settings)
+
+    def test_a_board_with_too_few_pages_for_any_pair_has_no_rank_ranges(self):
+        # A slice of 12 pages: every model is under the 20 pages a pair needs.
+        # A full range in every row, next to intervals, would read as a result.
+        results = _results(range(60))
+        labels = _labels(60, {"big": range(48), "small": range(48, 60)})
+        plan = _plan(_evaluation(results), slice_column="kind", slice_values=lambda *_: labels)
+        small = [row for row in plan.slice_rows if row["slice"] == "small"]
+        assert len(small) == 3
+        assert {(row["rank_low"], row["rank_high"]) for row in small} == {(None, None)}
+        big = [row for row in plan.slice_rows if row["slice"] == "big"]
+        assert len(big) == 3
+        assert all(row["rank_low"] is not None for row in big)
+        card = plan.files["README.md"].decode()
+        assert "A board with fewer than two models on 20 pages or more has no rank ranges" in card
+
+    def test_cut_outputs_are_counted_in_pages_per_model(self):
+        results = _results(range(20))
+        for r in results:
+            # mid's output is cut on pages 0-4; each page has two comparisons with mid.
+            if r.sample_idx < 5:
+                if r.model_a == "org/model-mid":
+                    r.truncated_a = True
+                if r.model_b == "org/model-mid":
+                    r.truncated_b = True
+        plan = _plan(_evaluation(results))
+        cut = {row["model"]: row["truncated_pages"] for row in plan.overall_rows}
+        assert cut == {"org/model-good": 0, "org/model-mid": 5, "org/model-weak": 0}
+        card = plan.files["README.md"].decode()
+        assert (
+            "The judge's copy of an output is cut at 8,000 characters. Pages where a model's "
+            "output was cut, so the judge did not see its end: org/model-mid: 5."
+        ) in card
+
+    def test_no_cut_note_when_nothing_was_cut(self):
+        plan = _plan(_evaluation(_results(range(20))))
+        assert "The judge's copy" not in plan.files["README.md"].decode()
+
+    def test_a_file_with_the_old_columns_is_refused(self):
+        plan = _plan(_evaluation(_results(range(20))))
+
+        def drop(rows):
+            for row in rows:
+                del row["rank_low"]
+
+        _rewrite_rows(plan, "overall.jsonl", drop)
+        with pytest.raises(PrivacyError):
+            check_plan(plan)
+
+    def test_the_prompts_link_names_the_version_that_judged(self):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata["ocr_bench_version"] = "0.0.7"
+        plan = _plan(evaluation)
+        assert plan.settings["judged_with_version"] == "0.0.7"
+        card = plan.files["README.md"].decode()
+        assert "blob/v0.0.7/src/ocr_bench/judge.py" in card
+        assert "the prompts in ocr-bench 0.0.7" in card
+
+    @pytest.mark.parametrize("recorded", [None, "", "0.0.0", "1.2.3.dev4+local", "main"])
+    def test_without_a_release_version_the_link_names_the_sharing_version(self, recorded):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata["ocr_bench_version"] = recorded
+        plan = _plan(evaluation)
+        assert plan.settings["judged_with_version"] == ""
+        version = plan.settings["ocr_bench_version"]
+        assert f"the prompts in ocr-bench {version}" in plan.files["README.md"].decode()
+
+    def test_cut_counts_are_unknown_for_rows_that_do_not_record_them(self):
+        # Rows from a version before the truncation flags hold None. A count of
+        # zero would say that nothing was cut.
+        results = _results(range(20))
+        for r in results:
+            if "org/model-weak" in (r.model_a, r.model_b):
+                if r.model_a == "org/model-weak":
+                    r.truncated_a = None
+                else:
+                    r.truncated_b = None
+        plan = _plan(_evaluation(results))
+        cut = {row["model"]: row["truncated_pages"] for row in plan.overall_rows}
+        assert cut == {"org/model-good": 0, "org/model-mid": 0, "org/model-weak": None}
+        card = plan.files["README.md"].decode()
+        assert "The results do not record how many outputs were cut for: org/model-weak." in card
+        assert "did not see its end" not in card
+
+    def test_an_identical_output_tie_does_not_make_the_cut_count_unknown(self):
+        results = _results(range(20))
+        for r in results[:3]:
+            r.winner, r.agreement, r.truncated_a, r.truncated_b = "tie", "auto", None, None
+        plan = _plan(_evaluation(results))
+        assert {row["truncated_pages"] for row in plan.overall_rows} == {0}
+
+    @pytest.mark.parametrize(
+        ("min_chars", "reason"),
+        [
+            (
+                20,
+                "a page where both outputs are shorter than 20 characters, one output is an "
+                "error marker such as `[OCR ERROR]`, or the judge gave no valid answer for it.",
+            ),
+            (
+                0,
+                "a page where one output is an error marker such as `[OCR ERROR]`, or the "
+                "judge gave no valid answer for it.",
+            ),
+            (
+                1,
+                "a page where both outputs are shorter than 1 character, one output is an "
+                "error marker such as `[OCR ERROR]`, or the judge gave no valid answer for it.",
+            ),
+            (
+                None,
+                "The results do not record the minimum-length setting, so this card does not "
+                "give the rules by which a pair was left out on a page.",
+            ),
+        ],
+    )
+    def test_the_pages_per_pair_line_follows_the_min_chars_setting(self, min_chars, reason):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata["min_chars"] = min_chars
+        card = _plan(evaluation).files["README.md"].decode()
+        assert reason in card
+        if min_chars == 0:
+            # With the filter off, two empty outputs are compared.
+            assert "both outputs" not in card
+            assert "do not record" not in card
+        if min_chars is None:
+            # Not recorded: older versions left pairs out by other rules, so
+            # the card names none.
+            assert "A pair is not compared on a page where" not in card
+
+    @pytest.mark.parametrize("recorded", ["0.0.9.1", "٠.٠.٩", "0.0.9/../x", "v0.0.9", "0.0"])
+    def test_a_version_that_is_not_three_plain_numbers_is_not_linked(self, recorded):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata["ocr_bench_version"] = recorded
+        assert _plan(evaluation).settings["judged_with_version"] == ""

@@ -47,6 +47,7 @@ from ocr_bench.dataset import (
     load_config_dataset,
 )
 from ocr_bench.elo import (
+    MIN_PAGES_FOR_RANK_RANGE,
     MIN_PAGES_TO_RESOLVE,
     ComparisonResult,
     Leaderboard,
@@ -65,12 +66,15 @@ logger = structlog.get_logger()
 SHARE_TAG = "ocr-bench-share"
 BOARD_COLUMNS = (
     "rank",
+    "rank_low",
+    "rank_high",
     "model",
     "params",
     "elo",
     "elo_low",
     "elo_high",
     "pages",
+    "truncated_pages",
     "wins",
     "losses",
     "ties",
@@ -83,6 +87,8 @@ BOARD_COLUMNS = (
 SLICE_BOARD_COLUMNS = (
     "slice",
     "rank",
+    "rank_low",
+    "rank_high",
     "model",
     "params",
     "elo",
@@ -110,6 +116,9 @@ SETTINGS_KEYS = (
     "adaptive_strategy",
     "comparisons",
     "auto_tied",
+    "pair_pages_min",
+    "pair_pages_max",
+    "pairs_never_compared",
     "slice_column",
     "slices",
     "slice_pages",
@@ -119,6 +128,7 @@ SETTINGS_KEYS = (
     "judged_at",
     "shared_at",
     "ocr_bench_version",
+    "judged_with_version",
     "repo",
     "sampled_pages",
 )
@@ -145,7 +155,10 @@ CHUNK = 32
 MIN_DISTINCT_ALNUM = 4
 
 N_BOOTSTRAP = 1000
-METHOD = "Bradley-Terry MLE, page-level bootstrap 95% CIs (1000 resamples, seed 42)"
+METHOD = (
+    "Bradley-Terry MLE; page-level bootstrap (1000 resamples, seed 42) for the 95% CIs "
+    "and, from paired rating differences, the rank ranges"
+)
 # Ratings are rounded to integers, so a refit can differ by one at a .5 boundary.
 ELO_TOLERANCE = 1
 
@@ -462,22 +475,78 @@ def _fill_sizes(rows: list[dict], sizes: dict[str, str]) -> None:
         row["params"] = sizes.get(row["model"]) or row["params"]
 
 
-def _overall_rows(board: Leaderboard, failed_models: list[str], failed_outputs: dict) -> list[dict]:
+def truncated_pages(comparisons: Iterable[ComparisonResult]) -> dict[str, int | None]:
+    """For each model, the number of pages where the judge read a cut output.
+
+    An output longer than the text cap is cut for the judge, who reads its start
+    only. The count is in pages, because one long output is cut in every
+    comparison of that page. An identical-output tie reaches no judge, so it
+    counts for nothing here.
+
+    The count is None for a model with a judged comparison that does not record
+    whether its output was cut (a row from a version before the flags): a count
+    from the other rows would be too low.
+    """
+    pages: dict[str, set[int]] = {}
+    not_recorded: set[str] = set()
+    for c in comparisons:
+        pages.setdefault(c.model_a, set())
+        pages.setdefault(c.model_b, set())
+        if c.agreement == "auto":
+            continue
+        for model, cut in ((c.model_a, c.truncated_a), (c.model_b, c.truncated_b)):
+            if cut is None:
+                not_recorded.add(model)
+            elif cut:
+                pages[model].add(c.sample_idx)
+    return {model: None if model in not_recorded else len(cut) for model, cut in pages.items()}
+
+
+def pair_page_counts(models: list[str], comparisons: Iterable[ComparisonResult]) -> list[int]:
+    """The number of pages each pair of ``models`` was compared on, one count per pair.
+
+    A pair that was never compared counts 0.
+    """
+    pages: dict[tuple[str, str], set[int]] = {
+        (a, b): set() for i, a in enumerate(sorted(models)) for b in sorted(models)[i + 1 :]
+    }
+    for c in comparisons:
+        pair = (c.model_a, c.model_b) if c.model_a <= c.model_b else (c.model_b, c.model_a)
+        if pair in pages:
+            pages[pair].add(c.sample_idx)
+    return [len(compared) for compared in pages.values()]
+
+
+def _rank_bounds(board: Leaderboard, model: str) -> tuple[int | None, int | None]:
+    best, worst = board.rank_range.get(model, (None, None))
+    return best, worst
+
+
+def _overall_rows(
+    board: Leaderboard,
+    failed_models: list[str],
+    failed_outputs: dict,
+    truncated: dict[str, int | None],
+) -> list[dict]:
     rows = []
     rank = 0
     for row in build_leaderboard_rows(board, failed_models, failed_outputs):
         failed = row["status"] == "failed"
         if not failed:
             rank += 1
+        rank_low, rank_high = (None, None) if failed else _rank_bounds(board, row["model"])
         rows.append(
             {
                 "rank": None if failed else rank,
+                "rank_low": rank_low,
+                "rank_high": rank_high,
                 "model": row["model"],
                 "params": row["params"] or None,
                 "elo": row["elo"],
                 "elo_low": row.get("elo_low"),
                 "elo_high": row.get("elo_high"),
                 "pages": board.pages_by_model.get(row["model"], 0),
+                "truncated_pages": None if failed else truncated.get(row["model"]),
                 "wins": row["wins"],
                 "losses": row["losses"],
                 "ties": row["ties"],
@@ -494,6 +563,8 @@ def _slice_rows(board: Leaderboard, slice_name: str) -> list[dict]:
         {
             "slice": slice_name,
             "rank": rank,
+            "rank_low": _rank_bounds(board, row["model"])[0],
+            "rank_high": _rank_bounds(board, row["model"])[1],
             "model": row["model"],
             "params": row["params"] or None,
             "elo": row["elo"],
@@ -642,31 +713,65 @@ def _model_cell(name: str) -> str:
 
 def _table(rows: list[dict]) -> list[str]:
     lines = [
-        "| Rank | Model | Size | Rating | 95% interval | Pages | Wins | Losses | Ties |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| Rank | Rank range | Model | Size | Rating | 95% interval | Pages | Wins | Losses "
+        "| Ties |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in rows:
         status = row.get("status", "ranked")
         if status == "failed":
             lines.append(
-                f"| — | {_model_cell(row['model'])} | {_md(row['params'] or '')} | FAILED "
+                f"| — | — | {_model_cell(row['model'])} | {_md(row['params'] or '')} | FAILED "
                 "| — | — | — | — | — |"
             )
             continue
         ci = f"{row['elo_low']}–{row['elo_high']}" if row.get("elo_low") is not None else "—"
         mark = " ⚠" if status == "degraded" else ""
         lines.append(
-            f"| {row['rank']} | {_model_cell(row['model'])}{mark} | {_md(row['params'] or '')} "
+            f"| {row['rank']} | {_rank_range_cell(row)} | {_model_cell(row['model'])}{mark} "
+            f"| {_md(row['params'] or '')} "
             f"| {row['elo']} | {ci} | {row['pages']} | {row['wins']} | {row['losses']} "
             f"| {row['ties']} |"
         )
     return lines
 
 
+def _rank_range_cell(row: dict) -> str:
+    """``3–5`` for a rank range from 3 to 5, ``3`` for a range of one rank."""
+    best, worst = row.get("rank_low"), row.get("rank_high")
+    if best is None or worst is None:
+        return "—"
+    return str(best) if best == worst else f"{best}–{worst}"
+
+
 def _label(value: object) -> str:
     """A slice label or column name as inline code, or escaped text if it holds a backtick."""
     text = "".join(" " if char in LINE_BREAKS else char for char in str(value))
     return _md(text) if "`" in text else f"`{text}`"
+
+
+# How to read the Rank range column. Every sentence is a definition, something
+# that always follows from the definition, or a measurement named as one:
+# reviewers found boards on which broader statements were false. Change it
+# only with a board in hand that the new wording is true for.
+RANK_RANGE_PARAGRAPH = (
+    "**Rank range** shows how firmly a model holds its rank. Pairs of ranked models are "
+    "tested on the difference between their ratings, taken on the same resampled pages: "
+    "one model tests clearly above another when the 95% interval of that difference is "
+    "above zero. A model's range starts at one more than the number of models that "
+    "test clearly above it, and ends at the number of ranked models minus those that "
+    "test clearly below it. It is widened, if needed, to include the model's own rank. "
+    "A range of one rank means the model tested clearly apart from every other ranked "
+    "model. A wider range does not always show which models it is apart from, and two "
+    "ranges that are both wider than one rank do not always decide a pair. This test can "
+    "separate two models whose own 95% intervals overlap. Each pair is tested on its own, "
+    "with no correction for the number of pairs: in simulations, 4 to 7 in 100 pairs of "
+    "equally good models tested apart by chance on "
+    f"{MIN_PAGES_FOR_RANK_RANGE} pages or more. A model on fewer than "
+    f"{MIN_PAGES_FOR_RANK_RANGE} pages is not tested against any model, which can only "
+    "widen the ranges. A board with fewer than two models on "
+    f"{MIN_PAGES_FOR_RANK_RANGE} pages or more has no rank ranges (—)."
+)
 
 
 def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict]) -> str:
@@ -698,18 +803,20 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         "private: this repo holds scores only.",
         "",
         "**How to read it.** A higher rating is better; 1500 is the average rating on each "
-        "board. The 95% interval is where the rating stays when the pages are resampled: "
-        "when two intervals overlap, this data does not clearly separate those models. "
+        "board. The 95% interval is where the rating stays when the pages are resampled. "
         "Size is the parameter count the Hub reports for the model's weights, where it "
         "has one (all experts, for a mixture-of-experts model). "
         "Pages is the number of pages a model was compared on. Wins, losses and ties are "
         "raw counts that depend on how often a model was compared, so compare ratings, "
         "not wins.",
         "",
+        RANK_RANGE_PARAGRAPH,
+        "",
         f"## All pages ({settings['pages']})",
         "",
         *_table(overall_rows),
     ]
+    lines += _cut_outputs_note(settings, ranked)
     degraded = [row for row in overall_rows if row["status"] == "degraded"]
     if degraded:
         counts = "; ".join(f"{_md(row['model'])}: {row['failed_outputs']}" for row in degraded)
@@ -747,14 +854,14 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         judge_line = f"- **Judge**: {judges}, with a custom prompt"
     else:
         # A link, not a paraphrase: judge reasons echo the prompt's wording, and the
-        # page-text check refuses a card that repeats them.
-        prompts = (
-            "https://github.com/davanstrien/ocr-bench/blob/"
-            f"v{settings['ocr_bench_version']}/src/ocr_bench/judge.py"
-        )
+        # page-text check refuses a card that repeats them. The link goes to the
+        # version that judged, where the results record it; results judged before
+        # that was recorded link the version that shares.
+        prompt_version = settings["judged_with_version"] or settings["ocr_bench_version"]
+        prompts = f"https://github.com/davanstrien/ocr-bench/blob/v{prompt_version}/src/ocr_bench/judge.py"
         judge_line = (
             f"- **Judge**: {judges}, with the `{_md(criteria)}` criteria "
-            f"([the prompts in ocr-bench {settings['ocr_bench_version']}]({prompts}))"
+            f"([the prompts in ocr-bench {prompt_version}]({prompts}))"
         )
     if settings["sampled_pages"]:
         sample = (
@@ -776,8 +883,9 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         f"- **Pages**: {sample}",
         f"- **Comparisons**: {settings['comparisons']:,}; {settings['auto_tied']} of them had "
         "identical text and were tied without a judge call",
-        "- **Ratings**: a Bradley-Terry fit on an Elo-like scale; 95% intervals from "
-        "resampling pages",
+        _pair_pages_line(settings),
+        "- **Ratings**: a Bradley-Terry fit on an Elo-like scale; 95% intervals and rank "
+        "ranges from resampling pages",
         f"- **Judged**: {str(settings['judged_at'])[:10] or 'not recorded'}",
         "",
         "The full settings (prompt hash, text and image caps, page-set fingerprint) are in "
@@ -797,12 +905,12 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         "<summary>Query with DuckDB</summary>",
         "",
         "Each row is one model on one board. `elo` is the rating, and `elo_low` and "
-        "`elo_high` are its 95% interval.",
+        "`elo_high` are its 95% interval. `rank_low` and `rank_high` are its rank range.",
         "",
         "```sql",
         "-- a private board needs a Hub token first:",
         "-- CREATE SECRET hf (TYPE huggingface, PROVIDER credential_chain);",
-        f"SELECT rank, model, elo, elo_low, elo_high, pages "
+        f"SELECT rank, rank_low, rank_high, model, elo, elo_low, elo_high, pages "
         f"FROM 'hf://datasets/{repo}/overall.jsonl' ORDER BY rank;",
     ]
     if slice_rows:
@@ -820,6 +928,87 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         f"{settings['ocr_bench_version']}*",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _cut_outputs_note(settings: dict, ranked_rows: list[dict]) -> list[str]:
+    """The card paragraph on outputs that were too long for the judge to read in full.
+
+    Empty when no ranked model had an output cut and every count is known.
+
+    The cap is on the text the judge is given. In the default text mode that
+    is the output with its HTML flattened, so an output longer than the cap
+    can reach the judge whole. The note therefore speaks of the judge's copy.
+    """
+    cut = [row for row in ranked_rows if row.get("truncated_pages")]
+    unknown = [row for row in ranked_rows if row.get("truncated_pages") is None]
+    if not cut and not unknown:
+        return []
+    cap = settings["max_ocr_text_len"]
+    if isinstance(cap, int):
+        note = f"The judge's copy of an output is cut at {cap:,} characters."
+    else:
+        note = "The judge's copy of a long output is cut."
+    if cut:
+        counts = "; ".join(f"{_md(row['model'])}: {row['truncated_pages']}" for row in cut)
+        note += (
+            f" Pages where a model's output was cut, so the judge did not see its end: {counts}."
+        )
+    if unknown:
+        names = ", ".join(_md(row["model"]) for row in unknown)
+        note += f" The results do not record how many outputs were cut for: {names}."
+    return ["", note]
+
+
+def _pair_pages_line(settings: dict) -> str:
+    """How many pages each pair of models was compared on, and why not all of them."""
+    fewest, most = settings["pair_pages_min"], settings["pair_pages_max"]
+    never = settings["pairs_never_compared"]
+    if fewest == most:
+        on_pages = "1 page" if fewest == 1 else f"{fewest} pages"
+    else:
+        on_pages = f"{fewest} to {most} pages"
+    if never:
+        # A targeted run, or a model added without a full run. The counts are
+        # for the pairs that were compared, and the reasons below do not
+        # explain a pair with no comparison at all.
+        no_direct = (
+            "1 pair of ranked models had no direct comparison"
+            if never == 1
+            else f"{never} pairs of ranked models had no direct comparison"
+        )
+        each = " each" if fewest == most else ""
+        compared = (
+            f"the pairs of ranked models that were compared were compared on {on_pages}{each}; "
+            f"{no_direct}, and their ratings come from comparisons with other models"
+        )
+    elif fewest == most:
+        compared = f"each pair of ranked models was compared on {on_pages}"
+    else:
+        compared = f"a pair of ranked models was compared on {on_pages}"
+
+    stops = "A run can also stop before every pair is judged on every page"
+    min_chars = settings["min_chars"]
+    if not isinstance(min_chars, int):
+        # The setting is recorded from 0.0.5. Earlier versions also left pairs
+        # out by other rules (an error marker was judged as text; a pair with
+        # one empty output was skipped), so the card names no rule.
+        return (
+            f"- **Pages per pair**: {compared}. The results do not record the "
+            "minimum-length setting, so this card does not give the rules by which a pair "
+            f"was left out on a page. {stops}"
+        )
+    error_marker = "one output is an error marker such as `[OCR ERROR]`"
+    failed_call = ", or the judge gave no valid answer for it"
+    if min_chars > 0:
+        characters = "1 character" if min_chars == 1 else f"{min_chars} characters"
+        reasons = f"both outputs are shorter than {characters}, {error_marker}" + failed_call
+    else:
+        # With the filter off, two empty outputs are compared (and tied).
+        reasons = error_marker + failed_call
+    return (
+        f"- **Pages per pair**: {compared}. A pair is not compared on a page where "
+        f"{reasons}. {stops}"
+    )
 
 
 def _settings_json(settings: dict) -> bytes:
@@ -1043,6 +1232,19 @@ def _sampled_pages(metadata: dict) -> int | None:
     return max(counts) if counts else None
 
 
+def _release_version(value: object) -> str:
+    """The judge-time version when it is a plain release number, else an empty string.
+
+    The value becomes part of a link on a public card, so anything that is not
+    digits and dots (a local build, a missing value) is left out. So is
+    ``0.0.0``, which a source tree without an install reports.
+    """
+    text = str(value or "")
+    if text == "0.0.0" or not re.fullmatch(r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}", text):
+        return ""
+    return text
+
+
 def _public_criteria(criteria: str) -> str:
     """A --criteria-file run is recorded as ``custom:<file name>``; publish ``custom``."""
     return "custom" if criteria.startswith("custom:") else criteria
@@ -1092,8 +1294,9 @@ def plan_share(
 
     board = compute_elo(comparisons, models, n_bootstrap=N_BOOTSTRAP)
     check_board_matches(board, evaluation.leaderboard, results_repo)
-    overall_rows = _overall_rows(board, failed_models, failed_outputs)
+    overall_rows = _overall_rows(board, failed_models, failed_outputs, truncated_pages(comparisons))
     sample_ids = {c.sample_idx for c in comparisons}
+    pair_pages = pair_page_counts(models, comparisons)
 
     slice_rows: list[dict] = []
     slice_names: list[str] = []
@@ -1146,6 +1349,11 @@ def plan_share(
         "adaptive_strategy": metadata.get("adaptive_strategy") or "balanced",
         "comparisons": len(comparisons),
         "auto_tied": sum(1 for c in comparisons if c.agreement == "auto"),
+        # The range is over the pairs that were compared at least once; the
+        # pairs that never were are counted on their own.
+        "pair_pages_min": min((count for count in pair_pages if count), default=0),
+        "pair_pages_max": max(pair_pages, default=0),
+        "pairs_never_compared": sum(1 for count in pair_pages if count == 0),
         "slice_column": slice_column,
         "slices": slice_names,
         "slice_pages": slice_pages,
@@ -1155,6 +1363,7 @@ def plan_share(
         "judged_at": metadata.get("timestamp") or "",
         "shared_at": now or datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
         "ocr_bench_version": __version__,
+        "judged_with_version": _release_version(metadata.get("ocr_bench_version")),
         "repo": board_repo,
         "sampled_pages": _sampled_pages(metadata),
     }
