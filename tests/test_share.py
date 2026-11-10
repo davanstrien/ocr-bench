@@ -1294,8 +1294,9 @@ class TestRankRangeAndCoverage:
         assert "| 1 | 1–2 | [org/model-mid]" in card
         assert "| 3 | 3 | [org/model-weak]" in card
         assert "**Rank range** is the best and worst rank a model could hold on this data" in card
-        assert "ranges that overlap do not show that two models are equal" in card
-        assert "about 1 pair in 20 of equally good models is called apart by chance" in card
+        assert "A range of one rank means the model is clearly apart from every other" in card
+        assert "two ranges do not show whether those two models are clearly apart" in card
+        assert "at least 1 pair in 20 of equally good models is called apart by chance" in card
         first = json.loads(plan.files["overall.jsonl"].decode().splitlines()[0])
         assert list(first)[:3] == ["rank", "rank_low", "rank_high"]
 
@@ -1384,7 +1385,9 @@ class TestRankRangeAndCoverage:
         assert plan.settings["pairs_never_compared"] == 1
         assert (plan.settings["pair_pages_min"], plan.settings["pair_pages_max"]) == (30, 30)
         card = plan.files["README.md"].decode()
-        assert "each pair of models was compared on 30 pages; 1 pair was never compared" in card
+        # "each pair of models" would be false: one pair has no comparison.
+        assert "each pair that was compared was compared on 30 pages; 1 pair was never" in card
+        assert "each pair of models was compared" not in card
 
     def test_cut_outputs_are_counted_in_pages_per_model(self):
         results = _results(range(20))
@@ -1466,7 +1469,11 @@ class TestRankRangeAndCoverage:
         [
             (20, "both outputs are shorter than 20 characters, or one output is an error message"),
             (0, "a page where one output is an error message"),
-            (None, "both outputs are empty or very short, or one output is an error message"),
+            (
+                None,
+                "a page where one output is an error message. The results do not record "
+                "whether a pair of two empty or very short outputs was also left out.",
+            ),
         ],
     )
     def test_the_pages_per_pair_line_follows_the_min_chars_setting(self, min_chars, reason):
@@ -1477,6 +1484,10 @@ class TestRankRangeAndCoverage:
         if min_chars == 0:
             # With the filter off, two empty outputs are compared.
             assert "both outputs" not in card
+            assert "do not record" not in card
+        if min_chars is None:
+            # Not recorded: the card must not say that such pairs were left out.
+            assert "both outputs are" not in card
 
     @pytest.mark.parametrize("recorded", ["0.0.9.1", "٠.٠.٩", "0.0.9/../x", "v0.0.9", "0.0"])
     def test_a_version_that_is_not_three_plain_numbers_is_not_linked(self, recorded):

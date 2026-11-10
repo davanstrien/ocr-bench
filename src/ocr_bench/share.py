@@ -792,11 +792,13 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         "when the 95% interval of the difference between their ratings, taken on the same "
         "resampled pages, is above zero. Two models whose own intervals overlap can still "
         "be clearly apart, because their ratings move together when the pages change. "
-        "Two models whose ranges do not overlap are clearly apart; ranges that overlap do "
-        "not show that two models are equal. Each pair is tested on its own, so about 1 "
-        "pair in 20 of equally good models is called apart by chance. A model on fewer "
-        f"than {MIN_PAGES_FOR_RANK_RANGE} pages is not called apart from any model, which "
-        "widens every range by one rank.",
+        "A range of one rank means the model is clearly apart from every other model. A "
+        "wider range counts the models clearly above and below; it does not name them, so "
+        "two ranges do not show whether those two models are clearly apart. The range "
+        "always includes the model's own rank. Each pair is tested on its own at the 95% "
+        "level: at least 1 pair in 20 of equally good models is called apart by chance, "
+        f"and more on a board with few pages. A model on fewer than {MIN_PAGES_FOR_RANK_RANGE} "
+        "pages is not called apart from any model, which widens every range by one rank.",
         "",
         f"## All pages ({settings['pages']})",
         "",
@@ -943,19 +945,27 @@ def _pair_pages_line(settings: dict) -> str:
     """How many pages each pair of models was compared on, and why not all of them."""
     fewest, most = settings["pair_pages_min"], settings["pair_pages_max"]
     never = settings["pairs_never_compared"]
+    # With pairs that were never compared, the counts are for the other pairs.
+    subject = "pair that was compared" if never else "pair of models"
     if fewest == most:
-        compared = f"each pair of models was compared on {fewest} pages"
+        compared = f"each {subject} was compared on {fewest} pages"
     else:
-        compared = f"a pair of models was compared on {fewest} to {most} pages"
+        compared = f"a {subject} was compared on {fewest} to {most} pages"
     if never:
         # A targeted run, or a model added without a full run: the reasons
         # below do not explain a pair with no comparison at all.
         pairs = "1 pair was" if never == 1 else f"{never} pairs were"
         compared += f"; {pairs} never compared with each other and rest on their other pairs"
+
     min_chars = settings["min_chars"]
+    not_recorded = ""
     if not isinstance(min_chars, int):
-        # Results that do not record the setting: the filter may have been on.
-        reasons = "both outputs are empty or very short, or one output is an error message"
+        # Results that do not record the setting: the filter may have been on or off.
+        reasons = "one output is an error message"
+        not_recorded = (
+            " The results do not record whether a pair of two empty or very short outputs "
+            "was also left out."
+        )
     elif min_chars > 0:
         reasons = (
             f"both outputs are shorter than {min_chars} characters, or one output is an "
@@ -966,7 +976,7 @@ def _pair_pages_line(settings: dict) -> str:
         reasons = "one output is an error message"
     return (
         f"- **Pages per pair**: {compared}. A pair is not compared on a page where "
-        f"{reasons}. A run can also stop before every pair is judged on every page"
+        f"{reasons}.{not_recorded} A run can also stop before every pair is judged on every page"
     )
 
 

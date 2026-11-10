@@ -582,6 +582,54 @@ class TestRankRanges:
         widths = {name: worst - best for name, (best, worst) in board.rank_range.items()}
         assert widths == {"strong": 1, "middle": 1, "weak": 1, "thin": 3}
 
+    def test_ranges_that_do_not_overlap_do_not_decide_a_pair(self):
+        # A is clearly above C and D, and C and D are clearly above B, but the
+        # difference between A and B is below zero in 40 of 1000 resamples
+        # (20 where A is low, 20 where B is high): that pair fails its own
+        # test. The ranges of A and B still do not overlap, so a range must
+        # not be read as a statement about one pair.
+        common = {"C": 1.0, "D": 1.0}
+        replicates = (
+            [{"A": 2.0, "B": 0.0, **common}] * 960
+            + [{"A": -1.0, "B": 0.0, **common}] * 20
+            + [{"A": 2.0, "B": 3.0, **common}] * 20
+        )
+        elo = {"A": 2.0, "C": 1.0, "D": 1.0, "B": 0.0}
+        pages = dict.fromkeys(elo, MIN_PAGES_FOR_RANK_RANGE)
+        assert _clearly_above("A", "C", replicates) and _clearly_above("C", "B", replicates)
+        assert not _clearly_above("A", "B", replicates)
+        assert not _clearly_above("B", "A", replicates)
+        ranges = _rank_ranges(elo, replicates, pages)
+        assert ranges == {"A": (1, 2), "C": (2, 3), "D": (2, 3), "B": (3, 4)}
+
+    def test_a_range_of_one_rank_means_apart_from_every_other_model(self):
+        # The statement the card makes. Checked on boards of random results.
+        rng = random.Random(11)
+        single_rank_models = 0
+        for _ in range(12):
+            models = [f"m{n}" for n in range(5)]
+            strength = {m: 1.0 + rng.random() * 3 for m in models}
+            results = []
+            for page in range(40):
+                for i, a in enumerate(models):
+                    for b in models[i + 1 :]:
+                        p_a = strength[a] / (strength[a] + strength[b])
+                        results.append(
+                            ComparisonResult(page, a, b, "A" if rng.random() < p_a else "B")
+                        )
+            replicates = _bootstrap_replicates(results, models, n_bootstrap=200)
+            board = compute_elo(results, models, n_bootstrap=200)
+            for model, (best, worst) in board.rank_range.items():
+                if best != worst:
+                    continue
+                single_rank_models += 1
+                for other in models:
+                    if other != model:
+                        assert _clearly_above(model, other, replicates) or _clearly_above(
+                            other, model, replicates
+                        )
+        assert single_rank_models > 5  # the loop above checked something
+
     def test_the_range_always_holds_the_fitted_rank(self):
         # Replicates that disagree with the fit (they put "low" above "high" in
         # every resample) cannot push a range past the fitted rank.

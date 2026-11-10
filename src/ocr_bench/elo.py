@@ -342,10 +342,15 @@ def _rank_ranges(
 
     A model's best rank is one more than the number of models clearly above it;
     its worst rank is the number of models minus those clearly below it (see
-    :func:`_clearly_above`). A range of one rank means the model is clearly
-    apart from every other model. The range says how many models are clearly
-    above and below, not which: two models with overlapping ranges can be
-    clearly apart.
+    :func:`_clearly_above`). The range is then widened, if needed, to include
+    the model's rank in the fit on all pages.
+
+    A range of one rank means the model is clearly apart from every other
+    model. A wider range says how many models are clearly above and below, not
+    which. Two ranges do not decide a pair: two models with overlapping ranges
+    can be clearly apart, and two models with ranges that do not overlap can
+    fail the test for that pair (A clearly above C, C clearly above B, and the
+    difference between A and B still not clear).
 
     A model on fewer than ``MIN_PAGES_FOR_RANK_RANGE`` pages is not called
     clearly apart from any model, so it widens every other range by one rank.
@@ -353,9 +358,10 @@ def _rank_ranges(
     ranges.
 
     The tests are one per pair at the 95% level, with no correction for the
-    number of pairs: about 1 pair in 20 of equally good models is called apart
-    by chance, so a large board is likely to hold such a pair. The range still
-    holds a model's true rank far more often than 95% of the time.
+    number of pairs: at least 1 pair in 20 of equally good models is called
+    apart by chance (about 7% at 20 pages in simulation), so a large board is
+    likely to hold such a pair. In simulations of complete designs the range
+    held a model's true rank for about 99% of models.
     """
     if len(replicates) < MIN_REPLICATES_FOR_RANK_RANGE:
         return {}
