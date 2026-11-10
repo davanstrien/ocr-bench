@@ -420,6 +420,37 @@ class TestBudget:
         assert any(page < 20 for page in pages)
         assert any(page >= 20 for page in pages)
 
+    @pytest.mark.parametrize("adaptive", [True, False])
+    def test_budget_stop_keeps_no_auto_tie_from_later_pages(self, adaptive):
+        # model-a and model-b give the same text on every second page of the
+        # visiting order, so that pair is auto-tied there with no judge call.
+        # A budget of 7 is used up on the third page visited:
+        #   page 1: 3 judged; page 2: 1 auto-tie + 2 judged; page 3: 2 judged.
+        ds, ocr = make_ds(n=40)
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        for page in order[1::2]:
+            ds._columns["col_b"][page] = ds._columns["col_a"][page]
+        flags = ["--max-comparisons", "7", "--checkpoint-every", "0"]
+        if not adaptive:
+            flags.insert(0, "--no-adaptive")
+
+        judge, m_publish, _ = _run_judge(flags, ds, ocr, judge=FakeJudge(winner="tie"))
+
+        assert judge.judged == 7
+        position = {page: n for n, page in enumerate(order)}
+        last_judged = max(position[page] for _, page in judge.pair_samples)
+        assert last_judged == 2
+        stored = m_publish.call_args.args[1].comparison_log
+        assert len(stored) == 8
+        assert all(position[row["sample_idx"]] <= last_judged for row in stored)
+        auto_tied_pages = [row["sample_idx"] for row in stored if row["agreement"] == "auto"]
+        assert auto_tied_pages == [order[1]]
+        meta = _published_metadata(m_publish)
+        assert meta.budget_exhausted is True
+        assert meta.total_comparisons == 7
+        assert meta.auto_tied == 1
+        assert meta.valid_comparisons == 7
+
     def test_no_budget_judges_everything(self):
         ds, ocr = make_ds(n=10)
         judge, m_publish, _ = _run_judge(["--no-adaptive", "--checkpoint-every", "0"], ds, ocr)
