@@ -994,6 +994,13 @@ def _string_list(value: object) -> list[str] | None:
     return strings
 
 
+def _last_run_hit_its_budget(existing_meta_rows: list[dict]) -> bool:
+    """Whether the latest recorded judge run stopped at its --max-comparisons budget."""
+    if not existing_meta_rows:
+        return False
+    return bool(existing_meta_rows[-1].get("budget_exhausted"))
+
+
 def _previous_judge_hint(existing_meta_rows: list[dict], requested_models: list[str] | None) -> str:
     """Name the earlier judge when a resume may have failed because the default judge changed.
 
@@ -1760,17 +1767,28 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 "  [dim]Model grid changed or its balanced warm-up is incomplete; "
                 f"continuing balanced allocation ({reason}).[/dim]"
             )
-        elif adaptive_strategy == "balanced" and len(existing_results) >= min_before_check:
+        elif (
+            adaptive_strategy == "balanced"
+            and len(existing_results) >= min_before_check
+            and not _last_run_hit_its_budget(existing_meta_rows)
+        ):
             # The loop below checks the stopping rule only after it has judged
             # a batch. Check it here on the existing results, so a rerun of a
             # board that already meets the rule makes no judge call. A model
             # added since the last run has no interval, so its pairs are
             # unresolved and the run goes on.
+            #
+            # Not after a run that stopped at its budget: that run stopped in
+            # the middle of a batch. A check here would look at the rule at
+            # every budget stop, where one run with no budget looks only at
+            # the end of each batch, and more looks stop more boards early.
             _, existing_decisions = _stopping_decisions(existing_results)
             if not unresolved_pairs(existing_decisions):
                 console.print(
                     "[green]Existing comparisons already meet the adaptive "
-                    "stopping criteria.[/green]"
+                    "stopping criteria.[/green] To judge more pages anyway, run with "
+                    "[bold]--no-adaptive[/bold] (add [bold]--max-comparisons N[/bold] "
+                    "to judge N more comparisons)."
                 )
                 all_indices = []
 

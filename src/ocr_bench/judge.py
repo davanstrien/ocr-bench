@@ -12,8 +12,9 @@ import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from itertools import combinations
-from typing import Any, cast
+from typing import Any
 
+import numpy as np
 from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -598,9 +599,9 @@ def _apply_cap(text: str, max_len: int) -> tuple[str, bool]:
 # --- Image helpers ---
 
 
-# PIL greyscale modes that hold values above 255: 16-bit integer (in its
-# three byte-order spellings), 32-bit integer and 32-bit float.
-_WIDE_GREY_MODES = frozenset({"I;16", "I;16L", "I;16B", "I", "F"})
+# PIL greyscale modes that hold values above 255: 16-bit integer (in its four
+# byte-order spellings), 32-bit integer and 32-bit float.
+_WIDE_GREY_MODES = frozenset({"I;16", "I;16L", "I;16B", "I;16N", "I", "F"})
 
 
 def _wide_grey_to_8bit(image: Image.Image) -> Image.Image:
@@ -610,26 +611,38 @@ def _wide_grey_to_8bit(image: Image.Image) -> Image.Image:
     255. A 16-bit scan with paper near 30000 and ink near 2000, converted that
     way, is a white image with no text on it.
 
-    When the image holds a value above 255, its own range is mapped linearly
-    onto 0 to 255: the darkest pixel becomes black and the lightest white.
-    The result is an ``L`` image. An image whose values are all 255 or below
-    is already in the 8-bit range, and an image with one value everywhere has
-    no range to map; both are returned unchanged. So is an image in any other
-    mode.
+    When the image holds a value above 255, its values are divided by its
+    largest value and spread over 0 to 255: the lightest pixel becomes white,
+    and zero stays black. The darkest pixel is not stretched down to black, so
+    a blank page stays a light page, and faint marks such as show-through
+    stay faint. An image with values below zero uses its lowest value as
+    black. The result is an ``L`` image.
+
+    An image whose values are all 255 or below is already in the 8-bit range
+    and is returned unchanged (this includes a float image with values from 0
+    to 1). So is an image in any other mode.
     """
     if image.mode not in _WIDE_GREY_MODES:
         return image
-    # "F" holds the values of all these modes. getextrema and point do not
-    # accept "I;16L" and "I;16B", but they accept "F".
-    as_float = image.convert("F")
-    # A single-band image has one (min, max) pair.
-    low, high = cast(tuple[float, float], as_float.getextrema())
-    if high <= 255 or high == low:
+    values = np.asarray(image)
+    if values.dtype.kind == "f":
+        finite = values[np.isfinite(values)]
+        if finite.size == 0:
+            return image
+        low, high = float(finite.min()), float(finite.max())
+    else:
+        # Exact for every integer mode. A 32-bit float cannot hold every 32-bit
+        # integer, so the range is taken before any conversion.
+        low, high = float(values.min()), float(values.max())
+    if high <= 255:
         return image
-    scale = 255.0 / (high - low)
-    # The conversion from "F" to "L" drops the fraction, so add 0.5 to round.
-    offset = 0.5 - low * scale
-    return as_float.point(lambda value: value * scale + offset).convert("L")
+    black = min(low, 0.0)
+    # float64 holds every 32-bit integer; float32 is exact for 16-bit values.
+    work = values.astype(np.float64 if values.dtype.itemsize > 2 else np.float32)
+    scaled = (work - black) * (255.0 / (high - black))
+    # A pixel that is not a number, or infinite, becomes black or white.
+    scaled = np.nan_to_num(scaled, nan=0.0, posinf=255.0, neginf=0.0)
+    return Image.fromarray(np.clip(np.rint(scaled), 0, 255).astype(np.uint8))
 
 
 def image_to_base64(image: Image.Image, max_dim: int = MAX_IMAGE_DIM) -> str:
