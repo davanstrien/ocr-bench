@@ -356,6 +356,13 @@ class TestBoards:
         assert "| FAILED |" in readme
         assert "FAILED: every output was an error message" in readme
 
+    def test_the_failed_note_names_the_judged_sample_when_the_counts_do(self):
+        # A model can fail on every sampled page and have text on other rows.
+        evaluation = _evaluation(_results(range(20)), failed_models=["org/model-dead"])
+        evaluation.metadata["failed_outputs_scope"] = "sample"
+        readme = _plan(evaluation).files["README.md"].decode()
+        assert "FAILED: every output in the judged sample was an error message" in readme
+
     def test_without_a_sample_cap_the_card_counts_the_compared_pages(self):
         evaluation = _evaluation(_results(range(20)))
         evaluation.metadata.pop("model_coverage", None)

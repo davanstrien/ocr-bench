@@ -78,8 +78,16 @@ class TestImageToBase64:
         values[100:110, 20:280] = 2000
         if mode in ("I", "F"):
             return Image.fromarray(values).convert(mode)
-        byte_order = ">u2" if mode == "I;16B" else "<u2"
+        byte_order = {"I;16B": ">u2", "I;16N": "=u2"}.get(mode, "<u2")
         return Image.frombytes(mode, (300, 200), values.astype(byte_order).tobytes())
+
+    @staticmethod
+    def _judged(image: Image.Image) -> Image.Image:
+        """The greyscale image the judge receives for ``image``."""
+        import base64
+        import io
+
+        return Image.open(io.BytesIO(base64.b64decode(image_to_base64(image)))).convert("L")
 
     @staticmethod
     def _plain_conversion(image: Image.Image, max_dim: int = 1024) -> str:
@@ -96,7 +104,7 @@ class TestImageToBase64:
         image.save(buf, format="JPEG", quality=85)
         return base64.b64encode(buf.getvalue()).decode()
 
-    @pytest.mark.parametrize("mode", ["I;16", "I;16L", "I;16B", "I", "F"])
+    @pytest.mark.parametrize("mode", ["I;16", "I;16L", "I;16B", "I;16N", "I", "F"])
     def test_wide_grey_page_keeps_dark_text_on_light_paper(self, mode):
         # convert("RGB") alone clips every value above 255 to white.
         import base64
@@ -121,10 +129,64 @@ class TestImageToBase64:
         page.paste(40, (8, 8, 56, 16))
         assert image_to_base64(page) == self._plain_conversion(page)
 
-    def test_wide_grey_flat_page_does_not_fail(self):
-        # One value everywhere, above 255: there is no range to map.
+    def test_wide_grey_flat_page_stays_a_light_page(self):
+        # One value everywhere, above 255: the lightest value is white.
         page = Image.new("I;16", (64, 64), 30000)
-        assert image_to_base64(page) == self._plain_conversion(page)
+        assert self._judged(page).getextrema() == (255, 255)
+
+    def test_wide_grey_blank_page_with_a_faint_mark_stays_light(self):
+        # A blank page with show-through 5% darker than the paper. Stretching
+        # the darkest pixel to black would turn the faint mark into ink.
+        import numpy as np
+
+        values = np.full((200, 300), 60000, dtype=np.uint16)
+        values[80:120, 40:260] = 57000
+        judged = self._judged(Image.fromarray(values))
+        paper = judged.getpixel((10, 10))
+        mark = judged.getpixel((150, 100))
+        assert paper > 245
+        assert 230 < mark < paper
+
+    def test_wide_grey_12_bit_values_in_a_16_bit_file_are_readable(self):
+        # A fixed division by 256 would leave such a page almost black.
+        import numpy as np
+
+        values = np.full((200, 300), 3800, dtype=np.uint16)
+        values[50:60, 20:280] = 400
+        judged = self._judged(Image.fromarray(values))
+        assert judged.getpixel((10, 10)) > 245
+        assert judged.getpixel((150, 55)) < 50
+
+    def test_wide_grey_32_bit_values_keep_their_exact_range(self):
+        # 32-bit integers that a 32-bit float cannot tell apart.
+        import numpy as np
+
+        values = np.zeros((64, 64), dtype=np.int32)
+        values[:, 32:] = 2**30 + 64
+        values[:, 48:] = 2**30
+        judged = self._judged(Image.fromarray(values))
+        assert judged.getpixel((8, 8)) < 5  # zero stays black
+        assert judged.getpixel((40, 8)) > 250
+
+    def test_wide_grey_values_below_zero_use_the_lowest_value_as_black(self):
+        import numpy as np
+
+        values = np.full((64, 64), 30000, dtype=np.int32)
+        values[:, :32] = -30000
+        judged = self._judged(Image.fromarray(values))
+        assert judged.getpixel((8, 8)) < 5
+        assert judged.getpixel((56, 8)) > 250
+
+    def test_wide_grey_float_page_with_an_infinite_pixel_is_still_readable(self):
+        import numpy as np
+
+        values = np.full((64, 64), 30000.0, dtype=np.float32)
+        values[20:30, 8:56] = 2000.0
+        values[0, 0] = np.inf
+        values[0, 1] = np.nan
+        judged = self._judged(Image.fromarray(values))
+        assert judged.getpixel((40, 50)) > 245
+        assert judged.getpixel((30, 25)) < 50
 
     @pytest.mark.parametrize("mode", ["L", "LA", "RGBA", "P", "1", "CMYK"])
     def test_other_modes_are_converted_as_before(self, mode):

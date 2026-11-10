@@ -722,7 +722,13 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
             f"{settings['failed_outputs_scope']}: {counts}.",
         ]
     if any(row["status"] == "failed" for row in overall_rows):
-        lines += ["", "FAILED: every output was an error message, so the model has no rating."]
+        where = (
+            " in the judged sample" if settings["failed_outputs_scope"] == "judged sample" else ""
+        )
+        lines += [
+            "",
+            f"FAILED: every output{where} was an error message, so the model has no rating.",
+        ]
     if slice_rows:
         column = _label(settings["slice_column"])
         lines += [
