@@ -4,6 +4,7 @@ import random
 
 from ocr_bench.elo import (
     INITIAL_ELO,
+    MIN_PAGES_TO_RESOLVE,
     ComparisonResult,
     Leaderboard,
     _bootstrap_ci,
@@ -438,3 +439,93 @@ class TestRankingsResolved:
             },
         )
         assert rankings_resolved(board) is False
+
+
+class TestRankRanges:
+    """The ranks a model could hold, from the paired bootstrap of rating differences."""
+
+    @staticmethod
+    def _results(pages, win_rule):
+        """One comparison per pair per page; ``win_rule(page, a, b)`` names the winner."""
+        models = ["strong", "middle", "weak"]
+        results = []
+        for page in range(pages):
+            for i, a in enumerate(models):
+                for b in models[i + 1 :]:
+                    results.append(ComparisonResult(page, a, b, win_rule(page, a, b)))
+        return models, results
+
+    def test_clearly_different_models_hold_one_rank_each(self):
+        # The model listed first wins 9 pages in 10.
+        models, results = self._results(60, lambda page, a, b: "B" if page % 10 == 0 else "A")
+        board = compute_elo(results, models, n_bootstrap=200)
+        assert board.rank_range == {"strong": (1, 1), "middle": (2, 2), "weak": (3, 3)}
+
+    def test_models_the_data_does_not_separate_share_a_range(self):
+        def win_rule(page, a, b):
+            if (a, b) == ("strong", "middle"):
+                return "A" if page % 2 == 0 else "B"  # an even split
+            return "B" if page % 10 == 0 else "A"
+
+        models, results = self._results(60, win_rule)
+        board = compute_elo(results, models, n_bootstrap=200)
+        assert board.rank_range["strong"] == (1, 2)
+        assert board.rank_range["middle"] == (1, 2)
+        assert board.rank_range["weak"] == (3, 3)
+
+    def test_the_range_holds_the_rank_from_the_fit(self):
+        rng = random.Random(3)
+        models = [f"m{n}" for n in range(6)]
+        strength = {m: 1.0 + 0.15 * n for n, m in enumerate(models)}
+        results = []
+        for page in range(40):
+            for i, a in enumerate(models):
+                for b in models[i + 1 :]:
+                    p_a = strength[a] / (strength[a] + strength[b])
+                    results.append(ComparisonResult(page, a, b, "A" if rng.random() < p_a else "B"))
+        board = compute_elo(results, models, n_bootstrap=200)
+        for rank, (model, _) in enumerate(board.ranked, start=1):
+            best, worst = board.rank_range[model]
+            assert 1 <= best <= rank <= worst <= len(models)
+
+    def test_overlapping_intervals_can_still_be_clearly_apart(self):
+        # alpha and beta win or lose against the three anchors together, page by
+        # page, so both ratings move the same way when the pages are resampled.
+        # alpha beats beta on 4 pages in 5.
+        anchors = ["anchor-0", "anchor-1", "anchor-2"]
+        results = []
+        for page in range(60):
+            both_win = (page * 7) % 10 < 5
+            for top in ("alpha", "beta"):
+                for anchor in anchors:
+                    results.append(ComparisonResult(page, top, anchor, "A" if both_win else "B"))
+            results.append(ComparisonResult(page, "alpha", "beta", "A" if page % 5 < 4 else "B"))
+            for i, a in enumerate(anchors):
+                for b in anchors[i + 1 :]:
+                    results.append(ComparisonResult(page, a, b, "tie"))
+        board = compute_elo(results, ["alpha", "beta", *anchors], n_bootstrap=300)
+
+        alpha_low, _ = board.elo_ci["alpha"]
+        _, beta_high = board.elo_ci["beta"]
+        assert beta_high > alpha_low  # the two intervals overlap
+        # alpha could be first and beta could not: alpha is clearly above beta.
+        assert board.rank_range["alpha"][0] == 1
+        assert board.rank_range["beta"][0] == 2
+
+    def test_a_model_on_too_few_pages_is_not_called_apart(self):
+        models, results = self._results(
+            MIN_PAGES_TO_RESOLVE - 1, lambda page, a, b: "B" if page == 0 else "A"
+        )
+        board = compute_elo(results, models, n_bootstrap=200)
+        assert set(board.rank_range.values()) == {(1, 3)}
+
+    def test_no_rank_range_without_a_bootstrap(self):
+        models, results = self._results(20, lambda page, a, b: "A")
+        assert compute_elo(results, models, n_bootstrap=0).rank_range == {}
+
+    def test_the_bootstrap_intervals_do_not_depend_on_the_rank_ranges(self):
+        # One set of resamples gives both: the published intervals stay the
+        # same as the intervals of the separate interval function.
+        models, results = self._results(30, lambda page, a, b: "B" if page % 4 == 0 else "A")
+        board = compute_elo(results, models, n_bootstrap=100)
+        assert board.elo_ci == _bootstrap_ci(results, models, n_bootstrap=100)

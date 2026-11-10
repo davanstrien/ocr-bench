@@ -23,6 +23,13 @@ current behaviour.
   - It is empty for an auto-tie, which no judge saw, and for rows written by earlier versions. A judged row with an empty `shown_first` was written before this fix.
   - The `winner` and `reason` columns are unchanged: both refer to `model_a` and `model_b`. In a stored `reason`, "Output A" means `model_a`, also when the judge saw it second.
 - Each row of the `metadata` config records `adaptive` (whether the run judged in adaptive batches or in one pass) and `ocr_bench_version` (the version that judged). `adaptive_strategy` did not tell the two modes apart, because it is recorded for both. A row describes its own run: after a resume, earlier comparisons in the repo can come from another mode or version.
+- The board card that `share` writes says more about how sure a ranking is and what it rests on. Share a board again to update its card.
+  - **Rank range.** Each model has the ranks it could hold on this data: `3–5` means the data does not clearly separate it from the models at ranks 3 to 5. The range comes from the difference between two ratings on the same resampled pages. Two models whose 95% intervals overlap can still be clearly apart, so the card no longer says that overlapping intervals mean the models are not separated. A model on fewer than 10 pages is not called apart from any model. The tests are one per pair, with no correction for the number of pairs.
+  - **Pages per pair.** The card gives the smallest and largest number of pages a pair of models was compared on, and why a pair is not compared on a page.
+  - **Cut outputs.** When an output was longer than the judge's text cap on some pages, the card gives the number of those pages for each model. The judge did not see the end of those outputs.
+  - The link to the judge prompts goes to the ocr-bench version that judged, when the results record it.
+  - `overall.jsonl` has the new columns `rank_low`, `rank_high` and `truncated_pages`; `slices.jsonl` has `rank_low` and `rank_high`; `board.json` has `pair_pages_min`, `pair_pages_max` and `judged_with_version`.
+- `Leaderboard.rank_range` holds the rank range of each model after a bootstrap.
 
 ## [0.0.8] - 2026-11-09
 
