@@ -495,6 +495,89 @@ class TestBalancedRerun:
         assert judge.judged == 1
         assert len(m_publish.call_args.args[1].comparison_log) == 30
 
+    @pytest.mark.parametrize("page_of_third_batch", [0, 1, 4])
+    def test_a_stop_at_the_end_of_a_page_inside_a_batch_is_not_the_end_of_a_batch(
+        self, page_of_third_batch
+    ):
+        # The board converged at the end of the second batch (30 rows). A later
+        # run then judged one whole page of the third batch and stopped. The
+        # stored comparisons end at the end of a page, inside a batch: the run
+        # judges the other four pages of that batch before it checks the rule.
+        converged = self._converged_board()
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        _, m_publish, _ = _run_judge(
+            [*self.FLAGS, "--no-adaptive"], ds, ocr, judge=NameOrderJudge()
+        )
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        extra_page = order[10 + page_of_third_batch]
+        one_more_page = [r for r in self._stored_results(m_publish) if r.sample_idx == extra_page]
+        assert len(one_more_page) == 3
+
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        judge, _, _ = _run_judge(
+            [*self.FLAGS],
+            ds,
+            ocr,
+            existing=[*converged, *one_more_page],
+            judge=NameOrderJudge(),
+        )
+        assert judge.judged == 12
+        assert {page for _, page in judge.pair_samples} == set(order[10:15]) - {extra_page}
+
+    @pytest.mark.parametrize(("stored_batches", "calls"), [(2, 10), (3, 5)])
+    def test_whole_batches_below_the_minimum_do_not_stop_a_two_model_board(
+        self, stored_batches, calls
+    ):
+        # Two models: one batch is 5 comparisons, and the rule is not checked
+        # before 20. Two or three stored batches, all won by one model, end at
+        # the end of a batch, but they are too few to stop on.
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        existing = [
+            ComparisonResult(sample_idx=page, model_a="model-a", model_b="model-b", winner="A")
+            for page in order[: 5 * stored_batches]
+        ]
+        ds, ocr = make_ds(n=40, models=("a", "b"))
+        judge, _, _ = _run_judge([*self.FLAGS], ds, ocr, existing=existing, judge=NameOrderJudge())
+        assert judge.judged == calls
+
+    def test_rows_of_a_model_outside_the_grid_do_not_block_the_check(self):
+        # A fourth model was judged earlier, on later pages, and is not in this
+        # run. Its rows are kept and take no part in the check: the three
+        # models of this run converged at the end of the second batch.
+        converged = self._converged_board()
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        out_of_grid = [
+            ComparisonResult(sample_idx=page, model_a="model-a", model_b="model-z", winner="A")
+            for page in order[20:30]
+        ]
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        judge, m_publish, _ = _run_judge(
+            [*self.FLAGS],
+            ds,
+            ocr,
+            existing=[*converged, *out_of_grid],
+            judge=NameOrderJudge(),
+        )
+        assert judge.judged == 0
+        assert len(m_publish.call_args.kwargs["preserved_comparisons"]) == 10
+
+    def test_the_targeted_message_has_no_hint_that_cannot_be_followed(self, capsys):
+        # --no-adaptive cannot be combined with --adaptive-strategy targeted.
+        existing = self._converged_board()
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        capsys.readouterr()
+        judge, _, _ = _run_judge(
+            [*self.FLAGS, "--adaptive-strategy", "targeted"],
+            ds,
+            ocr,
+            existing=existing,
+            judge=NameOrderJudge(),
+        )
+        out = " ".join(capsys.readouterr().out.split())
+        assert judge.judged == 0
+        assert "Existing comparisons already meet the adaptive stopping criteria." in out
+        assert "--no-adaptive" not in out
+
     def test_stored_comparisons_after_an_unjudged_batch_are_not_a_finished_prefix(self):
         # The judge calls of the first batch all failed, so nothing is stored
         # for its pages. The second batch is stored, and the third stopped at a
