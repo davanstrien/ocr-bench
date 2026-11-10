@@ -1686,6 +1686,24 @@ def cmd_judge(args: argparse.Namespace) -> None:
         if max_comparisons is not None:
             console.print(f"Budget: stop after {max_comparisons} comparisons")
 
+        def _stopping_decisions(
+            results: list[ComparisonResult],
+        ) -> tuple[Leaderboard, list[AdjacentPairDecision]]:
+            """Fit the board on ``results`` and classify its adjacent pairs.
+
+            The run stops when no pair is unresolved. The check before the
+            first batch and the check after each batch both call this, so they
+            apply one rule.
+            """
+            fitted_board = compute_elo(results, model_names)
+            pair_decisions = _decisions_for_board(
+                fitted_board,
+                results,
+                size_tie_ratio=args.size_tie_ratio,
+                size_tie_min_samples=args.size_tie_min_samples,
+            )
+            return fitted_board, pair_decisions
+
         new_results: list[ComparisonResult] = []
         total_comparisons = 0  # judge calls made this run (auto-ties excluded)
         last_checkpoint = 0
@@ -1711,13 +1729,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             # records completed (pair, sample) work, not the active pair set;
             # deriving it from the current board prevents a resumed targeted run
             # from filling every pair it intentionally deprioritised previously.
-            resumed_board = compute_elo(existing_results, model_names)
-            resumed_decisions = _decisions_for_board(
-                resumed_board,
-                existing_results,
-                size_tie_ratio=args.size_tie_ratio,
-                size_tie_min_samples=args.size_tie_min_samples,
-            )
+            _, resumed_decisions = _stopping_decisions(existing_results)
             active_pairs = unresolved_pairs(resumed_decisions)
             if active_pairs:
                 console.print(
@@ -1741,6 +1753,19 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 "  [dim]Model grid changed or its balanced warm-up is incomplete; "
                 f"continuing balanced allocation ({reason}).[/dim]"
             )
+        elif adaptive_strategy == "balanced" and len(existing_results) >= min_before_check:
+            # The loop below checks the stopping rule only after it has judged
+            # a batch. Check it here on the existing results, so a rerun of a
+            # board that already meets the rule makes no judge call. A model
+            # added since the last run has no interval, so its pairs are
+            # unresolved and the run goes on.
+            _, existing_decisions = _stopping_decisions(existing_results)
+            if not unresolved_pairs(existing_decisions):
+                console.print(
+                    "[green]Existing comparisons already meet the adaptive "
+                    "stopping criteria.[/green]"
+                )
+                all_indices = []
 
         for batch_num, batch_start in enumerate(range(0, len(all_indices), batch_samples)):
             # Global budget: stop before a batch we can't afford at all.
@@ -1805,14 +1830,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 break
 
             if total >= min_before_check:
-                accumulated = existing_results + new_results
-                board = compute_elo(accumulated, model_names)
-                decisions = _decisions_for_board(
-                    board,
-                    accumulated,
-                    size_tie_ratio=args.size_tie_ratio,
-                    size_tie_min_samples=args.size_tie_min_samples,
-                )
+                board, decisions = _stopping_decisions(existing_results + new_results)
 
                 if board.elo_ci:
                     console.print("  CI gaps:")
