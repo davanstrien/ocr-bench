@@ -786,13 +786,14 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         "raw counts that depend on how often a model was compared, so compare ratings, "
         "not wins.",
         "",
-        "**Rank range** shows how firmly a model holds its rank. Each pair of models is "
+        "**Rank range** shows how firmly a model holds its rank. Pairs of ranked models are "
         "tested on the difference between their ratings, taken on the same resampled pages: "
         "one model tests clearly above another when the 95% interval of that difference is "
         "above zero. A model's range starts at one more than the number of models that "
         "test clearly above it, and ends at the number of ranked models minus those that "
         "test clearly below it. It is widened, if needed, to include the model's own rank. "
-        "A range of one rank means the model tested clearly apart from every other model. "
+        "A range of one rank means the model tested clearly apart from every other ranked "
+        "model. "
         "A wider range does not say which models it is apart from, and two ranges do not "
         "decide a pair. This test can separate two models whose own 95% intervals overlap. "
         "Each pair is tested on its own, with no correction for the number of pairs: in "
@@ -963,7 +964,7 @@ def _pair_pages_line(settings: dict) -> str:
         each = " each" if fewest == most else ""
         compared = (
             f"the pairs of models that were compared were compared on {on_pages}{each}; "
-            f"{no_direct}, and their order comes from comparisons with other models"
+            f"{no_direct}, and their ratings come from comparisons with other models"
         )
     elif fewest == most:
         compared = f"each pair of models was compared on {on_pages}"
@@ -973,23 +974,22 @@ def _pair_pages_line(settings: dict) -> str:
     stops = "A run can also stop before every pair is judged on every page"
     min_chars = settings["min_chars"]
     if not isinstance(min_chars, int):
-        # Results from before the setting was recorded. Those versions also
-        # left pairs out by other rules (an error message was judged as text;
-        # a pair with one empty output was skipped), so the card names no rule.
+        # The setting is recorded from 0.0.5. Earlier versions also left pairs
+        # out by other rules (an error marker was judged as text; a pair with
+        # one empty output was skipped), so the card names no rule.
         return (
-            f"- **Pages per pair**: {compared}. The results are from an older ocr-bench "
-            f"version and do not record which pairs were left out on a page. {stops}"
+            f"- **Pages per pair**: {compared}. The results do not record the "
+            "minimum-length setting, so this card does not give the rules by which a pair "
+            f"was left out on a page. {stops}"
         )
+    error_marker = "one output is an error marker such as `[OCR ERROR]`"
     failed_call = ", or the judge gave no valid answer for it"
     if min_chars > 0:
         characters = "1 character" if min_chars == 1 else f"{min_chars} characters"
-        reasons = (
-            f"both outputs are shorter than {characters}, one output is an error message"
-            + failed_call
-        )
+        reasons = f"both outputs are shorter than {characters}, {error_marker}" + failed_call
     else:
         # With the filter off, two empty outputs are compared (and tied).
-        reasons = "one output is an error message" + failed_call
+        reasons = error_marker + failed_call
     return (
         f"- **Pages per pair**: {compared}. A pair is not compared on a page where "
         f"{reasons}. {stops}"

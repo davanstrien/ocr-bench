@@ -1294,7 +1294,11 @@ class TestRankRangeAndCoverage:
         assert "| 1 | 1–2 | [org/model-mid]" in card
         assert "| 3 | 3 | [org/model-weak]" in card
         assert "**Rank range** shows how firmly a model holds its rank." in card
-        assert "A range of one rank means the model tested clearly apart from every other" in card
+        assert "Pairs of ranked models are tested on the difference between their ratings" in card
+        assert (
+            "A range of one rank means the model tested clearly apart from every other ranked "
+            "model."
+        ) in card
         assert "two ranges do not decide a pair" in card
         assert "in simulations, 4 to 7 in 100 pairs of equally good models tested apart" in card
         # The page gate of the rank ranges (20), not the 10-page minimum of a slice board.
@@ -1399,7 +1403,7 @@ class TestRankRangeAndCoverage:
         # "each pair of models" would be false: one pair has no comparison.
         assert (
             "the pairs of models that were compared were compared on 30 pages each; 1 pair "
-            "of models had no direct comparison, and their order comes from comparisons with "
+            "of models had no direct comparison, and their ratings come from comparisons with "
             "other models"
         ) in card
         assert "each pair of models was compared" not in card
@@ -1561,22 +1565,22 @@ class TestRankRangeAndCoverage:
             (
                 20,
                 "a page where both outputs are shorter than 20 characters, one output is an "
-                "error message, or the judge gave no valid answer for it.",
+                "error marker such as `[OCR ERROR]`, or the judge gave no valid answer for it.",
             ),
             (
                 0,
-                "a page where one output is an error message, or the judge gave no valid "
-                "answer for it.",
+                "a page where one output is an error marker such as `[OCR ERROR]`, or the "
+                "judge gave no valid answer for it.",
             ),
             (
                 1,
                 "a page where both outputs are shorter than 1 character, one output is an "
-                "error message, or the judge gave no valid answer for it.",
+                "error marker such as `[OCR ERROR]`, or the judge gave no valid answer for it.",
             ),
             (
                 None,
-                "The results are from an older ocr-bench version and do not record which "
-                "pairs were left out on a page.",
+                "The results do not record the minimum-length setting, so this card does not "
+                "give the rules by which a pair was left out on a page.",
             ),
         ],
     )

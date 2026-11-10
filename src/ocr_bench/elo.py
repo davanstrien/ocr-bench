@@ -351,11 +351,12 @@ def _rank_ranges(
     the model's rank in the fit on all pages.
 
     A range of one rank means the model is clearly apart from every other
-    model. A wider range says how many models are clearly above and below, not
-    which. Two ranges do not decide a pair: two models with overlapping ranges
+    model in ``elo``. A wider range does not say which models tested clearly
+    above or below it, and the widening to the fitted rank can hide how many
+    did. Two ranges do not decide a pair: two models with overlapping ranges
     can be clearly apart, and two models with ranges that do not overlap can
-    fail the test for that pair (A clearly above C, C clearly above B, and the
-    difference between A and B still not clear).
+    fail the test for that pair (A tests clearly above C and D, C and D test
+    clearly above B, and the difference between A and B is still not clear).
 
     A model on fewer than ``MIN_PAGES_FOR_RANK_RANGE`` pages is not tested
     against any model, which can only widen the other ranges. There are no
@@ -364,11 +365,10 @@ def _rank_ranges(
 
     The tests are one per pair at the 95% level, with no correction for the
     number of pairs. The rate at which equally good models are called apart
-    depends on the data: models with the same output on every page are never
-    called apart, and in simulations (Bradley-Terry results, every pair on
-    every page, 20 pages or more) it was 4 to 7% of pairs, so a large board is
-    likely to hold such a pair. In the same simulations about 99% of models
-    had their true rank inside their range.
+    depends on the data: two models with the same rating in every replicate
+    are never called apart, and in simulations (Bradley-Terry results, every
+    pair on every page, 20 pages or more) it was 4 to 7% of pairs. In the same
+    simulations about 99% of models had their true rank inside their range.
     """
     if len(replicates) < MIN_REPLICATES_FOR_RANK_RANGE:
         return {}

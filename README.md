@@ -12,7 +12,7 @@ Generic OCR benchmarks tell you which model wins _on average_. But if you're dig
 
 ocr-bench lets you run the same set of OCR models on a sample of _your_ collection, then uses a vision-language model to judge which produces the best transcription for each document. The result is a leaderboard specific to your data.
 
-The two published example boards, as ELO with page-level bootstrap 95% confidence intervals. Models whose intervals overlap may not be separated by the run; a board made with `share` gives each model a rank range, from a test of each pair's rating difference:
+The two published example boards, as ELO with page-level bootstrap 95% confidence intervals. Models whose intervals overlap may not be separated by the run; a board made with `share` can show a rank range for each ranked model, from a test of each pair's rating difference:
 
 | Model              | Britannica 1771 (50 pages) | BPL card catalog (33 judged cards of 50) |
 | ------------------ | :------------------------: | :--------------------------------------: |
