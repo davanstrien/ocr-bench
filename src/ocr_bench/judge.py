@@ -604,6 +604,37 @@ def _apply_cap(text: str, max_len: int) -> tuple[str, bool]:
 _WIDE_GREY_MODES = frozenset({"I;16", "I;16L", "I;16B", "I;16N", "I", "F"})
 
 
+# Rows converted at a time. The page is scaled in strips, so the extra memory
+# is one strip in float64 plus the 8-bit result, not several full-size copies.
+_STRIP_ROWS = 256
+
+
+def _finite_range(values: np.ndarray) -> tuple[float, float] | None:
+    """The lowest and highest value of a pixel array, or None when it has none.
+
+    A float image can hold pixels that are not a number, or infinite. They are
+    left out of the range.
+    """
+    if values.dtype.kind != "f":
+        # Exact for every integer mode. A 32-bit float cannot hold every 32-bit
+        # integer, so the range is taken before any conversion.
+        return float(values.min()), float(values.max())
+    low: float | None = None
+    high: float | None = None
+    for first_row in range(0, values.shape[0], _STRIP_ROWS):
+        strip = values[first_row : first_row + _STRIP_ROWS]
+        finite = strip[np.isfinite(strip)]
+        if finite.size == 0:
+            continue
+        strip_low = float(finite.min())
+        strip_high = float(finite.max())
+        low = strip_low if low is None else min(low, strip_low)
+        high = strip_high if high is None else max(high, strip_high)
+    if low is None or high is None:
+        return None
+    return low, high
+
+
 def _wide_grey_to_8bit(image: Image.Image) -> Image.Image:
     """Bring a 16-bit, 32-bit or float greyscale image into the 8-bit range.
 
@@ -625,24 +656,27 @@ def _wide_grey_to_8bit(image: Image.Image) -> Image.Image:
     if image.mode not in _WIDE_GREY_MODES:
         return image
     values = np.asarray(image)
-    if values.dtype.kind == "f":
-        finite = values[np.isfinite(values)]
-        if finite.size == 0:
-            return image
-        low, high = float(finite.min()), float(finite.max())
-    else:
-        # Exact for every integer mode. A 32-bit float cannot hold every 32-bit
-        # integer, so the range is taken before any conversion.
-        low, high = float(values.min()), float(values.max())
+    value_range = _finite_range(values)
+    if value_range is None:
+        return image
+    low, high = value_range
     if high <= 255:
         return image
     black = min(low, 0.0)
-    # float64 holds every 32-bit integer; float32 is exact for 16-bit values.
-    work = values.astype(np.float64 if values.dtype.itemsize > 2 else np.float32)
-    scaled = (work - black) * (255.0 / (high - black))
-    # A pixel that is not a number, or infinite, becomes black or white.
-    scaled = np.nan_to_num(scaled, nan=0.0, posinf=255.0, neginf=0.0)
-    return Image.fromarray(np.clip(np.rint(scaled), 0, 255).astype(np.uint8))
+    scale = 255.0 / (high - black)
+    scaled = np.empty(values.shape, dtype=np.uint8)
+    for first_row in range(0, values.shape[0], _STRIP_ROWS):
+        # float64 holds every 32-bit integer exactly.
+        strip = values[first_row : first_row + _STRIP_ROWS].astype(np.float64)
+        strip -= black
+        strip *= scale
+        # A pixel that is not a number becomes black; an infinite one becomes
+        # black or white.
+        np.nan_to_num(strip, copy=False, nan=0.0, posinf=255.0, neginf=0.0)
+        np.rint(strip, out=strip)
+        np.clip(strip, 0.0, 255.0, out=strip)
+        scaled[first_row : first_row + _STRIP_ROWS] = strip
+    return Image.fromarray(scaled)
 
 
 def image_to_base64(image: Image.Image, max_dim: int = MAX_IMAGE_DIM) -> str:
