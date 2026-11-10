@@ -994,6 +994,14 @@ def _string_list(value: object) -> list[str] | None:
     return strings
 
 
+# Printed when a run finds that the stored comparisons need no more judging.
+_ALREADY_MEETS_STOPPING_RULE = (
+    "[green]Existing comparisons already meet the adaptive stopping criteria.[/green] "
+    "To judge more pages anyway, run with [bold]--no-adaptive[/bold] (add "
+    "[bold]--max-comparisons N[/bold] to judge N more comparisons)."
+)
+
+
 def _previous_judge_hint(existing_meta_rows: list[dict], requested_models: list[str] | None) -> str:
     """Name the earlier judge when a resume may have failed because the default judge changed.
 
@@ -1744,10 +1752,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     f"adjacent pair(s), not all {n_pairs} pairs.[/dim]"
                 )
             else:
-                console.print(
-                    "[green]Existing comparisons already meet the adaptive "
-                    "stopping criteria.[/green]"
-                )
+                console.print(_ALREADY_MEETS_STOPPING_RULE)
                 all_indices = []
         elif adaptive_strategy == "targeted" and existing_results and not can_resume_targeted:
             missing = sorted(current_models - existing_models)
@@ -1808,12 +1813,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 ):
                     _, stored_decisions = _stopping_decisions(existing_results)
                     if not unresolved_pairs(stored_decisions):
-                        console.print(
-                            "[green]Existing comparisons already meet the adaptive "
-                            "stopping criteria.[/green] To judge more pages anyway, run "
-                            "with [bold]--no-adaptive[/bold] (add "
-                            "[bold]--max-comparisons N[/bold] to judge N more comparisons)."
-                        )
+                        console.print(_ALREADY_MEETS_STOPPING_RULE)
                         break
 
             # Trim the final batch to land exactly on the budget: the run stops

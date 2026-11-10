@@ -183,22 +183,34 @@ class TestImageToBase64:
     def test_wide_grey_values_below_zero_use_the_lowest_value_as_black(self):
         import numpy as np
 
-        values = np.full((64, 64), 30000, dtype=np.int32)
-        values[:, :32] = -30000
-        judged = self._judged(Image.fromarray(values))
-        assert judged.getpixel((8, 8)) < 5
-        assert judged.getpixel((56, 8)) > 250
+        values = np.array([[-30000, 0, 30000]], dtype=np.int32)
+        scaled = np.asarray(_wide_grey_to_8bit(Image.fromarray(values)))
+        # Zero is half way between the lowest and the highest value.
+        assert scaled.tolist() == [[0, 128, 255]]
 
-    def test_wide_grey_float_page_with_an_infinite_pixel_is_still_readable(self):
+    def test_wide_grey_values_are_rounded_to_the_nearest_level(self):
         import numpy as np
 
-        values = np.full((64, 64), 30000.0, dtype=np.float32)
-        values[20:30, 8:56] = 2000.0
-        values[0, 0] = np.inf
-        values[0, 1] = np.nan
-        judged = self._judged(Image.fromarray(values))
-        assert judged.getpixel((40, 50)) > 245
-        assert judged.getpixel((30, 25)) < 50
+        # 40000 of 65535 is 155.64 levels; 10000 is 38.91.
+        values = np.array([[0, 10000, 40000, 65535]], dtype=np.uint16)
+        scaled = np.asarray(_wide_grey_to_8bit(Image.fromarray(values)))
+        assert scaled.tolist() == [[0, 39, 156, 255]]
+
+    def test_wide_grey_float_pixels_that_are_not_finite(self):
+        import numpy as np
+
+        values = np.array([[2000.0, np.nan, np.inf, -np.inf, 30000.0, 15000.0]], dtype=np.float32)
+        scaled = np.asarray(_wide_grey_to_8bit(Image.fromarray(values)))
+        # Not a number: black. Infinite: white or black. The range comes from
+        # the finite pixels (0 to 30000, zero stays black).
+        assert scaled.tolist() == [[17, 0, 255, 0, 255, 128]]
+
+    def test_wide_grey_float_page_with_no_finite_pixel_does_not_fail(self):
+        import numpy as np
+
+        page = Image.fromarray(np.full((8, 8), np.nan, dtype=np.float32))
+        assert _wide_grey_to_8bit(page) is page
+        assert isinstance(image_to_base64(page), str)
 
     @pytest.mark.parametrize("mode", ["L", "LA", "RGBA", "P", "1", "CMYK"])
     def test_other_modes_are_converted_as_before(self, mode):
