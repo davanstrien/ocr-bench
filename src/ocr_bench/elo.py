@@ -76,7 +76,7 @@ class Leaderboard:
     comparison_log: list[dict[str, object]] = field(default_factory=list)
     elo_ci: dict[str, tuple[float, float]] = field(default_factory=dict)
     pages_by_model: dict[str, int] = field(default_factory=dict)
-    # model → (best rank, worst rank) it could hold, from the paired bootstrap
+    # model → its rank range (first rank, last rank), from the paired bootstrap
     # of rating differences (see ``_rank_ranges``). Empty without a bootstrap,
     # with too few resamples, or with fewer than two models on enough pages.
     rank_range: dict[str, tuple[int, int]] = field(default_factory=dict)
@@ -320,11 +320,12 @@ def _clearly_above(
     from the same resampled pages, and it is clear when its percentile interval
     lies above zero.
 
-    This test can call two models apart whose own intervals overlap. The rule
-    "the two intervals do not overlap" is stricter: in simulations it called
-    equally good models apart about 1% of the time, against 4 to 7% for this
-    test, and separated fewer models that do differ. Neither rule implies the
-    other for every set of replicates.
+    This test can call two models apart whose own intervals overlap. On boards
+    of three or more models the rule "the two intervals do not overlap" is
+    stricter: in simulations it called equally good models apart about 1% of
+    the time, against 6 to 7% for this test, and separated fewer models that
+    do differ. On a board of two models the two rules gave the same answer
+    (about 4%). Neither rule implies the other for every set of replicates.
     """
     differences = [
         replicate[higher] - replicate[lower]
@@ -343,7 +344,7 @@ def _rank_ranges(
     pages_by_model: dict[str, int],
     ci: float = 0.95,
 ) -> dict[str, tuple[int, int]]:
-    """The best and worst rank each model could hold.
+    """The rank range of each model: (first rank, last rank).
 
     A model's best rank is one more than the number of models clearly above it;
     its worst rank is the number of models minus those clearly below it (see

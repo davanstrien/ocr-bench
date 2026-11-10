@@ -1293,19 +1293,38 @@ class TestRankRangeAndCoverage:
         assert "| Rank | Rank range | Model |" in card
         assert "| 1 | 1–2 | [org/model-mid]" in card
         assert "| 3 | 3 | [org/model-weak]" in card
-        assert "**Rank range** shows how firmly a model holds its rank." in card
+        # The whole paragraph, word for word. Every sentence was checked against
+        # boards; a changed number or a dropped "not" must fail here.
+        assert (
+            "**Rank range** shows how firmly a model holds its rank. Pairs of ranked models "
+            "are tested on the difference between their ratings, taken on the same resampled "
+            "pages: one model tests clearly above another when the 95% interval of that "
+            "difference is above zero. A model's range starts at one more than the number of "
+            "models that test clearly above it, and ends at the number of ranked models minus "
+            "those that test clearly below it. It is widened, if needed, to include the "
+            "model's own rank. A range of one rank means the model tested clearly apart from "
+            "every other ranked model. A wider range does not always show which models it is "
+            "apart from, and two ranges that are both wider than one rank do not always decide "
+            "a pair. This test can separate two models whose own 95% intervals overlap. Each "
+            "pair is tested on its own, with no correction for the number of pairs: in "
+            "simulations, 4 to 7 in 100 pairs of equally good models tested apart by chance "
+            "on 20 pages or more. A model on fewer than 20 pages is not tested against any "
+            "model, which can only widen the ranges. A board with fewer than two models on 20 "
+            "pages or more has no rank ranges (—).\n"
+        ) in card
         assert "Pairs of ranked models are tested on the difference between their ratings" in card
         assert (
             "A range of one rank means the model tested clearly apart from every other ranked "
             "model."
         ) in card
-        assert "two ranges do not decide a pair" in card
         assert "in simulations, 4 to 7 in 100 pairs of equally good models tested apart" in card
         # The page gate of the rank ranges (20), not the 10-page minimum of a slice board.
         assert "A model on fewer than 20 pages is not tested against any model" in card
         # Statements that reviewers showed to be false in some case stay off the card.
         for withdrawn in (
             "ranges do not overlap are clearly apart",
+            "when two intervals overlap, this data does not clearly separate those models",
+            "two ranges do not decide a pair",
             "move together",
             "at least 1 pair in 20",
             "adds one rank",
@@ -1373,12 +1392,15 @@ class TestRankRangeAndCoverage:
         plan = _plan(_evaluation(results))
         assert (plan.settings["pair_pages_min"], plan.settings["pair_pages_max"]) == (15, 20)
         card = plan.files["README.md"].decode()
-        assert "a pair of models was compared on 15 to 20 pages" in card
+        assert "a pair of ranked models was compared on 15 to 20 pages" in card
         assert "both outputs are shorter than 10 characters" in card
 
     def test_one_page_count_when_every_pair_has_the_same(self):
         plan = _plan(_evaluation(_results(range(20))))
-        assert "each pair of models was compared on 20 pages" in plan.files["README.md"].decode()
+        assert (
+            "each pair of ranked models was compared on 20 pages"
+            in plan.files["README.md"].decode()
+        )
 
     def test_pair_page_counts_include_a_pair_that_was_never_compared(self):
         results = _results(range(12), pairs=[("org/model-good", "org/model-mid")])
@@ -1402,9 +1424,9 @@ class TestRankRangeAndCoverage:
         card = plan.files["README.md"].decode()
         # "each pair of models" would be false: one pair has no comparison.
         assert (
-            "the pairs of models that were compared were compared on 30 pages each; 1 pair "
-            "of models had no direct comparison, and their ratings come from comparisons with "
-            "other models"
+            "the pairs of ranked models that were compared were compared on 30 pages each; 1 pair "
+            "of ranked models had no direct comparison, and their ratings come from comparisons "
+            "with other models"
         ) in card
         assert "each pair of models was compared" not in card
 
@@ -1417,7 +1439,10 @@ class TestRankRangeAndCoverage:
         plan = _plan(_evaluation(results))
         assert plan.settings["pairs_never_compared"] == 0
         assert (plan.settings["pair_pages_min"], plan.settings["pair_pages_max"]) == (1, 30)
-        assert "a pair of models was compared on 1 to 30 pages." in plan.files["README.md"].decode()
+        assert (
+            "a pair of ranked models was compared on 1 to 30 pages."
+            in plan.files["README.md"].decode()
+        )
 
     def test_without_a_recorded_text_cap_the_note_gives_no_number(self):
         results = _results(range(20))
@@ -1425,8 +1450,8 @@ class TestRankRangeAndCoverage:
         evaluation = _evaluation(results)
         evaluation.metadata["max_ocr_text_len"] = None
         card = _plan(evaluation).files["README.md"].decode()
-        assert "The judge reads the start of an output. Pages where" in card
-        assert "characters of an output" not in card
+        assert "The judge's copy of a long output is cut. Pages where" in card
+        assert "characters." not in card.split("The judge's copy")[1].split("Pages where")[0]
 
     def test_unequal_page_counts_with_a_pair_never_compared(self):
         settings = {
@@ -1436,7 +1461,7 @@ class TestRankRangeAndCoverage:
             "min_chars": 20,
         }
         line = share._pair_pages_line(settings)
-        assert "were compared on 15 to 30 pages; 1 pair of models had no direct" in line
+        assert "compared on 15 to 30 pages; 1 pair of ranked models had no direct" in line
         assert "pages each" not in line
 
     def test_the_cut_note_does_not_describe_how_the_text_was_prepared(self):
@@ -1447,15 +1472,19 @@ class TestRankRangeAndCoverage:
         evaluation = _evaluation(results)
         del evaluation.metadata["judge_text_mode"]
         card = _plan(evaluation).files["README.md"].decode()
-        assert "The judge reads the first 8,000 characters of an output. Pages where" in card
+        assert "The judge's copy of an output is cut at 8,000 characters. Pages where" in card
         assert "flattened" not in card
 
     @pytest.mark.parametrize(
         ("pages", "never", "expected"),
         [
-            (1, 0, "each pair of models was compared on 1 page."),
-            (1, 1, "were compared on 1 page each; 1 pair of models had no direct comparison,"),
-            (30, 2, "were compared on 30 pages each; 2 pairs of models had no direct comparison,"),
+            (1, 0, "each pair of ranked models was compared on 1 page."),
+            (1, 1, "compared on 1 page each; 1 pair of ranked models had no direct comparison,"),
+            (
+                30,
+                2,
+                "compared on 30 pages each; 2 pairs of ranked models had no direct comparison,",
+            ),
         ],
     )
     def test_the_pages_per_pair_line_counts_one_page_and_one_pair_correctly(
@@ -1498,13 +1527,13 @@ class TestRankRangeAndCoverage:
         assert cut == {"org/model-good": 0, "org/model-mid": 5, "org/model-weak": 0}
         card = plan.files["README.md"].decode()
         assert (
-            "The judge reads the first 8,000 characters of an output. Pages where a model's "
-            "output was longer, so the judge did not see its end: org/model-mid: 5."
+            "The judge's copy of an output is cut at 8,000 characters. Pages where a model's "
+            "output was cut, so the judge did not see its end: org/model-mid: 5."
         ) in card
 
     def test_no_cut_note_when_nothing_was_cut(self):
         plan = _plan(_evaluation(_results(range(20))))
-        assert "The judge reads" not in plan.files["README.md"].decode()
+        assert "The judge's copy" not in plan.files["README.md"].decode()
 
     def test_a_file_with_the_old_columns_is_refused(self):
         plan = _plan(_evaluation(_results(range(20))))

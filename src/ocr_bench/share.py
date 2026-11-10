@@ -737,7 +737,7 @@ def _table(rows: list[dict]) -> list[str]:
 
 
 def _rank_range_cell(row: dict) -> str:
-    """``3–5`` for a model that could hold ranks 3 to 5, ``3`` when only rank 3."""
+    """``3–5`` for a rank range from 3 to 5, ``3`` for a range of one rank."""
     best, worst = row.get("rank_low"), row.get("rank_high")
     if best is None or worst is None:
         return "—"
@@ -748,6 +748,30 @@ def _label(value: object) -> str:
     """A slice label or column name as inline code, or escaped text if it holds a backtick."""
     text = "".join(" " if char in LINE_BREAKS else char for char in str(value))
     return _md(text) if "`" in text else f"`{text}`"
+
+
+# How to read the Rank range column. Every sentence is a definition, something
+# that always follows from the definition, or a measurement named as one:
+# reviewers found boards on which broader statements were false. Change it
+# only with a board in hand that the new wording is true for.
+RANK_RANGE_PARAGRAPH = (
+    "**Rank range** shows how firmly a model holds its rank. Pairs of ranked models are "
+    "tested on the difference between their ratings, taken on the same resampled pages: "
+    "one model tests clearly above another when the 95% interval of that difference is "
+    "above zero. A model's range starts at one more than the number of models that "
+    "test clearly above it, and ends at the number of ranked models minus those that "
+    "test clearly below it. It is widened, if needed, to include the model's own rank. "
+    "A range of one rank means the model tested clearly apart from every other ranked "
+    "model. A wider range does not always show which models it is apart from, and two "
+    "ranges that are both wider than one rank do not always decide a pair. This test can "
+    "separate two models whose own 95% intervals overlap. Each pair is tested on its own, "
+    "with no correction for the number of pairs: in simulations, 4 to 7 in 100 pairs of "
+    "equally good models tested apart by chance on "
+    f"{MIN_PAGES_FOR_RANK_RANGE} pages or more. A model on fewer than "
+    f"{MIN_PAGES_FOR_RANK_RANGE} pages is not tested against any model, which can only "
+    "widen the ranges. A board with fewer than two models on "
+    f"{MIN_PAGES_FOR_RANK_RANGE} pages or more has no rank ranges (—)."
+)
 
 
 def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict]) -> str:
@@ -786,22 +810,7 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         "raw counts that depend on how often a model was compared, so compare ratings, "
         "not wins.",
         "",
-        "**Rank range** shows how firmly a model holds its rank. Pairs of ranked models are "
-        "tested on the difference between their ratings, taken on the same resampled pages: "
-        "one model tests clearly above another when the 95% interval of that difference is "
-        "above zero. A model's range starts at one more than the number of models that "
-        "test clearly above it, and ends at the number of ranked models minus those that "
-        "test clearly below it. It is widened, if needed, to include the model's own rank. "
-        "A range of one rank means the model tested clearly apart from every other ranked "
-        "model. "
-        "A wider range does not say which models it is apart from, and two ranges do not "
-        "decide a pair. This test can separate two models whose own 95% intervals overlap. "
-        "Each pair is tested on its own, with no correction for the number of pairs: in "
-        "simulations, 4 to 7 in 100 pairs of equally good models tested apart by chance on "
-        f"{MIN_PAGES_FOR_RANK_RANGE} pages or more. A model on fewer than "
-        f"{MIN_PAGES_FOR_RANK_RANGE} pages is not tested against any model, which can only "
-        "widen the ranges. A board with fewer than two models on "
-        f"{MIN_PAGES_FOR_RANK_RANGE} pages or more has no rank ranges (—).",
+        RANK_RANGE_PARAGRAPH,
         "",
         f"## All pages ({settings['pages']})",
         "",
@@ -925,18 +934,24 @@ def _cut_outputs_note(settings: dict, ranked_rows: list[dict]) -> list[str]:
     """The card paragraph on outputs that were too long for the judge to read in full.
 
     Empty when no ranked model had an output cut and every count is known.
+
+    The cap is on the text the judge is given. In the default text mode that
+    is the output with its HTML flattened, so an output longer than the cap
+    can reach the judge whole. The note therefore speaks of the judge's copy.
     """
     cut = [row for row in ranked_rows if row.get("truncated_pages")]
     unknown = [row for row in ranked_rows if row.get("truncated_pages") is None]
     if not cut and not unknown:
         return []
     cap = settings["max_ocr_text_len"]
-    limit = f"the first {cap:,} characters" if isinstance(cap, int) else "the start"
-    note = f"The judge reads {limit} of an output."
+    if isinstance(cap, int):
+        note = f"The judge's copy of an output is cut at {cap:,} characters."
+    else:
+        note = "The judge's copy of a long output is cut."
     if cut:
         counts = "; ".join(f"{_md(row['model'])}: {row['truncated_pages']}" for row in cut)
         note += (
-            f" Pages where a model's output was longer, so the judge did not see its end: {counts}."
+            f" Pages where a model's output was cut, so the judge did not see its end: {counts}."
         )
     if unknown:
         names = ", ".join(_md(row["model"]) for row in unknown)
@@ -957,19 +972,19 @@ def _pair_pages_line(settings: dict) -> str:
         # for the pairs that were compared, and the reasons below do not
         # explain a pair with no comparison at all.
         no_direct = (
-            "1 pair of models had no direct comparison"
+            "1 pair of ranked models had no direct comparison"
             if never == 1
-            else f"{never} pairs of models had no direct comparison"
+            else f"{never} pairs of ranked models had no direct comparison"
         )
         each = " each" if fewest == most else ""
         compared = (
-            f"the pairs of models that were compared were compared on {on_pages}{each}; "
+            f"the pairs of ranked models that were compared were compared on {on_pages}{each}; "
             f"{no_direct}, and their ratings come from comparisons with other models"
         )
     elif fewest == most:
-        compared = f"each pair of models was compared on {on_pages}"
+        compared = f"each pair of ranked models was compared on {on_pages}"
     else:
-        compared = f"a pair of models was compared on {on_pages}"
+        compared = f"a pair of ranked models was compared on {on_pages}"
 
     stops = "A run can also stop before every pair is judged on every page"
     min_chars = settings["min_chars"]
