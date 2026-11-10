@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ocr_bench.adaptive import AdjacentPairDecision
-from ocr_bench.elo import ComparisonResult, Leaderboard
+from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo
 from ocr_bench.publish import (
     EvalMetadata,
     _align_metadata_rows,
@@ -323,6 +323,24 @@ class TestEvaluationProvenanceHash:
         assert row["adaptive_strategy"] == "balanced"
         assert row["size_tie_ratio"] is None
         assert row["size_tie_min_samples"] == 10
+        # Not known unless the judge run states them.
+        assert row["adaptive"] is None
+        assert row["ocr_bench_version"] == ""
+
+    def test_run_mode_and_version_recorded(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=[],
+            seed=42,
+            max_samples=0,
+            total_comparisons=0,
+            valid_comparisons=0,
+            adaptive=False,
+            ocr_bench_version="1.2.3",
+        )
+        row = build_metadata_row(meta)
+        assert row["adaptive"] is False
+        assert row["ocr_bench_version"] == "1.2.3"
 
     def test_adaptive_fields_recorded(self):
         meta = EvalMetadata(
@@ -775,6 +793,38 @@ class TestLoadExistingComparisons:
         assert results[0].model_a == "ModelA"
         assert results[0].winner == "A"
         assert results[0].swapped is False
+
+    @patch("ocr_bench.publish.load_dataset")
+    def test_display_order_is_read_back_without_swapping_the_winner(self, mock_load):
+        row = {
+            "sample_idx": 0,
+            "model_a": "ModelA",
+            "model_b": "ModelB",
+            "winner": "A",
+            "reason": "better",
+            "agreement": "1/1",
+        }
+        mock_ds = MagicMock()
+        mock_ds.__iter__ = lambda self: iter(
+            [
+                {**row, "shown_first": "b"},
+                {**row, "sample_idx": 1, "shown_first": "a"},
+                # An auto-tie, and a row written before the field existed.
+                {**row, "sample_idx": 2, "shown_first": ""},
+                {**row, "sample_idx": 3, "shown_first": None},
+                {**row, "sample_idx": 4},
+            ]
+        )
+        mock_load.return_value = mock_ds
+
+        results = load_existing_comparisons("user/results")
+        assert [r.shown_first for r in results] == ["b", "a", "", "", ""]
+        # The stored winner is already un-swapped: reading the display order
+        # back must not make compute_elo flip it again.
+        assert not any(r.swapped for r in results)
+        board = compute_elo(results, ["ModelA", "ModelB"], n_bootstrap=0)
+        assert board.wins["ModelA"] == 5
+        assert [r["shown_first"] for r in board.comparison_log] == ["b", "a", "", "", ""]
 
     @patch("ocr_bench.publish.load_dataset")
     def test_backward_compat_missing_truncation_flags(self, mock_load):

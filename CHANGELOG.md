@@ -9,6 +9,17 @@ current behaviour.
 
 ## [Unreleased]
 
+### Fixed
+
+- Adaptive judging did not balance which output the judge sees first. `judge` builds the comparisons five pages at a time in adaptive mode (the default), and each batch replayed the same sequence of A/B choices. A pair of models could be shown the same way round on most of its pages. A judge favours one position, so this can shift ratings in a way the 95% interval does not show. `--no-adaptive` runs were not affected.
+  - The display order of a comparison now depends only on `--seed`, the page and the two model names. It is the same in adaptive batches, in one pass and after a resume, and each pair is balanced over its pages.
+  - For a given seed the order differs from earlier versions. Stored comparisons are not changed. To remove the effect from an existing board, judge it again with `--full-rejudge`.
+
+### New
+
+- The `comparisons` config records the display order in `shown_first`: `a` when the judge saw `model_a`'s output first (as "Output A"), `b` when it saw `model_b`'s first. It is empty for an auto-tie, which no judge saw, and for rows written by earlier versions. The `winner` column is unchanged: it always refers to `model_a` and `model_b`.
+- Each row of the `metadata` config records `adaptive` (whether the run judged in adaptive batches or in one pass) and `ocr_bench_version` (the version that judged). `adaptive_strategy` did not tell the two modes apart, because it is recorded for both.
+
 ## [0.0.8] - 2026-11-09
 
 The board card that `share` writes is easier to read and to query, and it names the repo it was built for. Share a board again to update its card.

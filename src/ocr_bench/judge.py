@@ -747,6 +747,25 @@ def judging_order(indices: list[int], seed: int = 42) -> list[int]:
     return order
 
 
+def display_swapped(seed: int, sample_idx: int, model_a: str, model_b: str) -> bool:
+    """Whether the judge sees ``model_b``'s output first (as "Output A").
+
+    A judge favours one position, so each model must be shown first on about
+    half of the pages of each pair. The order of one comparison depends only on
+    the seed, the page and the two model names. It does not depend on which
+    other comparisons are built in the same call, so a run that builds the grid
+    in batches, or resumes, shows every comparison the same way round as a run
+    that builds it in one pass.
+
+    The model names are sorted first: the same pair on the same page gets the
+    same model first whatever the column order.
+    """
+    first, second = _normalize_pair(model_a, model_b)
+    key = json.dumps(["display-order", seed, sample_idx, first, second])
+    shown_first = first if hashlib.sha256(key.encode()).digest()[0] % 2 == 0 else second
+    return shown_first != model_a
+
+
 def build_comparisons(
     dataset: Any,
     ocr_columns: dict[str, str],
@@ -768,7 +787,8 @@ def build_comparisons(
         ocr_columns: Mapping of column_name -> model_name.
         max_samples: If set, randomly sample this many rows. Ignored when
             ``indices`` is provided.
-        seed: Random seed for sampling and position-bias randomization.
+        seed: Random seed for sampling and for the display order of each
+            comparison (see :func:`display_swapped`).
         skip_samples: Maps a (model_a, model_b) pair to the set of sample
             indices already judged for that pair; those exact (pair, sample)
             combinations are excluded. Pairs are normalized so (a, b) and
@@ -781,7 +801,7 @@ def build_comparisons(
             evidence threshold. ``None`` keeps the existing all-pairs behavior.
         indices: Explicit row indices to use. When provided, ``max_samples``
             and ``seed`` are not used for index selection (seed is still used
-            for position-bias randomization).
+            for the display order).
         min_chars: Skip a pair when BOTH outputs are shorter than this (after
             stripping) — neither model produced meaningful text. Set to 0 to
             disable the filter.
@@ -818,7 +838,6 @@ def build_comparisons(
     if indices is None:
         indices = sample_indices(len(dataset), max_samples, seed)
 
-    rng = random.Random(seed)
     comparisons: list[Comparison] = []
 
     # Pre-fetch text columns to avoid triggering image decode per row.
@@ -898,7 +917,7 @@ def build_comparisons(
                 )
                 continue
 
-            swapped = rng.random() < 0.5
+            swapped = display_swapped(seed, idx, model_names[i], model_names[j])
             prompt, swapped, trunc_a, trunc_b = build_prompt(
                 text_a,
                 text_b,

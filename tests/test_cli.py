@@ -736,6 +736,18 @@ class TestConvertResults:
         assert results[0].truncated_a is True
         assert results[0].truncated_b is False
 
+    @pytest.mark.parametrize(("swapped", "shown_first"), [(False, "a"), (True, "b")])
+    def test_display_order_recorded_for_a_judged_comparison(self, swapped, shown_first):
+        comp = _make_comparison()
+        comp.swapped = swapped
+        results = _convert_results([comp], [{"winner": "A", "reason": "ok"}])
+        assert results[0].shown_first == shown_first
+        assert results[0].swapped is swapped
+
+    def test_auto_tie_has_no_display_order(self):
+        results = _convert_results([_auto_comparison()], [dict(_AUTO_TIE)])
+        assert results[0].shown_first == ""
+
 
 def _space_var(value: str) -> MagicMock:
     """A stand-in for huggingface_hub's SpaceVariable (has a .value)."""

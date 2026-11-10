@@ -98,6 +98,12 @@ class EvalMetadata:
     # Comparison-allocation provenance. ``balanced`` is the historical default;
     # ``targeted`` tops up only unresolved adjacent pairs after enough balanced evidence.
     adaptive_strategy: str = "balanced"
+    # Whether the run judged in adaptive batches (the default) or in one pass
+    # (--no-adaptive). ``adaptive_strategy`` is recorded either way, so it does
+    # not tell the two apart. None on rows written before this field.
+    adaptive: bool | None = None
+    # The ocr-bench version that judged this run.
+    ocr_bench_version: str = ""
     # Optional practical preference rule for overlapping adjacent CIs. This
     # affects stopping/annotation only; it never changes ELO or rank.
     size_tie_ratio: float | None = None
@@ -236,6 +242,8 @@ def load_existing_comparisons(repo_id: str, revision: str | None = None) -> list
     """Load existing comparisons without failing open on uncertain read errors.
 
     The stored winner is already unswapped (canonical), so ``swapped=False``.
+    ``shown_first`` carries the display order the judge saw; it is empty for
+    rows written before it was recorded.
     Returns an empty list only when the repo/config genuinely has no comparison
     files. If files exist but loading fails, raises ``OSError`` so a later push
     cannot replace history with a partial current run.
@@ -253,6 +261,7 @@ def load_existing_comparisons(repo_id: str, revision: str | None = None) -> list
                     reason=row.get("reason", ""),
                     agreement=row.get("agreement", "1/1"),
                     swapped=False,
+                    shown_first=row.get("shown_first") or "",
                     text_a=row.get("text_a", ""),
                     text_b=row.get("text_b", ""),
                     col_a=row.get("col_a", ""),
@@ -440,6 +449,8 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
         "judge_text_mode": metadata.judge_text_mode,
         "min_chars": metadata.min_chars,
         "adaptive_strategy": metadata.adaptive_strategy,
+        "adaptive": metadata.adaptive,
+        "ocr_bench_version": metadata.ocr_bench_version,
         "size_tie_ratio": metadata.size_tie_ratio,
         "size_tie_min_samples": metadata.size_tie_min_samples,
     }

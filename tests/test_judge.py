@@ -13,6 +13,7 @@ from ocr_bench.judge import (
     build_comparisons,
     build_messages,
     build_prompt,
+    display_swapped,
     image_to_base64,
     is_sentinel,
     judging_order,
@@ -1118,3 +1119,131 @@ class TestJudgingOrder:
 
     def test_empty_sample(self):
         assert judging_order([], 42) == []
+
+
+class TestDisplayOrder:
+    """Which output the judge sees first is fixed per comparison and balanced per pair.
+
+    A judge favours one position. Adaptive judging builds the grid five pages at
+    a time; the order must not repeat from batch to batch, or one model of a
+    pair is shown first on most of that pair's pages.
+    """
+
+    MODELS = tuple(f"model-{n}" for n in range(9))
+    COLUMNS = {f"col_{n}": f"model-{n}" for n in range(9)}
+
+    def _dataset(self, pages: int):
+        image = Image.new("RGB", (8, 8))
+        return [
+            {
+                "image": image,
+                **{f"col_{n}": f"the text that model {n} read on page {page}" for n in range(9)},
+            }
+            for page in range(pages)
+        ]
+
+    @staticmethod
+    def _order(comparisons):
+        return {(c.sample_idx, c.model_a, c.model_b): c.swapped for c in comparisons}
+
+    def _in_batches(self, dataset, order, **kwargs):
+        """Build the grid as the adaptive loop does: one call per five pages, same seed."""
+        comparisons = []
+        for start in range(0, len(order), 5):
+            comparisons += build_comparisons(
+                dataset, self.COLUMNS, indices=order[start : start + 5], seed=42, **kwargs
+            )
+        return comparisons
+
+    def test_each_pair_is_balanced_when_built_in_batches(self):
+        pages = 340
+        dataset = self._dataset(pages)
+        order = judging_order(sample_indices(pages, None, 42), 42)
+        comparisons = self._in_batches(dataset, order)
+        assert len(comparisons) == pages * 36
+
+        shown_second_first: dict[tuple[str, str], list[bool]] = {}
+        shown_first = dict.fromkeys(self.MODELS, 0)
+        for c in comparisons:
+            shown_second_first.setdefault((c.model_a, c.model_b), []).append(c.swapped)
+            shown_first[c.model_b if c.swapped else c.model_a] += 1
+
+        shares = {pair: sum(flags) / len(flags) for pair, flags in shown_second_first.items()}
+        assert len(shares) == 36
+        # A fair coin on 340 pages has a standard deviation of 0.027. With the
+        # order replayed per batch, a pair's share was a multiple of 0.2.
+        assert min(shares.values()) > 0.4, shares
+        assert max(shares.values()) < 0.6, shares
+        # Each model meets 8 others on 340 pages.
+        for model, count in shown_first.items():
+            assert 0.46 < count / (8 * pages) < 0.54, (model, count)
+
+    def test_batches_show_each_comparison_as_one_pass_does(self):
+        dataset = self._dataset(40)
+        order = judging_order(sample_indices(40, None, 42), 42)
+        one_pass = build_comparisons(dataset, self.COLUMNS, indices=order, seed=42)
+        assert self._order(self._in_batches(dataset, order)) == self._order(one_pass)
+
+    def test_resume_keeps_the_order_of_the_comparisons_still_to_judge(self):
+        dataset = self._dataset(20)
+        order = list(range(20))
+        full = self._order(build_comparisons(dataset, self.COLUMNS, indices=order, seed=42))
+        # Pages 0-9 of one pair and every page of another are already judged.
+        skip = {
+            ("model-0", "model-1"): set(range(10)),
+            ("model-3", "model-2"): set(range(20)),
+        }
+        resumed = self._order(
+            build_comparisons(dataset, self.COLUMNS, indices=order, seed=42, skip_samples=skip)
+        )
+        assert len(resumed) == len(full) - 30
+        assert all(full[key] == swapped for key, swapped in resumed.items())
+
+    def test_skipped_pairs_do_not_shift_the_order_of_the_others(self):
+        # An empty pair, an error output and an auto-tie are not sent to a judge.
+        dataset = self._dataset(10)
+        full = self._order(build_comparisons(dataset, self.COLUMNS, seed=42))
+        dataset[0]["col_0"] = ""
+        dataset[0]["col_1"] = ""
+        dataset[1]["col_2"] = "[OCR ERROR]"
+        dataset[2]["col_3"] = dataset[2]["col_4"]
+        comparisons = build_comparisons(dataset, self.COLUMNS, seed=42)
+        judged = self._order(c for c in comparisons if c.auto_result is None)
+        # (page 0: models 0 and 1) + (page 1: model 2 with 8 others) + (page 2: models 3 and 4)
+        assert len(judged) == len(full) - 1 - 8 - 1
+        assert all(full[key] == swapped for key, swapped in judged.items())
+
+    def test_column_order_does_not_change_which_model_is_first(self):
+        dataset = self._dataset(30)
+        reversed_columns = dict(reversed(list(self.COLUMNS.items())))
+
+        def first_shown(columns):
+            return {
+                (c.sample_idx, frozenset((c.model_a, c.model_b))): (
+                    c.model_b if c.swapped else c.model_a
+                )
+                for c in build_comparisons(dataset, columns, seed=42)
+            }
+
+        assert first_shown(reversed_columns) == first_shown(self.COLUMNS)
+
+    def test_display_swapped_names_the_same_first_model_for_both_argument_orders(self):
+        for page in range(50):
+            assert display_swapped(42, page, "alpha", "beta") != display_swapped(
+                42, page, "beta", "alpha"
+            )
+
+    def test_seed_changes_the_order(self):
+        with_42 = [display_swapped(42, page, "alpha", "beta") for page in range(200)]
+        with_43 = [display_swapped(43, page, "alpha", "beta") for page in range(200)]
+        assert with_42 != with_43
+        assert 60 < sum(a == b for a, b in zip(with_42, with_43, strict=True)) < 140
+
+    def test_the_judge_prompt_follows_the_display_order(self):
+        dataset = self._dataset(12)
+        comparisons = build_comparisons(dataset, self.COLUMNS, seed=42)
+        assert {c.swapped for c in comparisons} == {True, False}
+        for c in comparisons:
+            prompt = c.messages[0]["content"][1]["text"]
+            first, second = (c.text_b, c.text_a) if c.swapped else (c.text_a, c.text_b)
+            assert prompt.index(first) < prompt.index(second)

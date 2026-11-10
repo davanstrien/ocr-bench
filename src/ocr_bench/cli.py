@@ -17,6 +17,7 @@ from openai import OpenAIError
 from rich.console import Console
 from rich.table import Table
 
+from ocr_bench import __version__
 from ocr_bench.adaptive import (
     AdjacentPairDecision,
     classify_adjacent_pairs,
@@ -892,6 +893,8 @@ def _convert_results(
                 reason=result.get("reason", ""),
                 agreement=result.get("agreement", "1/1"),
                 swapped=comp.swapped,
+                # An auto-tie never reached a judge, so it has no display order.
+                shown_first="" if comp.auto_result is not None else ("b" if comp.swapped else "a"),
                 text_a=comp.text_a,
                 text_b=comp.text_b,
                 col_a=comp.col_a,
@@ -1919,6 +1922,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     judge_text_mode=args.judge_text_mode,
                     min_chars=args.min_chars,
                     adaptive_strategy=adaptive_strategy,
+                    adaptive=adaptive,
+                    ocr_bench_version=__version__,
                     size_tie_ratio=args.size_tie_ratio,
                     size_tie_min_samples=args.size_tie_min_samples,
                 )
@@ -2055,6 +2060,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
             judge_text_mode=args.judge_text_mode,
             min_chars=args.min_chars,
             adaptive_strategy=adaptive_strategy,
+            adaptive=adaptive,
+            ocr_bench_version=__version__,
             size_tie_ratio=args.size_tie_ratio,
             size_tie_min_samples=args.size_tie_min_samples,
         )

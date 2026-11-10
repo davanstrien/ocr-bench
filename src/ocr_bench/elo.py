@@ -31,7 +31,14 @@ class ComparisonResult:
     winner: Winner
     reason: str = ""
     agreement: str = "1/1"
+    # In-memory only: True while ``winner`` is still in the order the judge saw
+    # (Output A = model_b). Stored rows hold the un-swapped winner, so a result
+    # loaded from the Hub always has ``swapped=False``.
     swapped: bool = False
+    # Which model's output the judge saw first, as "Output A": "a" (model_a) or
+    # "b" (model_b). "" when no judge saw the pair (an auto-tie) or the row
+    # predates this field. Stored with the comparison; never used to un-swap.
+    shown_first: str = ""
     text_a: str = ""
     text_b: str = ""
     col_a: str = ""
@@ -345,6 +352,7 @@ def compute_elo(
                 "winner": winner,
                 "reason": reason,
                 "agreement": r.agreement,
+                "shown_first": r.shown_first,
                 "text_a": r.text_a,
                 "text_b": r.text_b,
                 "col_a": r.col_a,
