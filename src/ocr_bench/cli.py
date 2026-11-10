@@ -1795,21 +1795,29 @@ def cmd_judge(args: argparse.Namespace) -> None:
             if not batch_comps:
                 continue
 
-            # This is the first batch with work left. When none of its pages
-            # has a stored comparison, the stored comparisons end at the end of
-            # a batch: the point where a run looks at the stopping rule. Look
-            # at it now, so a rerun of a board that already meets the rule
-            # makes no judge call.
+            # This is the first batch with work left: every batch before it is
+            # complete. When every stored comparison is on a page of those
+            # earlier batches, the stored comparisons are exactly the first
+            # batches of the visiting order, and they end at the end of a
+            # batch: the point where a run looks at the stopping rule. Look at
+            # it now, so a rerun of a board that already meets the rule makes
+            # no judge call.
             #
-            # A batch that is partly judged (a run stopped inside it at a
-            # budget, or a model was added) is finished first and the rule is
-            # checked at its end, as in a run that was never stopped. A look
-            # in the middle of a batch at every stop would be more looks than
-            # one run takes, and more looks stop more boards early.
+            # In every other case the batch is judged first and the rule is
+            # checked at its end, as in a run that was never stopped:
+            # - a batch that is partly judged (a run stopped inside it at a
+            #   budget, or a model was added);
+            # - a stored comparison on a later page (an earlier batch whose
+            #   judge calls all failed, or results stored in another visiting
+            #   order).
+            # A look at the rule in the middle of a batch at every stop would
+            # be more looks than one run takes, and more looks stop more
+            # boards early.
             if not looked_at_stored_results:
                 looked_at_stored_results = True
-                if len(existing_results) >= min_before_check and stored_pages.isdisjoint(
-                    batch_indices
+                pages_of_earlier_batches = set(all_indices[:batch_start])
+                if len(existing_results) >= min_before_check and stored_pages.issubset(
+                    pages_of_earlier_batches
                 ):
                     _, stored_decisions = _stopping_decisions(existing_results)
                     if not unresolved_pairs(stored_decisions):

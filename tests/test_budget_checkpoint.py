@@ -495,6 +495,52 @@ class TestBalancedRerun:
         assert judge.judged == 1
         assert len(m_publish.call_args.args[1].comparison_log) == 30
 
+    def test_stored_comparisons_after_an_unjudged_batch_are_not_a_finished_prefix(self):
+        # The judge calls of the first batch all failed, so nothing is stored
+        # for its pages. The second batch is stored, and the third stopped at a
+        # budget one comparison short. The first batch has no stored
+        # comparison, but the stored comparisons do not end at the end of a
+        # batch: the run judges the first batch, then checks the rule.
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        _, m_publish, _ = _run_judge(
+            [*self.FLAGS, "--no-adaptive"], ds, ocr, judge=NameOrderJudge()
+        )
+        every_page = self._stored_results(m_publish)
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        second_and_third = set(order[5:15])
+        stored = [r for r in every_page if r.sample_idx in second_and_third][:-1]
+        assert len(stored) == 29
+
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        judge, _, _ = _run_judge(
+            [*self.FLAGS],
+            ds,
+            ocr,
+            existing=stored,
+            judge=NameOrderJudge(),
+            checkpoint_resume=True,
+        )
+        assert judge.judged == 15
+        assert {page for _, page in judge.pair_samples} == set(order[:5])
+
+    def test_results_stored_in_another_visiting_order_get_no_early_check(self):
+        # Results from a version that visited the pages in another order are on
+        # pages that are not the first batches of this order. The run judges
+        # its first batch before it checks the rule, as it always did.
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        _, m_publish, _ = _run_judge(
+            [*self.FLAGS, "--no-adaptive"], ds, ocr, judge=NameOrderJudge()
+        )
+        every_page = self._stored_results(m_publish)
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        last_two_batches = set(order[30:40])
+        stored = [r for r in every_page if r.sample_idx in last_two_batches]
+        assert len(stored) == 30
+
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        judge, _, _ = _run_judge([*self.FLAGS], ds, ocr, existing=stored, judge=NameOrderJudge())
+        assert judge.judged == 15
+
     @pytest.mark.parametrize("budget_exhausted", [True, False, None])
     def test_the_check_reads_the_stored_comparisons_not_the_last_metadata_row(
         self, budget_exhausted
