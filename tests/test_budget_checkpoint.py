@@ -444,7 +444,10 @@ class TestBalancedRerun:
         """The metadata row a run published, as the next run loads it."""
         return build_metadata_row(_published_metadata(m_publish))
 
-    @pytest.mark.parametrize("budget", [4, 7, 11, 14, 29])
+    # One batch of this board is 15 judge calls. The budgets include ones that
+    # end at the end of a batch (3, 5, 15, 30), one that ends a comparison
+    # before it (29), and 30, which is used up when the rule is met.
+    @pytest.mark.parametrize("budget", [3, 4, 5, 7, 11, 14, 15, 29, 30])
     def test_runs_stopped_at_a_budget_stop_where_one_run_stops(self, budget):
         # One run with no budget meets the rule at the end of its second batch
         # (30 comparisons). Runs that each stop at a budget stop inside a
@@ -456,7 +459,7 @@ class TestBalancedRerun:
         existing: list[ComparisonResult] = []
         meta_rows: list[dict] | None = None
         calls = []
-        for _ in range(12):
+        for _ in range(14):
             ds, ocr = make_ds(n=40, models=("a", "b", "c"))
             judge, m_publish, _ = _run_judge(
                 [*self.FLAGS, "--max-comparisons", str(budget)],
