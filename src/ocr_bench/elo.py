@@ -22,9 +22,9 @@ ShownFirst = Literal["A", "B", ""]
 MIN_PAGES_TO_RESOLVE = 10
 
 # The paired bootstrap test behind the rank ranges calls two equally good models
-# apart too often on few pages: in simulation about 9% of the time at 10 pages,
-# 7% at 20 and 6% at 30 and more, against the 5% it is set to. A model on fewer
-# pages than this is not called apart from any model.
+# apart too often on few pages: in simulations about 9% of the time at 10 pages,
+# 7% at 20, 6% at 30 and 5% at 300, against the 5% it is set to. A model on
+# fewer pages than this is not tested against any model.
 MIN_PAGES_FOR_RANK_RANGE = 20
 
 # A percentile bound from a few replicates is close to the smallest one, so the
@@ -77,7 +77,8 @@ class Leaderboard:
     elo_ci: dict[str, tuple[float, float]] = field(default_factory=dict)
     pages_by_model: dict[str, int] = field(default_factory=dict)
     # model → (best rank, worst rank) it could hold, from the paired bootstrap
-    # of rating differences (see ``_rank_ranges``). Empty without a bootstrap.
+    # of rating differences (see ``_rank_ranges``). Empty without a bootstrap,
+    # with too few resamples, or with fewer than two models on enough pages.
     rank_range: dict[str, tuple[int, int]] = field(default_factory=dict)
 
     def has_enough_pages_to_resolve(self, model: str) -> bool:
@@ -321,7 +322,7 @@ def _clearly_above(
 
     This test can call two models apart whose own intervals overlap. The rule
     "the two intervals do not overlap" is stricter: in simulations it called
-    equally good models apart about 1% of the time, against 5 to 7% for this
+    equally good models apart about 1% of the time, against 4 to 7% for this
     test, and separated fewer models that do differ. Neither rule implies the
     other for every set of replicates.
     """
@@ -365,7 +366,7 @@ def _rank_ranges(
     number of pairs. The rate at which equally good models are called apart
     depends on the data: models with the same output on every page are never
     called apart, and in simulations (Bradley-Terry results, every pair on
-    every page, 20 pages or more) it was 5 to 7% of pairs, so a large board is
+    every page, 20 pages or more) it was 4 to 7% of pairs, so a large board is
     likely to hold such a pair. In the same simulations about 99% of models
     had their true rank inside their range.
     """

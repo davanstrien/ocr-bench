@@ -27,15 +27,15 @@ current behaviour.
   - **Rank range.** Each model has the best and worst rank it could hold on this data. Its best rank is one more than the number of models that test clearly above it; its worst rank leaves out only the models that test clearly below it; the range is widened, if needed, to include the model's own rank. One model tests clearly above another when the 95% interval of the difference between their ratings, on the same resampled pages, is above zero.
     - This test can separate two models whose own 95% intervals overlap, so the card no longer says that overlapping intervals mean the models are not separated.
     - A range of one rank means the model tested clearly apart from every other model. A wider range does not say which models it is apart from, and two ranges do not decide a pair.
-    - Each pair is tested on its own, with no correction for the number of pairs. In simulations, 5 to 7 in 100 pairs of equally good models tested apart by chance on 20 pages or more, so a large board is likely to hold such a pair. The card says so.
+    - Each pair is tested on its own, with no correction for the number of pairs. In simulations, 4 to 7 in 100 pairs of equally good models tested apart by chance on 20 pages or more, so a large board is likely to hold such a pair. The card gives that rate.
     - A model on fewer than 20 pages is not tested against any model, which can only widen the ranges. On fewer pages the test called equally good models apart more often (in simulations about 9 in 100 pairs at 10 pages). A board with fewer than two models on 20 pages has no rank ranges. The 10-page minimum for a slice board and the adaptive stopping rule are not changed.
     - There are no rank ranges from fewer than 100 bootstrap resamples.
-  - **Pages per pair.** The card gives the smallest and largest number of pages a pair of models was compared on, and why a pair is not compared on a page. It also gives the number of pairs that were never compared with each other, as after a targeted run. When the results do not record `--min-chars`, the card says so.
+  - **Pages per pair.** The card gives the smallest and largest number of pages a pair of models was compared on, and why a pair is not compared on a page. It also gives the number of pairs that were never compared with each other, as after a targeted run. For results from a version that did not record `--min-chars`, the card says that the rules for leaving a pair out are not recorded.
   - **Cut outputs.** When an output was longer than the judge's text cap on some pages, the card gives the number of those pages for each model. The judge did not see the end of those outputs. For comparisons stored without this information, the card says that the count is not recorded.
   - The link to the judge prompts goes to the ocr-bench version that judged, when the results record it.
   - `overall.jsonl` has the new columns `rank_low`, `rank_high` and `truncated_pages`; `slices.jsonl` has `rank_low` and `rank_high`; `board.json` has `pair_pages_min`, `pair_pages_max`, `pairs_never_compared` and `judged_with_version`.
 - `load_existing_comparisons` gives `truncated_a` and `truncated_b` as `None`, not `False`, for a stored row that does not record them.
-- `Leaderboard.rank_range` holds the rank range of each model after a bootstrap.
+- `Leaderboard.rank_range` holds the rank range of each model after a bootstrap. It is empty with fewer than 100 resamples, or with fewer than two models on 20 pages.
 
 ## [0.0.8] - 2026-11-09
 

@@ -1296,7 +1296,9 @@ class TestRankRangeAndCoverage:
         assert "**Rank range** shows how firmly a model holds its rank." in card
         assert "A range of one rank means the model tested clearly apart from every other" in card
         assert "two ranges do not decide a pair" in card
-        assert "in simulations, 5 to 7 in 100 pairs of equally good models tested apart" in card
+        assert "in simulations, 4 to 7 in 100 pairs of equally good models tested apart" in card
+        # The page gate of the rank ranges (20), not the 10-page minimum of a slice board.
+        assert "A model on fewer than 20 pages is not tested against any model" in card
         # Statements that reviewers showed to be false in some case stay off the card.
         for withdrawn in (
             "ranges do not overlap are clearly apart",
@@ -1412,6 +1414,26 @@ class TestRankRangeAndCoverage:
         assert plan.settings["pairs_never_compared"] == 0
         assert (plan.settings["pair_pages_min"], plan.settings["pair_pages_max"]) == (1, 30)
         assert "a pair of models was compared on 1 to 30 pages." in plan.files["README.md"].decode()
+
+    def test_without_a_recorded_text_cap_the_note_gives_no_number(self):
+        results = _results(range(20))
+        results[0].truncated_a = True
+        evaluation = _evaluation(results)
+        evaluation.metadata["max_ocr_text_len"] = None
+        card = _plan(evaluation).files["README.md"].decode()
+        assert "The judge reads the start of an output. Pages where" in card
+        assert "characters of an output" not in card
+
+    def test_unequal_page_counts_with_a_pair_never_compared(self):
+        settings = {
+            "pair_pages_min": 15,
+            "pair_pages_max": 30,
+            "pairs_never_compared": 1,
+            "min_chars": 20,
+        }
+        line = share._pair_pages_line(settings)
+        assert "were compared on 15 to 30 pages; 1 pair of models had no direct" in line
+        assert "pages each" not in line
 
     def test_the_cut_note_does_not_describe_how_the_text_was_prepared(self):
         # Older results do not record the text mode, so the card makes no
@@ -1547,10 +1569,14 @@ class TestRankRangeAndCoverage:
                 "answer for it.",
             ),
             (
+                1,
+                "a page where both outputs are shorter than 1 character, one output is an "
+                "error message, or the judge gave no valid answer for it.",
+            ),
+            (
                 None,
-                "a page where one output is an error message, or the judge gave no valid "
-                "answer for it. The results do not record whether a pair of two empty or very "
-                "short outputs was also left out.",
+                "The results are from an older ocr-bench version and do not record which "
+                "pairs were left out on a page.",
             ),
         ],
     )
@@ -1564,8 +1590,9 @@ class TestRankRangeAndCoverage:
             assert "both outputs" not in card
             assert "do not record" not in card
         if min_chars is None:
-            # Not recorded: the card must not say that such pairs were left out.
-            assert "both outputs are" not in card
+            # Not recorded: older versions left pairs out by other rules, so
+            # the card names none.
+            assert "A pair is not compared on a page where" not in card
 
     @pytest.mark.parametrize("recorded", ["0.0.9.1", "٠.٠.٩", "0.0.9/../x", "v0.0.9", "0.0"])
     def test_a_version_that_is_not_three_plain_numbers_is_not_linked(self, recorded):

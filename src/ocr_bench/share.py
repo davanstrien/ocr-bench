@@ -796,7 +796,7 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         "A wider range does not say which models it is apart from, and two ranges do not "
         "decide a pair. This test can separate two models whose own 95% intervals overlap. "
         "Each pair is tested on its own, with no correction for the number of pairs: in "
-        "simulations, 5 to 7 in 100 pairs of equally good models tested apart by chance on "
+        "simulations, 4 to 7 in 100 pairs of equally good models tested apart by chance on "
         f"{MIN_PAGES_FOR_RANK_RANGE} pages or more. A model on fewer than "
         f"{MIN_PAGES_FOR_RANK_RANGE} pages is not tested against any model, which can only "
         "widen the ranges. A board with fewer than two models on "
@@ -970,27 +970,29 @@ def _pair_pages_line(settings: dict) -> str:
     else:
         compared = f"a pair of models was compared on {on_pages}"
 
+    stops = "A run can also stop before every pair is judged on every page"
     min_chars = settings["min_chars"]
-    not_recorded = ""
-    failed_call = ", or the judge gave no valid answer for it"
     if not isinstance(min_chars, int):
-        # Results that do not record the setting: the filter may have been on or off.
-        reasons = "one output is an error message" + failed_call
-        not_recorded = (
-            " The results do not record whether a pair of two empty or very short outputs "
-            "was also left out."
+        # Results from before the setting was recorded. Those versions also
+        # left pairs out by other rules (an error message was judged as text;
+        # a pair with one empty output was skipped), so the card names no rule.
+        return (
+            f"- **Pages per pair**: {compared}. The results are from an older ocr-bench "
+            f"version and do not record which pairs were left out on a page. {stops}"
         )
-    elif min_chars > 0:
+    failed_call = ", or the judge gave no valid answer for it"
+    if min_chars > 0:
+        characters = "1 character" if min_chars == 1 else f"{min_chars} characters"
         reasons = (
-            f"both outputs are shorter than {min_chars} characters, one output is an "
-            "error message" + failed_call
+            f"both outputs are shorter than {characters}, one output is an error message"
+            + failed_call
         )
     else:
         # With the filter off, two empty outputs are compared (and tied).
         reasons = "one output is an error message" + failed_call
     return (
         f"- **Pages per pair**: {compared}. A pair is not compared on a page where "
-        f"{reasons}.{not_recorded} A run can also stop before every pair is judged on every page"
+        f"{reasons}. {stops}"
     )
 
 
