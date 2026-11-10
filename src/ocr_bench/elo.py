@@ -317,10 +317,13 @@ def _clearly_above(
 
     The difference is taken within each replicate, where both ratings come
     from the same resampled pages, and it is clear when its percentile interval
-    lies above zero. Two models whose own intervals overlap can still be
-    clearly apart: the difference between two ratings varies less than their
-    two intervals added together, which is what "the intervals do not overlap"
-    asks for. On a board of two models the two tests are the same.
+    lies above zero.
+
+    This test can call two models apart whose own intervals overlap. The rule
+    "the two intervals do not overlap" is stricter: in simulations it called
+    equally good models apart about 1% of the time, against 5 to 7% for this
+    test, and separated fewer models that do differ. Neither rule implies the
+    other for every set of replicates.
     """
     differences = [
         replicate[higher] - replicate[lower]
@@ -353,17 +356,18 @@ def _rank_ranges(
     fail the test for that pair (A clearly above C, C clearly above B, and the
     difference between A and B still not clear).
 
-    A model on fewer than ``MIN_PAGES_FOR_RANK_RANGE`` pages is not called
-    clearly apart from any model, so each such model adds one rank to every
-    other range. There are no ranges when fewer than two models have that many
-    pages (no pair can be tested), or with fewer than
-    ``MIN_REPLICATES_FOR_RANK_RANGE`` replicates.
+    A model on fewer than ``MIN_PAGES_FOR_RANK_RANGE`` pages is not tested
+    against any model, which can only widen the other ranges. There are no
+    ranges when fewer than two models have that many pages (no pair can be
+    tested), or with fewer than ``MIN_REPLICATES_FOR_RANK_RANGE`` replicates.
 
     The tests are one per pair at the 95% level, with no correction for the
-    number of pairs: at least 1 pair in 20 of equally good models is called
-    apart by chance (about 7% at 20 pages in simulation), so a large board is
-    likely to hold such a pair. In simulations of complete designs the range
-    held a model's true rank for about 99% of models.
+    number of pairs. The rate at which equally good models are called apart
+    depends on the data: models with the same output on every page are never
+    called apart, and in simulations (Bradley-Terry results, every pair on
+    every page, 20 pages or more) it was 5 to 7% of pairs, so a large board is
+    likely to hold such a pair. In the same simulations about 99% of models
+    had their true rank inside their range.
     """
     if len(replicates) < MIN_REPLICATES_FOR_RANK_RANGE:
         return {}

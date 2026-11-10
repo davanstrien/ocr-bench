@@ -1293,10 +1293,19 @@ class TestRankRangeAndCoverage:
         assert "| Rank | Rank range | Model |" in card
         assert "| 1 | 1–2 | [org/model-mid]" in card
         assert "| 3 | 3 | [org/model-weak]" in card
-        assert "**Rank range** is the best and worst rank a model could hold on this data" in card
-        assert "A range of one rank means the model is clearly apart from every other" in card
-        assert "two ranges do not show whether those two models are clearly apart" in card
-        assert "at least 1 pair in 20 of equally good models is called apart by chance" in card
+        assert "**Rank range** shows how firmly a model holds its rank." in card
+        assert "A range of one rank means the model tested clearly apart from every other" in card
+        assert "two ranges do not decide a pair" in card
+        assert "in simulations, 5 to 7 in 100 pairs of equally good models tested apart" in card
+        # Statements that reviewers showed to be false in some case stay off the card.
+        for withdrawn in (
+            "ranges do not overlap are clearly apart",
+            "move together",
+            "at least 1 pair in 20",
+            "adds one rank",
+            "added together",
+        ):
+            assert withdrawn not in card
         first = json.loads(plan.files["overall.jsonl"].decode().splitlines()[0])
         assert list(first)[:3] == ["rank", "rank_low", "rank_high"]
 
@@ -1388,7 +1397,7 @@ class TestRankRangeAndCoverage:
         # "each pair of models" would be false: one pair has no comparison.
         assert (
             "the pairs of models that were compared were compared on 30 pages each; 1 pair "
-            "was never compared with each other, and their order comes from comparisons with "
+            "of models had no direct comparison, and their order comes from comparisons with "
             "other models"
         ) in card
         assert "each pair of models was compared" not in card
@@ -1404,13 +1413,35 @@ class TestRankRangeAndCoverage:
         assert (plan.settings["pair_pages_min"], plan.settings["pair_pages_max"]) == (1, 30)
         assert "a pair of models was compared on 1 to 30 pages." in plan.files["README.md"].decode()
 
-    def test_a_raw_text_run_has_no_note_about_flattened_html(self):
+    def test_the_cut_note_does_not_describe_how_the_text_was_prepared(self):
+        # Older results do not record the text mode, so the card makes no
+        # statement about it.
         results = _results(range(20))
         results[0].truncated_a = True
         evaluation = _evaluation(results)
-        evaluation.metadata["judge_text_mode"] = "raw"
+        del evaluation.metadata["judge_text_mode"]
         card = _plan(evaluation).files["README.md"].decode()
         assert "The judge reads the first 8,000 characters of an output. Pages where" in card
+        assert "flattened" not in card
+
+    @pytest.mark.parametrize(
+        ("pages", "never", "expected"),
+        [
+            (1, 0, "each pair of models was compared on 1 page."),
+            (1, 1, "were compared on 1 page each; 1 pair of models had no direct comparison,"),
+            (30, 2, "were compared on 30 pages each; 2 pairs of models had no direct comparison,"),
+        ],
+    )
+    def test_the_pages_per_pair_line_counts_one_page_and_one_pair_correctly(
+        self, pages, never, expected
+    ):
+        settings = {
+            "pair_pages_min": pages,
+            "pair_pages_max": pages,
+            "pairs_never_compared": never,
+            "min_chars": 20,
+        }
+        assert expected in share._pair_pages_line(settings)
 
     def test_a_board_with_too_few_pages_for_any_pair_has_no_rank_ranges(self):
         # A slice of 12 pages: every model is under the 20 pages a pair needs.
@@ -1422,9 +1453,10 @@ class TestRankRangeAndCoverage:
         assert len(small) == 3
         assert {(row["rank_low"], row["rank_high"]) for row in small} == {(None, None)}
         big = [row for row in plan.slice_rows if row["slice"] == "big"]
+        assert len(big) == 3
         assert all(row["rank_low"] is not None for row in big)
         card = plan.files["README.md"].decode()
-        assert "A board with fewer than two models on that many pages has no rank ranges" in card
+        assert "A board with fewer than two models on 20 pages or more has no rank ranges" in card
 
     def test_cut_outputs_are_counted_in_pages_per_model(self):
         results = _results(range(20))
@@ -1440,9 +1472,8 @@ class TestRankRangeAndCoverage:
         assert cut == {"org/model-good": 0, "org/model-mid": 5, "org/model-weak": 0}
         card = plan.files["README.md"].decode()
         assert (
-            "The judge reads the first 8,000 characters of an output (of its text, after HTML "
-            "is flattened). Pages where a model's output was longer, so the judge did not see "
-            "its end: org/model-mid: 5."
+            "The judge reads the first 8,000 characters of an output. Pages where a model's "
+            "output was longer, so the judge did not see its end: org/model-mid: 5."
         ) in card
 
     def test_no_cut_note_when_nothing_was_cut(self):

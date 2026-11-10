@@ -786,22 +786,21 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         "raw counts that depend on how often a model was compared, so compare ratings, "
         "not wins.",
         "",
-        "**Rank range** is the best and worst rank a model could hold on this data: its best "
-        "rank is one more than the number of models clearly above it, and its worst rank "
-        "leaves out only the models clearly below it. One model is clearly above another "
-        "when the 95% interval of the difference between their ratings, taken on the same "
-        "resampled pages, is above zero. Two models whose own intervals overlap can still "
-        "be clearly apart: the difference between two ratings varies less than their two "
-        "intervals added together. "
-        "A range of one rank means the model is clearly apart from every other model. A "
-        "wider range counts the models clearly above and below; it does not name them, so "
-        "two ranges do not show whether those two models are clearly apart. The range "
-        "always includes the model's own rank. Each pair is tested on its own at the 95% "
-        "level: at least 1 pair in 20 of equally good models is called apart by chance, "
-        f"and more on a board with few pages. A model on fewer than {MIN_PAGES_FOR_RANK_RANGE} "
-        "pages is not called apart from any model, so each such model adds one rank to "
-        "every other range. A board with fewer than two models on that many pages has no "
-        "rank ranges (—).",
+        "**Rank range** shows how firmly a model holds its rank. Each pair of models is "
+        "tested on the difference between their ratings, taken on the same resampled pages: "
+        "one model tests clearly above another when the 95% interval of that difference is "
+        "above zero. A model's range starts at one more than the number of models that "
+        "test clearly above it, and ends at the number of ranked models minus those that "
+        "test clearly below it. It is widened, if needed, to include the model's own rank. "
+        "A range of one rank means the model tested clearly apart from every other model. "
+        "A wider range does not say which models it is apart from, and two ranges do not "
+        "decide a pair. This test can separate two models whose own 95% intervals overlap. "
+        "Each pair is tested on its own, with no correction for the number of pairs: in "
+        "simulations, 5 to 7 in 100 pairs of equally good models tested apart by chance on "
+        f"{MIN_PAGES_FOR_RANK_RANGE} pages or more. A model on fewer than "
+        f"{MIN_PAGES_FOR_RANK_RANGE} pages is not tested against any model, which can only "
+        "widen the ranges. A board with fewer than two models on "
+        f"{MIN_PAGES_FOR_RANK_RANGE} pages or more has no rank ranges (—).",
         "",
         f"## All pages ({settings['pages']})",
         "",
@@ -932,12 +931,7 @@ def _cut_outputs_note(settings: dict, ranked_rows: list[dict]) -> list[str]:
         return []
     cap = settings["max_ocr_text_len"]
     limit = f"the first {cap:,} characters" if isinstance(cap, int) else "the start"
-    flattened = (
-        " (of its text, after HTML is flattened)"
-        if settings["judge_text_mode"] == "normalized"
-        else ""
-    )
-    note = f"The judge reads {limit} of an output{flattened}."
+    note = f"The judge reads {limit} of an output."
     if cut:
         counts = "; ".join(f"{_md(row['model'])}: {row['truncated_pages']}" for row in cut)
         note += (
@@ -953,17 +947,23 @@ def _pair_pages_line(settings: dict) -> str:
     """How many pages each pair of models was compared on, and why not all of them."""
     fewest, most = settings["pair_pages_min"], settings["pair_pages_max"]
     never = settings["pairs_never_compared"]
-    on_pages = f"{fewest} pages" if fewest == most else f"{fewest} to {most} pages"
+    if fewest == most:
+        on_pages = "1 page" if fewest == 1 else f"{fewest} pages"
+    else:
+        on_pages = f"{fewest} to {most} pages"
     if never:
         # A targeted run, or a model added without a full run. The counts are
         # for the pairs that were compared, and the reasons below do not
         # explain a pair with no comparison at all.
-        pairs = "1 pair was" if never == 1 else f"{never} pairs were"
+        no_direct = (
+            "1 pair of models had no direct comparison"
+            if never == 1
+            else f"{never} pairs of models had no direct comparison"
+        )
         each = " each" if fewest == most else ""
         compared = (
             f"the pairs of models that were compared were compared on {on_pages}{each}; "
-            f"{pairs} never compared with each other, and their order comes from "
-            "comparisons with other models"
+            f"{no_direct}, and their order comes from comparisons with other models"
         )
     elif fewest == most:
         compared = f"each pair of models was compared on {on_pages}"

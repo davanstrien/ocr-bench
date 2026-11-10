@@ -651,6 +651,19 @@ class TestRankRanges:
             2,
         )
 
+    def test_a_model_on_few_pages_can_only_widen_the_other_ranges(self):
+        # The fit puts "a" above "b", and every resample puts "b" above "a".
+        # Each range is widened to hold the fitted rank: (1, 2) for both. A
+        # third model on few pages is tested against no model. It widens the
+        # range of "a" and leaves the range of "b" as it is: an untested model
+        # never narrows a range, and it does not always add a rank.
+        elo = {"a": 1600.0, "b": 1400.0}
+        replicates = [{"a": 1400.0 - i, "b": 1600.0 + i} for i in range(200)]
+        assert _rank_ranges(elo, replicates, {"a": 50, "b": 50}) == {"a": (1, 2), "b": (1, 2)}
+        with_thin = [{**replicate, "thin": 1000.0} for replicate in replicates]
+        ranges = _rank_ranges({**elo, "thin": 1000.0}, with_thin, {"a": 50, "b": 50, "thin": 5})
+        assert ranges == {"a": (1, 3), "b": (1, 2), "thin": (1, 3)}
+
     def test_no_ranges_when_fewer_than_two_models_have_enough_pages(self):
         replicates = [{"high": 1600.0, "low": 1400.0}] * 200
         elo = {"high": 1600.0, "low": 1400.0}
