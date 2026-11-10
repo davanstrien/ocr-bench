@@ -1277,14 +1277,25 @@ class TestCli:
 class TestRankRangeAndCoverage:
     """What the card says beyond a rating: rank range, pages per pair, cut outputs."""
 
-    def test_rows_and_card_give_the_rank_range(self):
-        plan = _plan(_evaluation(_results(range(40))))
-        ranges = [(row["rank_low"], row["rank_high"]) for row in plan.overall_rows]
-        for row, (best, worst) in zip(plan.overall_rows, ranges, strict=True):
-            assert 1 <= best <= row["rank"] <= worst <= 3
+    @pytest.fixture(autouse=True)
+    def _enough_resamples_for_rank_ranges(self, monkeypatch):
+        monkeypatch.setattr(share, "N_BOOTSTRAP", 200)
+
+    def test_rows_and_card_give_the_rank_range_of_the_fit(self):
+        results = _results(range(40))
+        plan = _plan(_evaluation(results))
+        expected = compute_elo(results, MODELS, n_bootstrap=200).rank_range
+        assert set(expected.values()) == {(1, 2), (3, 3)}  # not all the same, not all (rank, rank)
+        assert {
+            row["model"]: (row["rank_low"], row["rank_high"]) for row in plan.overall_rows
+        } == expected
         card = plan.files["README.md"].decode()
         assert "| Rank | Rank range | Model |" in card
-        assert "Rank range gives the ranks a model could hold" in card
+        assert "| 1 | 1–2 | [org/model-mid]" in card
+        assert "| 3 | 3 | [org/model-weak]" in card
+        assert "**Rank range** is the best and worst rank a model could hold on this data" in card
+        assert "ranges that overlap do not show that two models are equal" in card
+        assert "about 1 pair in 20 of equally good models is called apart by chance" in card
         first = json.loads(plan.files["overall.jsonl"].decode().splitlines()[0])
         assert list(first)[:3] == ["rank", "rank_low", "rank_high"]
 
@@ -1295,12 +1306,31 @@ class TestRankRangeAndCoverage:
         assert share._rank_range_cell({"rank_low": None, "rank_high": None}) == "—"
 
     def test_slice_rows_give_the_rank_range_of_their_own_board(self):
-        results = _results(range(40))
-        labels = _labels(40, {"print": range(20), "typed": range(20, 40)})
+        results = _results(range(60))
+        labels = _labels(60, {"print": range(30), "typed": range(30, 60)})
         plan = _plan(_evaluation(results), slice_column="kind", slice_values=lambda *_: labels)
-        assert plan.slice_rows
-        for row in plan.slice_rows:
-            assert 1 <= row["rank_low"] <= row["rank"] <= row["rank_high"] <= 3
+        for name, pages in (("print", range(30)), ("typed", range(30, 60))):
+            expected = compute_elo(
+                [r for r in results if r.sample_idx in pages], MODELS, n_bootstrap=200
+            ).rank_range
+            rows = [row for row in plan.slice_rows if row["slice"] == name]
+            assert {row["model"]: (row["rank_low"], row["rank_high"]) for row in rows} == expected
+        overall = {row["model"]: (row["rank_low"], row["rank_high"]) for row in plan.overall_rows}
+        by_slice = [
+            {
+                row["model"]: (row["rank_low"], row["rank_high"])
+                for row in plan.slice_rows
+                if row["slice"] == name
+            }
+            for name in ("print", "typed")
+        ]
+        assert any(ranges != overall for ranges in by_slice)  # a slice board has its own ranges
+
+    def test_no_rank_range_from_a_few_resamples(self, monkeypatch):
+        monkeypatch.setattr(share, "N_BOOTSTRAP", 20)
+        plan = _plan(_evaluation(_results(range(40))))
+        assert {(row["rank_low"], row["rank_high"]) for row in plan.overall_rows} == {(None, None)}
+        assert "| 1 | — | [org/model-" in plan.files["README.md"].decode()
 
     def test_a_failed_model_has_no_rank_range_and_no_cut_pages(self):
         models = [*MODELS, "org/model-broken"]
@@ -1337,6 +1367,24 @@ class TestRankRangeAndCoverage:
     def test_pair_page_counts_include_a_pair_that_was_never_compared(self):
         results = _results(range(12), pairs=[("org/model-good", "org/model-mid")])
         assert sorted(share.pair_page_counts(MODELS, results)) == [0, 0, 12]
+
+    def test_pair_page_counts_do_not_depend_on_which_model_is_model_a(self):
+        # The same pair stored both ways round, on different pages.
+        one_way = _results(range(8), pairs=[("org/model-good", "org/model-mid")])
+        other_way = _results(range(8, 12), pairs=[("org/model-mid", "org/model-good")])
+        assert sorted(share.pair_page_counts(MODELS, one_way + other_way)) == [0, 0, 12]
+
+    def test_the_card_counts_the_pairs_that_were_never_compared(self):
+        # A targeted run: good and weak are each compared with mid, never with each other.
+        results = _results(
+            range(30),
+            pairs=[("org/model-good", "org/model-mid"), ("org/model-mid", "org/model-weak")],
+        )
+        plan = _plan(_evaluation(results))
+        assert plan.settings["pairs_never_compared"] == 1
+        assert (plan.settings["pair_pages_min"], plan.settings["pair_pages_max"]) == (30, 30)
+        card = plan.files["README.md"].decode()
+        assert "each pair of models was compared on 30 pages; 1 pair was never compared" in card
 
     def test_cut_outputs_are_counted_in_pages_per_model(self):
         results = _results(range(20))
@@ -1388,3 +1436,50 @@ class TestRankRangeAndCoverage:
         assert plan.settings["judged_with_version"] == ""
         version = plan.settings["ocr_bench_version"]
         assert f"the prompts in ocr-bench {version}" in plan.files["README.md"].decode()
+
+    def test_cut_counts_are_unknown_for_rows_that_do_not_record_them(self):
+        # Rows from a version before the truncation flags hold None. A count of
+        # zero would say that nothing was cut.
+        results = _results(range(20))
+        for r in results:
+            if "org/model-weak" in (r.model_a, r.model_b):
+                if r.model_a == "org/model-weak":
+                    r.truncated_a = None
+                else:
+                    r.truncated_b = None
+        plan = _plan(_evaluation(results))
+        cut = {row["model"]: row["truncated_pages"] for row in plan.overall_rows}
+        assert cut == {"org/model-good": 0, "org/model-mid": 0, "org/model-weak": None}
+        card = plan.files["README.md"].decode()
+        assert "The results do not record how many outputs were cut for: org/model-weak." in card
+        assert "did not see its end" not in card
+
+    def test_an_identical_output_tie_does_not_make_the_cut_count_unknown(self):
+        results = _results(range(20))
+        for r in results[:3]:
+            r.winner, r.agreement, r.truncated_a, r.truncated_b = "tie", "auto", None, None
+        plan = _plan(_evaluation(results))
+        assert {row["truncated_pages"] for row in plan.overall_rows} == {0}
+
+    @pytest.mark.parametrize(
+        ("min_chars", "reason"),
+        [
+            (20, "both outputs are shorter than 20 characters, or one output is an error message"),
+            (0, "a page where one output is an error message"),
+            (None, "both outputs are empty or very short, or one output is an error message"),
+        ],
+    )
+    def test_the_pages_per_pair_line_follows_the_min_chars_setting(self, min_chars, reason):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata["min_chars"] = min_chars
+        card = _plan(evaluation).files["README.md"].decode()
+        assert reason in card
+        if min_chars == 0:
+            # With the filter off, two empty outputs are compared.
+            assert "both outputs" not in card
+
+    @pytest.mark.parametrize("recorded", ["0.0.9.1", "٠.٠.٩", "0.0.9/../x", "v0.0.9", "0.0"])
+    def test_a_version_that_is_not_three_plain_numbers_is_not_linked(self, recorded):
+        evaluation = _evaluation(_results(range(20)))
+        evaluation.metadata["ocr_bench_version"] = recorded
+        assert _plan(evaluation).settings["judged_with_version"] == ""

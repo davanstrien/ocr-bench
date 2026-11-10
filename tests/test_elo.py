@@ -4,10 +4,15 @@ import random
 
 from ocr_bench.elo import (
     INITIAL_ELO,
-    MIN_PAGES_TO_RESOLVE,
+    MIN_PAGES_FOR_RANK_RANGE,
+    MIN_REPLICATES_FOR_RANK_RANGE,
     ComparisonResult,
     Leaderboard,
     _bootstrap_ci,
+    _bootstrap_replicates,
+    _clearly_above,
+    _percentile_bounds,
+    _rank_ranges,
     compute_elo,
     rankings_resolved,
 )
@@ -488,22 +493,29 @@ class TestRankRanges:
             best, worst = board.rank_range[model]
             assert 1 <= best <= rank <= worst <= len(models)
 
-    def test_overlapping_intervals_can_still_be_clearly_apart(self):
-        # alpha and beta win or lose against the three anchors together, page by
-        # page, so both ratings move the same way when the pages are resampled.
-        # alpha beats beta on 4 pages in 5.
-        anchors = ["anchor-0", "anchor-1", "anchor-2"]
+    @staticmethod
+    def _co_moving_results(pages=80):
+        """alpha and beta win or lose against six anchors together, page by page.
+
+        Both ratings move the same way when the pages are resampled. alpha
+        beats beta on 7 pages in 10.
+        """
+        anchors = [f"anchor-{n}" for n in range(6)]
         results = []
-        for page in range(60):
+        for page in range(pages):
             both_win = (page * 7) % 10 < 5
             for top in ("alpha", "beta"):
                 for anchor in anchors:
                     results.append(ComparisonResult(page, top, anchor, "A" if both_win else "B"))
-            results.append(ComparisonResult(page, "alpha", "beta", "A" if page % 5 < 4 else "B"))
+            results.append(ComparisonResult(page, "alpha", "beta", "A" if page % 10 < 7 else "B"))
             for i, a in enumerate(anchors):
                 for b in anchors[i + 1 :]:
                     results.append(ComparisonResult(page, a, b, "tie"))
-        board = compute_elo(results, ["alpha", "beta", *anchors], n_bootstrap=300)
+        return results, ["alpha", "beta", *anchors]
+
+    def test_overlapping_intervals_can_still_be_clearly_apart(self):
+        results, models = self._co_moving_results()
+        board = compute_elo(results, models, n_bootstrap=300)
 
         alpha_low, _ = board.elo_ci["alpha"]
         _, beta_high = board.elo_ci["beta"]
@@ -512,12 +524,79 @@ class TestRankRanges:
         assert board.rank_range["alpha"][0] == 1
         assert board.rank_range["beta"][0] == 2
 
-    def test_a_model_on_too_few_pages_is_not_called_apart(self):
-        models, results = self._results(
-            MIN_PAGES_TO_RESOLVE - 1, lambda page, a, b: "B" if page == 0 else "A"
-        )
+    def test_the_difference_is_taken_within_each_resample(self):
+        # The same two models, with alpha's rating from one resample set against
+        # beta's rating from another: the common movement no longer cancels and
+        # the difference is not clear. Only the paired difference separates them.
+        results, models = self._co_moving_results()
+        replicates = _bootstrap_replicates(results, models, n_bootstrap=300)
+        assert _clearly_above("alpha", "beta", replicates)
+        for shift in (7, 31, 101, 150):
+            unpaired = [
+                {
+                    "alpha": replicates[i]["alpha"],
+                    "beta": replicates[(i + shift) % len(replicates)]["beta"],
+                }
+                for i in range(len(replicates))
+            ]
+            assert not _clearly_above("alpha", "beta", unpaired)
+
+    def test_models_with_the_same_results_are_never_apart(self):
+        # twin-a and twin-b have the same result against the third model on
+        # every page and tie with each other: their difference is exactly zero
+        # in every resample.
+        results = []
+        for page in range(40):
+            results.append(ComparisonResult(page, "twin-a", "twin-b", "tie"))
+            winner = "A" if page % 3 else "B"
+            results.append(ComparisonResult(page, "twin-a", "other", winner))
+            results.append(ComparisonResult(page, "twin-b", "other", winner))
+        models = ["twin-a", "twin-b", "other"]
+        replicates = _bootstrap_replicates(results, models, n_bootstrap=200)
+        assert not _clearly_above("twin-a", "twin-b", replicates)
+        assert not _clearly_above("twin-b", "twin-a", replicates)
         board = compute_elo(results, models, n_bootstrap=200)
-        assert set(board.rank_range.values()) == {(1, 3)}
+        assert board.rank_range["twin-a"] == board.rank_range["twin-b"]
+
+    def test_clearly_above_follows_the_level(self):
+        # 100 differences from -5 to 94: five are below zero. The lower bound
+        # of the 95% interval is the third smallest (-3); that of the 60%
+        # interval is the 21st (15).
+        replicates = [{"a": float(i - 5), "b": 0.0} for i in range(100)]
+        assert not _clearly_above("a", "b", replicates, ci=0.95)
+        assert _clearly_above("a", "b", replicates, ci=0.60)
+        # A lower bound of exactly zero is not above zero.
+        at_zero = [{"a": float(max(i - 2, 0)), "b": 0.0} for i in range(100)]
+        assert not _clearly_above("a", "b", at_zero, ci=0.95)
+
+    def test_a_model_on_few_pages_widens_the_other_ranges_by_one(self):
+        # Three models on 60 pages, clearly apart, and a fourth that is
+        # compared on 12 pages only.
+        models, results = self._results(60, lambda page, a, b: "B" if page % 10 == 0 else "A")
+        for page in range(12):
+            for other in models:
+                results.append(ComparisonResult(page, "thin", other, "A" if page % 2 else "B"))
+        board = compute_elo(results, [*models, "thin"], n_bootstrap=200)
+        assert board.pages_by_model["thin"] == 12 < MIN_PAGES_FOR_RANK_RANGE
+        assert board.rank_range["thin"] == (1, 4)
+        widths = {name: worst - best for name, (best, worst) in board.rank_range.items()}
+        assert widths == {"strong": 1, "middle": 1, "weak": 1, "thin": 3}
+
+    def test_the_range_always_holds_the_fitted_rank(self):
+        # Replicates that disagree with the fit (they put "low" above "high" in
+        # every resample) cannot push a range past the fitted rank.
+        elo = {"high": 1600.0, "low": 1400.0}
+        replicates = [{"high": 1400.0 - i, "low": 1600.0 + i} for i in range(200)]
+        ranges = _rank_ranges(elo, replicates, {"high": 50, "low": 50})
+        assert ranges == {"high": (1, 2), "low": (1, 2)}
+
+    def test_no_rank_range_from_a_few_replicates(self):
+        models, results = self._results(60, lambda page, a, b: "B" if page % 10 == 0 else "A")
+        few = compute_elo(results, models, n_bootstrap=MIN_REPLICATES_FOR_RANK_RANGE - 1)
+        assert few.rank_range == {}
+        assert few.elo_ci  # the intervals are still given
+        enough = compute_elo(results, models, n_bootstrap=MIN_REPLICATES_FOR_RANK_RANGE)
+        assert set(enough.rank_range) == set(models)
 
     def test_no_rank_range_without_a_bootstrap(self):
         models, results = self._results(20, lambda page, a, b: "A")
@@ -529,3 +608,19 @@ class TestRankRanges:
         models, results = self._results(30, lambda page, a, b: "B" if page % 4 == 0 else "A")
         board = compute_elo(results, models, n_bootstrap=100)
         assert board.elo_ci == _bootstrap_ci(results, models, n_bootstrap=100)
+
+    def test_interval_bounds_use_the_same_order_statistics_at_every_level(self):
+        # The published intervals must not move. The index arithmetic is the one
+        # the intervals have always used; a different order of the same
+        # operations picks another sample at some levels (0.84 with 125 samples).
+        for n_samples in (20, 125, 200, 1000):
+            samples = [float(value) for value in range(n_samples)]
+            for ci in (0.5, 0.8, 0.84, 0.9, 0.95, 0.99):
+                alpha = (1.0 - ci) / 2.0
+                low_index = int(n_samples * (alpha * 100) / 100)
+                high_index = min(int(n_samples * ((1.0 - alpha) * 100) / 100), n_samples - 1)
+                assert _percentile_bounds(samples, ci) == (
+                    samples[low_index],
+                    samples[high_index],
+                ), (n_samples, ci)
+        assert _percentile_bounds([float(v) for v in range(125)], 0.84) == (10.0, 115.0)

@@ -21,6 +21,16 @@ ShownFirst = Literal["A", "B", ""]
 # identical pages give zero-width intervals. Do not call a ranking resolved below this.
 MIN_PAGES_TO_RESOLVE = 10
 
+# The paired bootstrap test behind the rank ranges calls two equally good models
+# apart too often on few pages: in simulation about 9% of the time at 10 pages,
+# 7% at 20 and 6% at 30 and more, against the 5% it is set to. A model on fewer
+# pages than this is not called apart from any model.
+MIN_PAGES_FOR_RANK_RANGE = 20
+
+# A percentile bound from a few replicates is close to the smallest one, so the
+# rank ranges are left out below this number of replicates.
+MIN_REPLICATES_FOR_RANK_RANGE = 100
+
 
 @dataclass
 class ComparisonResult:
@@ -46,8 +56,10 @@ class ComparisonResult:
     text_b: str = ""
     col_a: str = ""
     col_b: str = ""
-    truncated_a: bool = False
-    truncated_b: bool = False
+    # Whether the judge read a cut version of the output. None on a stored row
+    # that does not record it.
+    truncated_a: bool | None = False
+    truncated_b: bool | None = False
     # Hash of the source/judge/sampling provenance for safe incremental resume.
     # Historical rows lack it and must not be silently reused.
     provenance_hash: str = ""
@@ -263,8 +275,10 @@ def _percentile_bounds(samples: list[float], ci: float = 0.95) -> tuple[float, f
     """The lower and upper percentile of ``samples`` for a ``ci`` interval."""
     ordered = sorted(samples)
     alpha = (1.0 - ci) / 2.0
-    lo_idx = int(len(ordered) * alpha)
-    hi_idx = min(int(len(ordered) * (1.0 - alpha)), len(ordered) - 1)
+    lo_pct = alpha * 100
+    hi_pct = (1.0 - alpha) * 100
+    lo_idx = int(len(ordered) * lo_pct / 100)
+    hi_idx = min(int(len(ordered) * hi_pct / 100), len(ordered) - 1)
     return ordered[lo_idx], ordered[hi_idx]
 
 
@@ -329,15 +343,24 @@ def _rank_ranges(
     A model's best rank is one more than the number of models clearly above it;
     its worst rank is the number of models minus those clearly below it (see
     :func:`_clearly_above`). A range of one rank means the model is clearly
-    apart from every other model. A model on fewer than
-    ``MIN_PAGES_TO_RESOLVE`` pages is not called clearly apart from any model.
+    apart from every other model. The range says how many models are clearly
+    above and below, not which: two models with overlapping ranges can be
+    clearly apart.
 
-    The tests are one per pair with no correction for the number of pairs, so
-    on a large board a few ranges are narrower than a joint 95% statement
-    would allow.
+    A model on fewer than ``MIN_PAGES_FOR_RANK_RANGE`` pages is not called
+    clearly apart from any model, so it widens every other range by one rank.
+    With fewer than ``MIN_REPLICATES_FOR_RANK_RANGE`` replicates there are no
+    ranges.
+
+    The tests are one per pair at the 95% level, with no correction for the
+    number of pairs: about 1 pair in 20 of equally good models is called apart
+    by chance, so a large board is likely to hold such a pair. The range still
+    holds a model's true rank far more often than 95% of the time.
     """
+    if len(replicates) < MIN_REPLICATES_FOR_RANK_RANGE:
+        return {}
     names = sorted(elo, key=lambda name: (-elo[name], name))
-    enough_pages = {name: pages_by_model.get(name, 0) >= MIN_PAGES_TO_RESOLVE for name in names}
+    enough_pages = {name: pages_by_model.get(name, 0) >= MIN_PAGES_FOR_RANK_RANGE for name in names}
     ranges: dict[str, tuple[int, int]] = {}
     for position, name in enumerate(names, start=1):
         clearly_above_it = 0
