@@ -377,6 +377,94 @@ class TestTargetedAdaptive:
             )
 
 
+class NameOrderJudge(FakeJudge):
+    """A judge that always prefers the model whose name sorts first."""
+
+    def judge(self, comparisons):
+        outputs = super().judge(comparisons)
+        for comp, output in zip(comparisons, outputs, strict=True):
+            model_a_is_better = comp.model_a < comp.model_b
+            # The verdict names the displayed position. With ``swapped``, the
+            # judge saw model_b's output as "Output A".
+            model_a_shown_as_a = not comp.swapped
+            output["winner"] = "A" if model_a_is_better == model_a_shown_as_a else "B"
+        return outputs
+
+
+class TestBalancedRerun:
+    """Balanced mode checks the stopping rule on the stored comparisons first."""
+
+    FLAGS = ("--checkpoint-every", "0")
+
+    @staticmethod
+    def _stored_results(m_publish) -> list[ComparisonResult]:
+        """The published comparisons, as a later run loads them."""
+        return [
+            ComparisonResult(
+                sample_idx=row["sample_idx"],
+                model_a=row["model_a"],
+                model_b=row["model_b"],
+                winner=row["winner"],
+            )
+            for row in m_publish.call_args.args[1].comparison_log
+        ]
+
+    def _converged_board(self) -> list[ComparisonResult]:
+        """Run three models to convergence: 2 of the 8 batches are enough."""
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        judge, m_publish, _ = _run_judge([*self.FLAGS], ds, ocr, judge=NameOrderJudge())
+        assert judge.judged == 30  # stopped by the rule, not at the end of the sample
+        return self._stored_results(m_publish)
+
+    def test_rerun_of_a_converged_board_makes_no_judge_call(self, capsys):
+        existing = self._converged_board()
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        capsys.readouterr()
+
+        judge, m_publish, _ = _run_judge(
+            [*self.FLAGS], ds, ocr, existing=existing, judge=NameOrderJudge()
+        )
+
+        assert judge.judged == 0
+        out = " ".join(capsys.readouterr().out.split())  # undo console line wrapping
+        assert "Existing comparisons already meet the adaptive stopping criteria." in out
+        assert len(m_publish.call_args.args[1].comparison_log) == 30
+        assert _published_metadata(m_publish).total_comparisons == 0
+
+    def test_rerun_with_an_added_model_still_judges(self, capsys):
+        # The stored board is converged for a, b and c. The new model d has no
+        # comparisons and so no interval: the stopping rule is not met.
+        existing = self._converged_board()
+        ds, ocr = make_ds(n=40, models=("a", "b", "c", "d"))
+        capsys.readouterr()
+
+        judge, _, _ = _run_judge([*self.FLAGS], ds, ocr, existing=existing, judge=NameOrderJudge())
+
+        assert judge.judged > 0
+        assert all("model-d" in pair for pair in judge.pairs_seen[:15])
+        assert "already meet the adaptive stopping criteria" not in capsys.readouterr().out
+
+    def test_rerun_of_an_unresolved_board_still_judges(self):
+        # All ties: the intervals overlap, so the rule is not met on the stored
+        # comparisons and the run judges the pages that are left.
+        ds, ocr = make_ds(n=10, models=("a", "b", "c"))
+        existing = [
+            ComparisonResult(sample_idx=page, model_a=left, model_b=right, winner="tie")
+            for page in range(8)
+            for left, right in (
+                ("model-a", "model-b"),
+                ("model-a", "model-c"),
+                ("model-b", "model-c"),
+            )
+        ]
+
+        judge, _, _ = _run_judge(
+            [*self.FLAGS], ds, ocr, existing=existing, judge=FakeJudge(winner="tie")
+        )
+
+        assert judge.judged == 6  # the 2 pages not yet judged, 3 pairs each
+
+
 class TestBudget:
     def test_budget_stops_at_n_and_publishes(self):
         # 10 samples x 3 pairs = 30 possible comparisons; cap at 12.
