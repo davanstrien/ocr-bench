@@ -540,6 +540,56 @@ class TestBalancedRerun:
         judge, _, _ = _run_judge([*self.FLAGS], ds, ocr, existing=existing, judge=NameOrderJudge())
         assert judge.judged == calls
 
+    def test_whole_batches_at_the_minimum_stop_a_two_model_board(self):
+        # Exactly 20 stored comparisons, all won by one model: the minimum is
+        # reached, the rule is met, and the run makes no judge call.
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        existing = [
+            ComparisonResult(sample_idx=page, model_a="model-a", model_b="model-b", winner="A")
+            for page in order[:20]
+        ]
+        ds, ocr = make_ds(n=40, models=("a", "b"))
+        judge, _, _ = _run_judge([*self.FLAGS], ds, ocr, existing=existing, judge=NameOrderJudge())
+        assert judge.judged == 0
+
+    def test_the_stored_comparisons_are_looked_at_once(self):
+        # The stored comparisons end inside the fifth batch (22 of 25 pages)
+        # and meet the rule there. The run finishes that batch. The new
+        # verdicts go the other way, so the rule is not met at the end of the
+        # batch, and the run goes on to its budget. A second look at the
+        # stored comparisons alone, at the next batch, would stop it there.
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        existing = [
+            ComparisonResult(
+                sample_idx=page,
+                model_a="model-a",
+                model_b="model-b",
+                winner="B" if position in (0, 4, 8, 12, 16) else "A",
+            )
+            for position, page in enumerate(order[:22])
+        ]
+
+        class SecondNameWins(FakeJudge):
+            """A judge that always prefers the model whose name sorts last."""
+
+            def judge(self, comparisons):
+                outputs = super().judge(comparisons)
+                for comp, output in zip(comparisons, outputs, strict=True):
+                    model_b_shown_as_a = comp.swapped
+                    output["winner"] = "A" if model_b_shown_as_a else "B"
+                return outputs
+
+        ds, ocr = make_ds(n=40, models=("a", "b"))
+        judge, m_publish, _ = _run_judge(
+            [*self.FLAGS, "--max-comparisons", "8"],
+            ds,
+            ocr,
+            existing=existing,
+            judge=SecondNameWins(),
+        )
+        assert judge.judged == 8
+        assert len(m_publish.call_args.args[1].comparison_log) == 30
+
     def test_rows_of_a_model_outside_the_grid_do_not_block_the_check(self):
         # A fourth model was judged earlier, on later pages, and is not in this
         # run. Its rows are kept and take no part in the check: the three
