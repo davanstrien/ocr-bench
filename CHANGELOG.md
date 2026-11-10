@@ -16,6 +16,9 @@ current behaviour.
   - The display order of a comparison now depends only on `--seed`, the page and the two model names. It is the same in adaptive batches, in one pass and after a resume. Each comparison is an independent even choice, so over many pages each model of a pair is shown first about half of the time; the split is not forced to be exactly even.
   - For a given seed the order differs from earlier versions. Stored comparisons are not changed. To remove the effect from an existing board, judge it again with `--full-rejudge`. When `judge` resumes a results repo, it says how many stored comparisons have no recorded display order (see `shown_first` below).
 - `build_comparisons` refuses two OCR columns with the same model name. Comparisons and ratings are keyed by model name, so the two could not be told apart. The dataset loaders already rename such columns.
+- A `--max-comparisons` budget kept ties from pages the run did not reach. Two identical outputs are recorded as a tie with no judge call. When the budget stopped a run, `judge` dropped the judged comparisons over the budget but kept every such tie that came after them: with `--no-adaptive`, from the rest of the sample; in adaptive mode, from the rest of the last batch of five pages. A pair of models that often give the same output got a larger share of ties, and both models were ranked on more pages than the others.
+  - The run now stops at the last judged comparison that fits the budget. No comparison after it is recorded, ties included. A later run records those ties when it reaches their pages.
+  - Stored comparisons are not changed.
 
 ### New
 

@@ -850,25 +850,33 @@ def _merge_auto_ties(comparisons: list[Comparison], judged: list[dict]) -> list[
 def _trim_to_budget(
     comparisons: list[Comparison], judge_budget: int
 ) -> tuple[list[Comparison], bool]:
-    """Cap judged pairs at ``judge_budget`` while keeping every auto-tie.
+    """Cut ``comparisons`` after the last judged pair that fits ``judge_budget``.
 
-    Auto-ties cost no judge call, so they never count against the budget and
-    are always retained (they are real results that must still reach the
-    leaderboard). Returns the trimmed list and whether any judged pair was
-    dropped to fit the budget.
+    ``comparisons`` is in visiting order, and a budget stops the run at one
+    point in that order. Every comparison up to and including the last judged
+    pair that fits the budget is kept, auto-ties included. Every comparison
+    after it is dropped, auto-ties included. An auto-tie costs no judge call,
+    but one from a page the run did not reach would give its pair ties, and
+    its two models pages, from a part of the sample where no other pair was
+    judged. When no judged pair fits the budget, nothing is kept.
+
+    A list with at most ``judge_budget`` judged pairs is returned unchanged.
+    Returns the trimmed list and whether any judged pair was dropped to fit
+    the budget.
     """
     judgeable = sum(c.auto_result is None for c in comparisons)
     if judgeable <= judge_budget:
         return comparisons, False
-    kept: list[Comparison] = []
-    remaining = judge_budget
-    for comp in comparisons:
+    judged_kept = 0
+    keep_count = 0  # length of the leading part of the list that is kept
+    for position, comp in enumerate(comparisons):
         if comp.auto_result is not None:
-            kept.append(comp)
-        elif remaining > 0:
-            kept.append(comp)
-            remaining -= 1
-    return kept, True
+            continue
+        if judged_kept == judge_budget:
+            break
+        judged_kept += 1
+        keep_count = position + 1
+    return comparisons[:keep_count], True
 
 
 def _shown_first(comp: Comparison) -> ShownFirst:
@@ -1757,11 +1765,10 @@ def cmd_judge(args: argparse.Namespace) -> None:
             if not batch_comps:
                 continue
 
-            batch_auto = sum(c.auto_result is not None for c in batch_comps)
-
-            # Trim the final batch to land exactly on the budget: cap judged
-            # pairs at the remaining budget but keep auto-ties (they cost no
-            # judge call), so the run stops cleanly without dropping real ties.
+            # Trim the final batch to land exactly on the budget: the run stops
+            # at the last judged pair that fits. The rest of the batch is
+            # dropped, auto-ties included, so no pair gets ties from pages
+            # where the other pairs were not judged.
             if max_comparisons is not None:
                 batch_comps, hit_budget = _trim_to_budget(
                     batch_comps, max_comparisons - total_comparisons
@@ -1769,6 +1776,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 if hit_budget:
                     budget_exhausted = True
 
+            # Counted after the trim, which can drop auto-ties.
+            batch_auto = sum(c.auto_result is not None for c in batch_comps)
             n_auto_total += batch_auto
             batch_results = _judge_batch(batch_comps)
             new_results.extend(batch_results)
@@ -1874,9 +1883,10 @@ def cmd_judge(args: argparse.Namespace) -> None:
             normalize=normalize,
         )
 
-        # Global budget: judge at most N pairs, keeping every auto-tie (they
-        # cost no judge call). The pairs built last are dropped; with the random
-        # visiting order above, they come from random pages.
+        # Global budget: judge at most N pairs. The run stops at the last
+        # judged pair that fits; the comparisons built after it are dropped,
+        # auto-ties included. With the random visiting order above, they come
+        # from random pages.
         if max_comparisons is not None:
             comparisons, hit_budget = _trim_to_budget(comparisons, max_comparisons)
             if hit_budget:
