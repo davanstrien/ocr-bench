@@ -630,6 +630,56 @@ class TestRankRanges:
                         )
         assert single_rank_models > 5  # the loop above checked something
 
+    def test_the_page_gate_is_twenty_pages_for_both_models_of_a_pair(self):
+        replicates = [{"high": 1600.0, "low": 1400.0}] * 200
+        elo = {"high": 1600.0, "low": 1400.0}
+        assert MIN_PAGES_FOR_RANK_RANGE == 20
+        assert _rank_ranges(elo, replicates, {"high": 20, "low": 20}) == {
+            "high": (1, 1),
+            "low": (2, 2),
+        }
+        # One page short, on either side: that pair is not tested.
+        third = {"other": 1500.0}
+        replicates3 = [{"high": 1600.0, "low": 1400.0, "other": 1500.0}] * 200
+        elo3 = {**elo, **third}
+        assert _rank_ranges(elo3, replicates3, {"high": 19, "low": 20, "other": 20})["high"] == (
+            1,
+            3,
+        )
+        assert _rank_ranges(elo3, replicates3, {"high": 20, "low": 19, "other": 20})["high"] == (
+            1,
+            2,
+        )
+
+    def test_no_ranges_when_fewer_than_two_models_have_enough_pages(self):
+        replicates = [{"high": 1600.0, "low": 1400.0}] * 200
+        elo = {"high": 1600.0, "low": 1400.0}
+        assert _rank_ranges(elo, replicates, {"high": 19, "low": 19}) == {}
+        assert _rank_ranges(elo, replicates, {"high": 50, "low": 19}) == {}
+
+    def test_two_models_on_few_pages_add_two_ranks_to_the_other_ranges(self):
+        names = ["a", "b", "thin-1", "thin-2"]
+        elo = {"a": 1700.0, "b": 1300.0, "thin-1": 1500.0, "thin-2": 1490.0}
+        replicates = [dict(elo)] * 200
+        pages = {"a": 60, "b": 60, "thin-1": 5, "thin-2": 5}
+        ranges = _rank_ranges(elo, replicates, pages)
+        assert ranges == {"a": (1, 3), "thin-1": (1, 4), "thin-2": (1, 4), "b": (2, 4)}
+        assert set(ranges) == set(names)
+
+    def test_the_level_of_the_ranges_is_95_percent_and_can_be_set(self):
+        # "a" is below "b" in 5 of 100 resamples: not apart at 95%, apart at 60%.
+        replicates = [{"a": float(i - 5), "b": 0.0} for i in range(100)]
+        elo = {"a": 44.5, "b": 0.0}
+        pages = {"a": 50, "b": 50}
+        assert _rank_ranges(elo, replicates, pages) == {"a": (1, 2), "b": (1, 2)}
+        assert _rank_ranges(elo, replicates, pages, ci=0.60) == {"a": (1, 1), "b": (2, 2)}
+
+    def test_the_replicate_floor_is_one_hundred(self):
+        elo = {"high": 1600.0, "low": 1400.0}
+        pages = {"high": 50, "low": 50}
+        assert _rank_ranges(elo, [dict(elo)] * 99, pages) == {}
+        assert _rank_ranges(elo, [dict(elo)] * 100, pages) != {}
+
     def test_the_range_always_holds_the_fitted_rank(self):
         # Replicates that disagree with the fit (they put "low" above "high" in
         # every resample) cannot push a range past the fitted rank.

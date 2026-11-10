@@ -1386,8 +1386,45 @@ class TestRankRangeAndCoverage:
         assert (plan.settings["pair_pages_min"], plan.settings["pair_pages_max"]) == (30, 30)
         card = plan.files["README.md"].decode()
         # "each pair of models" would be false: one pair has no comparison.
-        assert "each pair that was compared was compared on 30 pages; 1 pair was never" in card
+        assert (
+            "the pairs of models that were compared were compared on 30 pages each; 1 pair "
+            "was never compared with each other, and their order comes from comparisons with "
+            "other models"
+        ) in card
         assert "each pair of models was compared" not in card
+
+    def test_a_pair_compared_on_one_page_is_not_a_pair_never_compared(self):
+        results = _results(
+            range(30),
+            pairs=[("org/model-good", "org/model-mid"), ("org/model-mid", "org/model-weak")],
+        )
+        results += _results([0], pairs=[("org/model-good", "org/model-weak")])
+        plan = _plan(_evaluation(results))
+        assert plan.settings["pairs_never_compared"] == 0
+        assert (plan.settings["pair_pages_min"], plan.settings["pair_pages_max"]) == (1, 30)
+        assert "a pair of models was compared on 1 to 30 pages." in plan.files["README.md"].decode()
+
+    def test_a_raw_text_run_has_no_note_about_flattened_html(self):
+        results = _results(range(20))
+        results[0].truncated_a = True
+        evaluation = _evaluation(results)
+        evaluation.metadata["judge_text_mode"] = "raw"
+        card = _plan(evaluation).files["README.md"].decode()
+        assert "The judge reads the first 8,000 characters of an output. Pages where" in card
+
+    def test_a_board_with_too_few_pages_for_any_pair_has_no_rank_ranges(self):
+        # A slice of 12 pages: every model is under the 20 pages a pair needs.
+        # A full range in every row, next to intervals, would read as a result.
+        results = _results(range(60))
+        labels = _labels(60, {"big": range(48), "small": range(48, 60)})
+        plan = _plan(_evaluation(results), slice_column="kind", slice_values=lambda *_: labels)
+        small = [row for row in plan.slice_rows if row["slice"] == "small"]
+        assert len(small) == 3
+        assert {(row["rank_low"], row["rank_high"]) for row in small} == {(None, None)}
+        big = [row for row in plan.slice_rows if row["slice"] == "big"]
+        assert all(row["rank_low"] is not None for row in big)
+        card = plan.files["README.md"].decode()
+        assert "A board with fewer than two models on that many pages has no rank ranges" in card
 
     def test_cut_outputs_are_counted_in_pages_per_model(self):
         results = _results(range(20))
@@ -1403,8 +1440,9 @@ class TestRankRangeAndCoverage:
         assert cut == {"org/model-good": 0, "org/model-mid": 5, "org/model-weak": 0}
         card = plan.files["README.md"].decode()
         assert (
-            "The judge reads the first 8,000 characters of an output. Pages where a model's "
-            "output was longer, so the judge did not see its end: org/model-mid: 5."
+            "The judge reads the first 8,000 characters of an output (of its text, after HTML "
+            "is flattened). Pages where a model's output was longer, so the judge did not see "
+            "its end: org/model-mid: 5."
         ) in card
 
     def test_no_cut_note_when_nothing_was_cut(self):
@@ -1467,12 +1505,21 @@ class TestRankRangeAndCoverage:
     @pytest.mark.parametrize(
         ("min_chars", "reason"),
         [
-            (20, "both outputs are shorter than 20 characters, or one output is an error message"),
-            (0, "a page where one output is an error message"),
+            (
+                20,
+                "a page where both outputs are shorter than 20 characters, one output is an "
+                "error message, or the judge gave no valid answer for it.",
+            ),
+            (
+                0,
+                "a page where one output is an error message, or the judge gave no valid "
+                "answer for it.",
+            ),
             (
                 None,
-                "a page where one output is an error message. The results do not record "
-                "whether a pair of two empty or very short outputs was also left out.",
+                "a page where one output is an error message, or the judge gave no valid "
+                "answer for it. The results do not record whether a pair of two empty or very "
+                "short outputs was also left out.",
             ),
         ],
     )

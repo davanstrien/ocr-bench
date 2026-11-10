@@ -315,11 +315,12 @@ def _clearly_above(
 ) -> bool:
     """Whether ``higher`` is rated above ``lower`` on this data, beyond resampling noise.
 
-    Both ratings come from the same resampled pages in each replicate, so their
-    difference varies less than the two ratings do on their own: a page that is
-    hard for one model is often hard for the other. The difference is clear
-    when its percentile interval lies above zero. Two models whose own
-    intervals overlap can still be clearly apart.
+    The difference is taken within each replicate, where both ratings come
+    from the same resampled pages, and it is clear when its percentile interval
+    lies above zero. Two models whose own intervals overlap can still be
+    clearly apart: the difference between two ratings varies less than their
+    two intervals added together, which is what "the intervals do not overlap"
+    asks for. On a board of two models the two tests are the same.
     """
     differences = [
         replicate[higher] - replicate[lower]
@@ -353,9 +354,10 @@ def _rank_ranges(
     difference between A and B still not clear).
 
     A model on fewer than ``MIN_PAGES_FOR_RANK_RANGE`` pages is not called
-    clearly apart from any model, so it widens every other range by one rank.
-    With fewer than ``MIN_REPLICATES_FOR_RANK_RANGE`` replicates there are no
-    ranges.
+    clearly apart from any model, so each such model adds one rank to every
+    other range. There are no ranges when fewer than two models have that many
+    pages (no pair can be tested), or with fewer than
+    ``MIN_REPLICATES_FOR_RANK_RANGE`` replicates.
 
     The tests are one per pair at the 95% level, with no correction for the
     number of pairs: at least 1 pair in 20 of equally good models is called
@@ -367,6 +369,8 @@ def _rank_ranges(
         return {}
     names = sorted(elo, key=lambda name: (-elo[name], name))
     enough_pages = {name: pages_by_model.get(name, 0) >= MIN_PAGES_FOR_RANK_RANGE for name in names}
+    if sum(enough_pages.values()) < 2:
+        return {}
     ranges: dict[str, tuple[int, int]] = {}
     for position, name in enumerate(names, start=1):
         clearly_above_it = 0

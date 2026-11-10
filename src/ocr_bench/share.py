@@ -791,14 +791,17 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
         "leaves out only the models clearly below it. One model is clearly above another "
         "when the 95% interval of the difference between their ratings, taken on the same "
         "resampled pages, is above zero. Two models whose own intervals overlap can still "
-        "be clearly apart, because their ratings move together when the pages change. "
+        "be clearly apart: the difference between two ratings varies less than their two "
+        "intervals added together. "
         "A range of one rank means the model is clearly apart from every other model. A "
         "wider range counts the models clearly above and below; it does not name them, so "
         "two ranges do not show whether those two models are clearly apart. The range "
         "always includes the model's own rank. Each pair is tested on its own at the 95% "
         "level: at least 1 pair in 20 of equally good models is called apart by chance, "
         f"and more on a board with few pages. A model on fewer than {MIN_PAGES_FOR_RANK_RANGE} "
-        "pages is not called apart from any model, which widens every range by one rank.",
+        "pages is not called apart from any model, so each such model adds one rank to "
+        "every other range. A board with fewer than two models on that many pages has no "
+        "rank ranges (—).",
         "",
         f"## All pages ({settings['pages']})",
         "",
@@ -929,7 +932,12 @@ def _cut_outputs_note(settings: dict, ranked_rows: list[dict]) -> list[str]:
         return []
     cap = settings["max_ocr_text_len"]
     limit = f"the first {cap:,} characters" if isinstance(cap, int) else "the start"
-    note = f"The judge reads {limit} of an output."
+    flattened = (
+        " (of its text, after HTML is flattened)"
+        if settings["judge_text_mode"] == "normalized"
+        else ""
+    )
+    note = f"The judge reads {limit} of an output{flattened}."
     if cut:
         counts = "; ".join(f"{_md(row['model'])}: {row['truncated_pages']}" for row in cut)
         note += (
@@ -945,35 +953,41 @@ def _pair_pages_line(settings: dict) -> str:
     """How many pages each pair of models was compared on, and why not all of them."""
     fewest, most = settings["pair_pages_min"], settings["pair_pages_max"]
     never = settings["pairs_never_compared"]
-    # With pairs that were never compared, the counts are for the other pairs.
-    subject = "pair that was compared" if never else "pair of models"
-    if fewest == most:
-        compared = f"each {subject} was compared on {fewest} pages"
-    else:
-        compared = f"a {subject} was compared on {fewest} to {most} pages"
+    on_pages = f"{fewest} pages" if fewest == most else f"{fewest} to {most} pages"
     if never:
-        # A targeted run, or a model added without a full run: the reasons
-        # below do not explain a pair with no comparison at all.
+        # A targeted run, or a model added without a full run. The counts are
+        # for the pairs that were compared, and the reasons below do not
+        # explain a pair with no comparison at all.
         pairs = "1 pair was" if never == 1 else f"{never} pairs were"
-        compared += f"; {pairs} never compared with each other and rest on their other pairs"
+        each = " each" if fewest == most else ""
+        compared = (
+            f"the pairs of models that were compared were compared on {on_pages}{each}; "
+            f"{pairs} never compared with each other, and their order comes from "
+            "comparisons with other models"
+        )
+    elif fewest == most:
+        compared = f"each pair of models was compared on {on_pages}"
+    else:
+        compared = f"a pair of models was compared on {on_pages}"
 
     min_chars = settings["min_chars"]
     not_recorded = ""
+    failed_call = ", or the judge gave no valid answer for it"
     if not isinstance(min_chars, int):
         # Results that do not record the setting: the filter may have been on or off.
-        reasons = "one output is an error message"
+        reasons = "one output is an error message" + failed_call
         not_recorded = (
             " The results do not record whether a pair of two empty or very short outputs "
             "was also left out."
         )
     elif min_chars > 0:
         reasons = (
-            f"both outputs are shorter than {min_chars} characters, or one output is an "
-            "error message"
+            f"both outputs are shorter than {min_chars} characters, one output is an "
+            "error message" + failed_call
         )
     else:
         # With the filter off, two empty outputs are compared (and tied).
-        reasons = "one output is an error message"
+        reasons = "one output is an error message" + failed_call
     return (
         f"- **Pages per pair**: {compared}. A pair is not compared on a page where "
         f"{reasons}.{not_recorded} A run can also stop before every pair is judged on every page"
