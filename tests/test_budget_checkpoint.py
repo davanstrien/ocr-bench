@@ -1110,3 +1110,141 @@ class TestFullRejudge:
         assert code is None
         m_publish.assert_called_once()
         assert m_publish.call_args.args[2].criteria == "table-fidelity"
+
+
+class OrderRecordingJudge(FakeJudge):
+    """A judge that records which way round it was shown each comparison."""
+
+    def __init__(self):
+        super().__init__(winner="tie")
+        self.saw_model_b_first: dict[tuple[int, str, str], bool] = {}
+
+    def judge(self, comparisons):
+        for comp in comparisons:
+            self.saw_model_b_first[(comp.sample_idx, comp.model_a, comp.model_b)] = comp.swapped
+        return super().judge(comparisons)
+
+
+def _published_display_order(m_publish) -> dict[tuple[int, str, str], str]:
+    """The ``shown_first`` value of each comparison row passed to publish_results."""
+    board = m_publish.call_args.args[1]
+    return {
+        (row["sample_idx"], row["model_a"], row["model_b"]): row["shown_first"]
+        for row in board.comparison_log
+    }
+
+
+class TestDisplayOrderAcrossRuns:
+    """The display order of a comparison does not depend on how the run was built."""
+
+    MODELS = ("a", "b", "c", "d")
+
+    def _run(self, flags, **kwargs):
+        ds, ocr = make_ds(n=40, models=self.MODELS)
+        judge = OrderRecordingJudge()
+        _, m_publish, _ = _run_judge(
+            [*flags, "--checkpoint-every", "0"], ds, ocr, judge=judge, **kwargs
+        )
+        return judge, m_publish
+
+    def test_adaptive_batches_match_a_single_pass(self):
+        adaptive_judge, adaptive_publish = self._run([])
+        single_judge, single_publish = self._run(["--no-adaptive"])
+        assert len(adaptive_judge.saw_model_b_first) == 40 * 6
+        assert adaptive_judge.saw_model_b_first == single_judge.saw_model_b_first
+        assert _published_display_order(adaptive_publish) == _published_display_order(
+            single_publish
+        )
+
+    def test_published_rows_record_what_the_judge_saw(self):
+        judge, m_publish = self._run([])
+        published = _published_display_order(m_publish)
+        assert set(published.values()) == {"A", "B"}
+        assert published == {
+            key: "B" if model_b_first else "A"
+            for key, model_b_first in judge.saw_model_b_first.items()
+        }
+
+    def test_adaptive_batches_do_not_replay_one_order(self):
+        # 8 batches of 5 pages. Replaying one order per batch shows each pair
+        # the same way round on every 5th page: only 5 distinct decisions.
+        judge, _ = self._run([])
+        ds_order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        position_in_batch = {page: n % 5 for n, page in enumerate(ds_order)}
+        replayed = 0
+        for model_a, model_b in [("model-a", "model-b"), ("model-c", "model-d")]:
+            by_position: dict[int, set[bool]] = {}
+            for (page, a, b), model_b_first in judge.saw_model_b_first.items():
+                if (a, b) == (model_a, model_b):
+                    by_position.setdefault(position_in_batch[page], set()).add(model_b_first)
+            replayed += all(len(seen) == 1 for seen in by_position.values())
+        assert replayed == 0
+
+    def test_resume_keeps_the_order_of_the_remaining_comparisons(self):
+        full_judge, _ = self._run([])
+        # A first run judged one pair on half of the pages.
+        existing = [
+            ComparisonResult(sample_idx=page, model_a="model-a", model_b="model-b", winner="tie")
+            for page in range(20)
+        ]
+        resumed_judge, _ = self._run([], existing=existing)
+        assert len(resumed_judge.saw_model_b_first) == 40 * 6 - 20
+        assert all(
+            full_judge.saw_model_b_first[key] == model_b_first
+            for key, model_b_first in resumed_judge.saw_model_b_first.items()
+        )
+
+    @pytest.mark.parametrize(("flags", "adaptive"), [([], True), (["--no-adaptive"], False)])
+    def test_metadata_records_run_mode_and_version(self, flags, adaptive):
+        from ocr_bench import __version__
+
+        _, m_publish = self._run(flags)
+        metadata = _published_metadata(m_publish)
+        assert metadata.adaptive is adaptive
+        assert metadata.ocr_bench_version == __version__
+
+    def test_a_refit_with_nothing_to_judge_also_records_run_mode_and_version(self):
+        from ocr_bench import __version__
+
+        ds, ocr = make_ds(n=4, models=("a", "b"))
+        existing = [
+            ComparisonResult(
+                sample_idx=page, model_a="model-a", model_b="model-b", winner="A", shown_first="A"
+            )
+            for page in range(4)
+        ]
+        judge, m_publish, _ = _run_judge(
+            ["--no-adaptive", "--checkpoint-every", "0"], ds, ocr, existing=existing
+        )
+        assert judge.judged == 0
+        metadata = _published_metadata(m_publish)
+        assert metadata.adaptive is False
+        assert metadata.ocr_bench_version == __version__
+
+    def test_resume_says_when_stored_comparisons_have_no_display_order(self, capsys):
+        # Rows from a version that did not record the order: the user cannot
+        # see from the board that their order may be unbalanced.
+        existing = [
+            ComparisonResult(sample_idx=page, model_a="model-a", model_b="model-b", winner="tie")
+            for page in range(20)
+        ]
+        self._run([], existing=existing)
+        out = " ".join(capsys.readouterr().out.split())  # undo console line wrapping
+        assert "20 of them have no recorded display order" in out
+        assert "--full-rejudge" in out
+
+    def test_resume_is_quiet_when_every_judged_comparison_has_its_display_order(self, capsys):
+        existing = [
+            ComparisonResult(
+                sample_idx=page, model_a="model-a", model_b="model-b", winner="tie", shown_first="A"
+            )
+            for page in range(19)
+        ]
+        # An auto-tie has no display order and is not a row from an older version.
+        existing.append(
+            ComparisonResult(
+                sample_idx=19, model_a="model-a", model_b="model-b", winner="tie", agreement="auto"
+            )
+        )
+        self._run([], existing=existing)
+        assert "no recorded display order" not in " ".join(capsys.readouterr().out.split())

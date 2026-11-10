@@ -9,6 +9,21 @@ current behaviour.
 
 ## [Unreleased]
 
+### Fixes
+
+- Adaptive judging did not balance which output the judge sees first. `judge` builds the comparisons five pages at a time in adaptive mode (the default), and each batch replayed the same sequence of A/B choices. A pair of models could be shown the same way round on most of its pages. A judge can favour one position, and when it does, this shifts ratings in a way the 95% interval does not show.
+  - A `--no-adaptive` run that finished in one go was not affected. A run that was resumed (after a `--max-comparisons` stop, or a stopped Job continued from a checkpoint) started the same sequence again for the comparisons still to judge.
+  - The display order of a comparison now depends only on `--seed`, the page and the two model names. It is the same in adaptive batches, in one pass and after a resume. Each comparison is an independent even choice, so over many pages each model of a pair is shown first about half of the time; the split is not forced to be exactly even.
+  - For a given seed the order differs from earlier versions. Stored comparisons are not changed. To remove the effect from an existing board, judge it again with `--full-rejudge`. When `judge` resumes a results repo, it says how many stored comparisons have no recorded display order (see `shown_first` below).
+- `build_comparisons` refuses two OCR columns with the same model name. Comparisons and ratings are keyed by model name, so the two could not be told apart. The dataset loaders already rename such columns.
+
+### New
+
+- The `comparisons` config records the display order in `shown_first`, with the same letters as `winner`: `A` when the judge saw `model_a`'s output first (as "Output A"), `B` when it saw `model_b`'s first. So `winner = shown_first` selects the comparisons that the first output shown won.
+  - It is empty for an auto-tie, which no judge saw, and for rows written by earlier versions. A judged row with an empty `shown_first` was written before this fix.
+  - The `winner` and `reason` columns are unchanged: both refer to `model_a` and `model_b`. In a stored `reason`, "Output A" means `model_a`, also when the judge saw it second.
+- Each row of the `metadata` config records `adaptive` (whether the run judged in adaptive batches or in one pass) and `ocr_bench_version` (the version that judged). `adaptive_strategy` did not tell the two modes apart, because it is recorded for both. A row describes its own run: after a resume, earlier comparisons in the repo can come from another mode or version.
+
 ## [0.0.8] - 2026-11-09
 
 The board card that `share` writes is easier to read and to query, and it names the repo it was built for. Share a board again to update its card.

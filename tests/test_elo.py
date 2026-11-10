@@ -55,6 +55,34 @@ class TestComputeElo:
         # After unswap, B→A
         assert board.comparison_log[0]["winner"] == "A"
 
+    def test_comparison_log_records_display_order(self):
+        results = [
+            ComparisonResult(
+                sample_idx=0,
+                model_a="alpha",
+                model_b="beta",
+                winner="B",
+                swapped=True,
+                shown_first="B",
+            ),
+            ComparisonResult(sample_idx=1, model_a="alpha", model_b="beta", winner="tie"),
+        ]
+        board = compute_elo(results, ["alpha", "beta"], n_bootstrap=0)
+        assert [row["shown_first"] for row in board.comparison_log] == ["B", ""]
+
+    def test_stored_display_order_does_not_flip_a_reloaded_winner(self):
+        # A row read back from the Hub holds the un-swapped winner and
+        # swapped=False. Its display order is a record, not an instruction.
+        reloaded = [
+            ComparisonResult(
+                sample_idx=0, model_a="alpha", model_b="beta", winner="A", shown_first="B"
+            ),
+        ]
+        board = compute_elo(reloaded, ["alpha", "beta"], n_bootstrap=0)
+        assert board.comparison_log[0]["winner"] == "A"
+        assert board.comparison_log[0]["shown_first"] == "B"
+        assert (board.wins["alpha"], board.wins["beta"]) == (1, 0)
+
     def test_comparison_log_includes_text_and_col_fields(self):
         results = [
             ComparisonResult(
