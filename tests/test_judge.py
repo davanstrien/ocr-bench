@@ -68,6 +68,73 @@ class TestImageToBase64:
         result = Image.open(io.BytesIO(decoded))
         assert result.size == (200, 100)
 
+    @staticmethod
+    def _scan_page(mode: str) -> Image.Image:
+        """A 300x200 greyscale page in ``mode``: paper at 30000, two text lines at 2000."""
+        import numpy as np
+
+        values = np.full((200, 300), 30000, dtype=np.uint16)
+        values[50:60, 20:280] = 2000
+        values[100:110, 20:280] = 2000
+        if mode in ("I", "F"):
+            return Image.fromarray(values).convert(mode)
+        byte_order = ">u2" if mode == "I;16B" else "<u2"
+        return Image.frombytes(mode, (300, 200), values.astype(byte_order).tobytes())
+
+    @staticmethod
+    def _plain_conversion(image: Image.Image, max_dim: int = 1024) -> str:
+        """The JPEG for a mode that needs no scaling: convert, resize, encode."""
+        import base64
+        import io
+
+        image = image.convert("RGB")
+        if max(image.size) > max_dim:
+            ratio = max_dim / max(image.size)
+            new_size = (int(image.width * ratio), int(image.height * ratio))
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        image.save(buf, format="JPEG", quality=85)
+        return base64.b64encode(buf.getvalue()).decode()
+
+    @pytest.mark.parametrize("mode", ["I;16", "I;16L", "I;16B", "I", "F"])
+    def test_wide_grey_page_keeps_dark_text_on_light_paper(self, mode):
+        # convert("RGB") alone clips every value above 255 to white.
+        import base64
+        import io
+
+        page = self._scan_page(mode)
+        assert page.mode == mode
+
+        b64 = image_to_base64(page)
+
+        judged = Image.open(io.BytesIO(base64.b64decode(b64))).convert("L")
+        paper = judged.getpixel((10, 10))
+        text = judged.getpixel((150, 55))
+        assert paper > 200
+        assert text < 50
+        low, high = judged.getextrema()
+        assert low < high  # at least two grey levels
+
+    def test_wide_grey_values_in_8bit_range_are_not_scaled(self):
+        # A 32-bit image that holds 8-bit values: 40 must stay 40, not become 0.
+        page = Image.new("I", (64, 64), 200)
+        page.paste(40, (8, 8, 56, 16))
+        assert image_to_base64(page) == self._plain_conversion(page)
+
+    def test_wide_grey_flat_page_does_not_fail(self):
+        # One value everywhere, above 255: there is no range to map.
+        page = Image.new("I;16", (64, 64), 30000)
+        assert image_to_base64(page) == self._plain_conversion(page)
+
+    @pytest.mark.parametrize("mode", ["L", "LA", "RGBA", "P", "1", "CMYK"])
+    def test_other_modes_are_converted_as_before(self, mode):
+        # A gradient with a dark bar, larger than max_dim so the resize runs.
+        grey = Image.linear_gradient("L").resize((1200, 800))
+        grey.paste(10, (100, 100, 1100, 140))
+        page = grey.convert(mode)
+        assert page.mode == mode
+        assert image_to_base64(page) == self._plain_conversion(page)
+
 
 class TestNormalizeForJudge:
     def test_plain_text_unchanged(self):
