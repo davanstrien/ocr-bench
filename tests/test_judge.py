@@ -10,6 +10,7 @@ from ocr_bench.judge import (
     CRITERIA_PROFILES,
     DEFAULT_CRITERIA,
     Comparison,
+    _wide_grey_to_8bit,
     build_comparisons,
     build_messages,
     build_prompt,
@@ -157,16 +158,27 @@ class TestImageToBase64:
         assert judged.getpixel((10, 10)) > 245
         assert judged.getpixel((150, 55)) < 50
 
-    def test_wide_grey_32_bit_values_keep_their_exact_range(self):
-        # 32-bit integers that a 32-bit float cannot tell apart.
+    def test_wide_grey_32_bit_values_are_scaled_exactly(self):
+        # 2**30 - 1 of 2**31 - 1 is just under one half: 127.4999... A 32-bit
+        # float cannot tell 2**30 - 1 from 2**30, and gives 128.
         import numpy as np
 
-        values = np.zeros((64, 64), dtype=np.int32)
-        values[:, 32:] = 2**30 + 64
-        values[:, 48:] = 2**30
-        judged = self._judged(Image.fromarray(values))
-        assert judged.getpixel((8, 8)) < 5  # zero stays black
-        assert judged.getpixel((40, 8)) > 250
+        values = np.array([[0, 2**30 - 1, 2**31 - 1]], dtype=np.int32)
+        scaled = _wide_grey_to_8bit(Image.fromarray(values))
+        assert scaled.mode == "L"
+        assert np.asarray(scaled).tolist() == [[0, 127, 255]]
+
+    def test_wide_grey_page_taller_than_one_strip_is_scaled_as_one_page(self):
+        # The page is converted in strips of rows; every strip uses the range
+        # of the whole page.
+        import numpy as np
+
+        values = np.full((700, 40), 20000, dtype=np.uint16)
+        values[650:, :] = 50000  # the lightest rows are in the last strip
+        scaled = np.asarray(_wide_grey_to_8bit(Image.fromarray(values)))
+        assert scaled.shape == (700, 40)
+        assert set(scaled[:650].ravel().tolist()) == {102}
+        assert set(scaled[650:].ravel().tolist()) == {255}
 
     def test_wide_grey_values_below_zero_use_the_lowest_value_as_black(self):
         import numpy as np

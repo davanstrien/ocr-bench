@@ -20,6 +20,7 @@ from ocr_bench.cli import build_parser
 from ocr_bench.dataset import DatasetError
 from ocr_bench.elo import ComparisonResult
 from ocr_bench.judge import CRITERIA_PROFILES, _normalize_pair, prompt_hash
+from ocr_bench.publish import build_metadata_row
 
 
 class FakeDataset:
@@ -439,12 +440,66 @@ class TestBalancedRerun:
         out = " ".join(capsys.readouterr().out.split())
         assert "To judge more pages anyway, run with --no-adaptive" in out
 
-    def test_no_check_before_the_first_batch_after_a_run_that_hit_its_budget(self):
-        # A budget stops a run in the middle of a batch. Checking the rule at
-        # that point, at every budget stop, would look at it far more often
-        # than one run with no budget does. The run goes on to the end of a
-        # batch and checks there.
-        existing = self._converged_board()
+    def _published_row(self, m_publish) -> dict:
+        """The metadata row a run published, as the next run loads it."""
+        return build_metadata_row(_published_metadata(m_publish))
+
+    @pytest.mark.parametrize("budget", [4, 7, 11, 14, 29])
+    def test_runs_stopped_at_a_budget_stop_where_one_run_stops(self, budget):
+        # One run with no budget meets the rule at the end of its second batch
+        # (30 comparisons). Runs that each stop at a budget stop inside a
+        # batch. The next run finishes that batch before it looks at the rule,
+        # so the chain ends with the same 30 comparisons, not with fewer.
+        one_run = self._converged_board()
+        expected = sorted((r.sample_idx, r.model_a, r.model_b) for r in one_run)
+
+        existing: list[ComparisonResult] = []
+        meta_rows: list[dict] | None = None
+        calls = []
+        for _ in range(12):
+            ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+            judge, m_publish, _ = _run_judge(
+                [*self.FLAGS, "--max-comparisons", str(budget)],
+                ds,
+                ocr,
+                existing=existing,
+                judge=NameOrderJudge(),
+                existing_meta_override=meta_rows,
+            )
+            calls.append(judge.judged)
+            existing = self._stored_results(m_publish)
+            meta_rows = [*(meta_rows or []), self._published_row(m_publish)]
+            if judge.judged == 0:
+                break
+        assert calls[-1] == 0  # the last run found the rule met and judged nothing
+        assert sum(calls) == 30, calls
+        assert sorted((r.sample_idx, r.model_a, r.model_b) for r in existing) == expected
+
+    def test_a_run_stopped_inside_a_batch_is_finished_before_the_rule_is_checked(self):
+        # A Job killed after a checkpoint leaves comparisons that end inside a
+        # batch, and no metadata row for that run. One comparison of the second
+        # batch is missing: the run judges it, then stops at the end of the batch.
+        stored = self._converged_board()[:-1]
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        judge, m_publish, _ = _run_judge(
+            [*self.FLAGS],
+            ds,
+            ocr,
+            existing=stored,
+            judge=NameOrderJudge(),
+            checkpoint_resume=True,
+        )
+        assert judge.judged == 1
+        assert len(m_publish.call_args.args[1].comparison_log) == 30
+
+    @pytest.mark.parametrize("budget_exhausted", [True, False, None])
+    def test_the_check_reads_the_stored_comparisons_not_the_last_metadata_row(
+        self, budget_exhausted
+    ):
+        # The latest metadata row can describe an earlier run: a checkpoint
+        # writes comparisons and no metadata. Whatever that row says, a board
+        # whose comparisons end at the end of a batch and meet the rule makes
+        # no judge call.
         ds, ocr = make_ds(n=40, models=("a", "b", "c"))
         meta_row = {
             "criteria": "default",
@@ -452,25 +507,17 @@ class TestBalancedRerun:
             "judge_text_mode": "normalized",
             "max_ocr_text_len": 2500,
             "judge_image_dim": 1024,
+            "budget_exhausted": budget_exhausted,
         }
-        after_budget_stop, _, _ = _run_judge(
-            [*self.FLAGS],
-            ds,
-            ocr,
-            existing=existing,
-            judge=NameOrderJudge(),
-            existing_meta_override=[{**meta_row, "budget_exhausted": True}],
-        )
-        assert after_budget_stop.judged == 15  # one batch of five pages, then the rule
-        after_own_stop, _, _ = _run_judge(
+        judge, _, _ = _run_judge(
             [*self.FLAGS],
             ds,
             ocr,
             existing=self._converged_board(),
             judge=NameOrderJudge(),
-            existing_meta_override=[{**meta_row, "budget_exhausted": False}],
+            existing_meta_override=[meta_row],
         )
-        assert after_own_stop.judged == 0
+        assert judge.judged == 0
 
     def test_too_few_stored_comparisons_for_the_rule_still_judges(self):
         # Two models: the rule is not checked before 20 comparisons. Twelve
