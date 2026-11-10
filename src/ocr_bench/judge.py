@@ -750,18 +750,20 @@ def judging_order(indices: list[int], seed: int = 42) -> list[int]:
 def display_swapped(seed: int, sample_idx: int, model_a: str, model_b: str) -> bool:
     """Whether the judge sees ``model_b``'s output first (as "Output A").
 
-    A judge favours one position, so each model must be shown first on about
-    half of the pages of each pair. The order of one comparison depends only on
-    the seed, the page and the two model names. It does not depend on which
-    other comparisons are built in the same call, so a run that builds the grid
-    in batches, or resumes, shows every comparison the same way round as a run
-    that builds it in one pass.
+    A judge can favour one position, so each model must be shown first on about
+    half of the pages of each pair. Each comparison is an independent even
+    choice: the split is even in expectation, not forced to be exact.
+
+    The order of one comparison depends only on the seed, the page and the two
+    model names. It does not depend on which other comparisons are built in the
+    same call, so a run that builds the grid in batches, or resumes, shows
+    every comparison the same way round as a run that builds it in one pass.
 
     The model names are sorted first: the same pair on the same page gets the
     same model first whatever the column order.
     """
     first, second = _normalize_pair(model_a, model_b)
-    key = json.dumps(["display-order", seed, sample_idx, first, second])
+    key = json.dumps(["display-order", int(seed), int(sample_idx), first, second])
     shown_first = first if hashlib.sha256(key.encode()).digest()[0] % 2 == 0 else second
     return shown_first != model_a
 
@@ -820,6 +822,12 @@ def build_comparisons(
     """
     col_names = list(ocr_columns.keys())
     model_names = list(ocr_columns.values())
+    # Comparisons, display order and ratings are keyed by model name. Two
+    # columns with one name cannot be told apart (the dataset loaders rename
+    # such columns before they get here).
+    if len(set(model_names)) != len(model_names):
+        repeated = sorted({name for name in model_names if model_names.count(name) > 1})
+        raise ValueError(f"Two OCR columns have the same model name: {', '.join(repeated)}")
     pairs = list(combinations(range(len(col_names)), 2))
     if include_pairs is not None:
         normalized_include = {_normalize_pair(a, b) for a, b in include_pairs}

@@ -1233,6 +1233,53 @@ class TestDisplayOrder:
                 42, page, "beta", "alpha"
             )
 
+    def test_the_order_for_a_seed_page_and_pair_is_fixed(self):
+        # Results repos record the seed, so the order must not change between
+        # versions, platforms or processes. These values are the contract.
+        assert [display_swapped(42, page, "model-a", "model-b") for page in range(12)] == [
+            False,
+            True,
+            False,
+            False,
+            True,
+            True,
+            False,
+            False,
+            False,
+            True,
+            False,
+            True,
+        ]
+        odd_names = [
+            display_swapped(7, page, 'org/Modèle "x"', "tesseract-5") for page in range(12)
+        ]
+        assert odd_names == [
+            True,
+            True,
+            True,
+            False,
+            False,
+            False,
+            False,
+            False,
+            True,
+            False,
+            True,
+            True,
+        ]
+
+    def test_integer_types_from_numpy_give_the_same_order(self):
+        np = pytest.importorskip("numpy")
+        for page in range(20):
+            assert display_swapped(np.int64(42), np.int64(page), "a", "b") == display_swapped(
+                42, page, "a", "b"
+            )
+
+    def test_two_columns_with_one_model_name_are_refused(self):
+        dataset = [{"image": Image.new("RGB", (8, 8)), "col_a": "some text", "col_b": "other"}]
+        with pytest.raises(ValueError, match="same model name: twin"):
+            build_comparisons(dataset, {"col_a": "twin", "col_b": "twin"}, min_chars=0)
+
     def test_seed_changes_the_order(self):
         with_42 = [display_swapped(42, page, "alpha", "beta") for page in range(200)]
         with_43 = [display_swapped(43, page, "alpha", "beta") for page in range(200)]

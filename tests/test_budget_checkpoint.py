@@ -1159,9 +1159,9 @@ class TestDisplayOrderAcrossRuns:
     def test_published_rows_record_what_the_judge_saw(self):
         judge, m_publish = self._run([])
         published = _published_display_order(m_publish)
-        assert set(published.values()) == {"a", "b"}
+        assert set(published.values()) == {"A", "B"}
         assert published == {
-            key: "b" if model_b_first else "a"
+            key: "B" if model_b_first else "A"
             for key, model_b_first in judge.saw_model_b_first.items()
         }
 
@@ -1202,3 +1202,49 @@ class TestDisplayOrderAcrossRuns:
         metadata = _published_metadata(m_publish)
         assert metadata.adaptive is adaptive
         assert metadata.ocr_bench_version == __version__
+
+    def test_a_refit_with_nothing_to_judge_also_records_run_mode_and_version(self):
+        from ocr_bench import __version__
+
+        ds, ocr = make_ds(n=4, models=("a", "b"))
+        existing = [
+            ComparisonResult(
+                sample_idx=page, model_a="model-a", model_b="model-b", winner="A", shown_first="A"
+            )
+            for page in range(4)
+        ]
+        judge, m_publish, _ = _run_judge(
+            ["--no-adaptive", "--checkpoint-every", "0"], ds, ocr, existing=existing
+        )
+        assert judge.judged == 0
+        metadata = _published_metadata(m_publish)
+        assert metadata.adaptive is False
+        assert metadata.ocr_bench_version == __version__
+
+    def test_resume_says_when_stored_comparisons_have_no_display_order(self, capsys):
+        # Rows from a version that did not record the order: the user cannot
+        # see from the board that their order may be unbalanced.
+        existing = [
+            ComparisonResult(sample_idx=page, model_a="model-a", model_b="model-b", winner="tie")
+            for page in range(20)
+        ]
+        self._run([], existing=existing)
+        out = " ".join(capsys.readouterr().out.split())  # undo console line wrapping
+        assert "20 of them have no recorded display order" in out
+        assert "--full-rejudge" in out
+
+    def test_resume_is_quiet_when_every_judged_comparison_has_its_display_order(self, capsys):
+        existing = [
+            ComparisonResult(
+                sample_idx=page, model_a="model-a", model_b="model-b", winner="tie", shown_first="A"
+            )
+            for page in range(19)
+        ]
+        # An auto-tie has no display order and is not a row from an older version.
+        existing.append(
+            ComparisonResult(
+                sample_idx=19, model_a="model-a", model_b="model-b", winner="tie", agreement="auto"
+            )
+        )
+        self._run([], existing=existing)
+        assert "no recorded display order" not in " ".join(capsys.readouterr().out.split())

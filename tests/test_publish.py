@@ -807,24 +807,26 @@ class TestLoadExistingComparisons:
         mock_ds = MagicMock()
         mock_ds.__iter__ = lambda self: iter(
             [
-                {**row, "shown_first": "b"},
-                {**row, "sample_idx": 1, "shown_first": "a"},
-                # An auto-tie, and a row written before the field existed.
+                {**row, "shown_first": "B"},
+                {**row, "sample_idx": 1, "shown_first": "A"},
+                # An auto-tie, a row written before the field existed, and a
+                # value that is not a display order.
                 {**row, "sample_idx": 2, "shown_first": ""},
                 {**row, "sample_idx": 3, "shown_first": None},
                 {**row, "sample_idx": 4},
+                {**row, "sample_idx": 5, "shown_first": "tie"},
             ]
         )
         mock_load.return_value = mock_ds
 
         results = load_existing_comparisons("user/results")
-        assert [r.shown_first for r in results] == ["b", "a", "", "", ""]
+        assert [r.shown_first for r in results] == ["B", "A", "", "", "", ""]
         # The stored winner is already un-swapped: reading the display order
         # back must not make compute_elo flip it again.
         assert not any(r.swapped for r in results)
         board = compute_elo(results, ["ModelA", "ModelB"], n_bootstrap=0)
-        assert board.wins["ModelA"] == 5
-        assert [r["shown_first"] for r in board.comparison_log] == ["b", "a", "", "", ""]
+        assert board.wins["ModelA"] == 6
+        assert [r["shown_first"] for r in board.comparison_log] == ["B", "A", "", "", "", ""]
 
     @patch("ocr_bench.publish.load_dataset")
     def test_backward_compat_missing_truncation_flags(self, mock_load):

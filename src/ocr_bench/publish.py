@@ -20,7 +20,7 @@ from ocr_bench.adaptive import (
     practical_preferences,
 )
 from ocr_bench.dataset import DatasetError
-from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo
+from ocr_bench.elo import ComparisonResult, Leaderboard, ShownFirst, compute_elo
 from ocr_bench.judge import DEFAULT_MIN_CHARS, MAX_IMAGE_DIM, MAX_OCR_TEXT_LENGTH
 from ocr_bench.run import MODEL_REGISTRY
 
@@ -238,6 +238,15 @@ def _config_is_absent(repo_id: str, config_name: str) -> bool:
     return not any(path.startswith(f"{config_name}/") for path in files)
 
 
+def _stored_shown_first(value: object) -> ShownFirst:
+    """The display order of a stored row; "" for a missing or unknown value."""
+    if value == "A":
+        return "A"
+    if value == "B":
+        return "B"
+    return ""
+
+
 def load_existing_comparisons(repo_id: str, revision: str | None = None) -> list[ComparisonResult]:
     """Load existing comparisons without failing open on uncertain read errors.
 
@@ -261,7 +270,7 @@ def load_existing_comparisons(repo_id: str, revision: str | None = None) -> list
                     reason=row.get("reason", ""),
                     agreement=row.get("agreement", "1/1"),
                     swapped=False,
-                    shown_first=row.get("shown_first") or "",
+                    shown_first=_stored_shown_first(row.get("shown_first")),
                     text_a=row.get("text_a", ""),
                     text_b=row.get("text_b", ""),
                     col_a=row.get("col_a", ""),

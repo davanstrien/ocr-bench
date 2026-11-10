@@ -14,6 +14,7 @@ from scipy.optimize import minimize
 INITIAL_ELO: float = 1500.0
 
 Winner = Literal["A", "B", "tie"]
+ShownFirst = Literal["A", "B", ""]
 
 
 # A page-level bootstrap has few distinct resamples on a handful of pages, and
@@ -35,10 +36,12 @@ class ComparisonResult:
     # (Output A = model_b). Stored rows hold the un-swapped winner, so a result
     # loaded from the Hub always has ``swapped=False``.
     swapped: bool = False
-    # Which model's output the judge saw first, as "Output A": "a" (model_a) or
-    # "b" (model_b). "" when no judge saw the pair (an auto-tie) or the row
-    # predates this field. Stored with the comparison; never used to un-swap.
-    shown_first: str = ""
+    # Which model's output the judge saw first, as "Output A": "A" (model_a) or
+    # "B" (model_b), the same letters as ``winner``, so ``winner == shown_first``
+    # means the first output shown won. "" when no judge saw the pair (an
+    # auto-tie) or the row predates this field. Stored with the comparison;
+    # never used to un-swap.
+    shown_first: ShownFirst = ""
     text_a: str = ""
     text_b: str = ""
     col_a: str = ""

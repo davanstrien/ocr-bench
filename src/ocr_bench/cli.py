@@ -41,7 +41,7 @@ from ocr_bench.dataset import (
     load_flat_dataset,
     require_dataset_repo,
 )
-from ocr_bench.elo import ComparisonResult, Leaderboard, compute_elo
+from ocr_bench.elo import ComparisonResult, Leaderboard, ShownFirst, compute_elo
 from ocr_bench.integrity import (
     SENTINEL_FLAG_RATE,
     ModelCoverage,
@@ -871,6 +871,14 @@ def _trim_to_budget(
     return kept, True
 
 
+def _shown_first(comp: Comparison) -> ShownFirst:
+    """Which model's output the judge saw first: "A" (model_a), "B" (model_b), or ""."""
+    if comp.auto_result is not None:
+        # An auto-tie never reached a judge, so it has no display order.
+        return ""
+    return "B" if comp.swapped else "A"
+
+
 def _convert_results(
     comparisons: list[Comparison],
     aggregated: list[dict],
@@ -893,8 +901,7 @@ def _convert_results(
                 reason=result.get("reason", ""),
                 agreement=result.get("agreement", "1/1"),
                 swapped=comp.swapped,
-                # An auto-tie never reached a judge, so it has no display order.
-                shown_first="" if comp.auto_result is not None else ("b" if comp.swapped else "a"),
+                shown_first=_shown_first(comp),
                 text_a=comp.text_a,
                 text_b=comp.text_b,
                 col_a=comp.col_a,
@@ -1588,6 +1595,17 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     f"comparisons across {len(skip_samples)} model pairs — skipping "
                     "already-judged (pair, sample) combinations, topping up the rest."
                 )
+                no_display_order = sum(
+                    1 for r in existing_results if r.agreement != "auto" and not r.shown_first
+                )
+                if no_display_order:
+                    console.print(
+                        f"[yellow]Note:[/yellow] {no_display_order} of them have no recorded "
+                        "display order: an earlier ocr-bench version judged them. If that "
+                        "run was adaptive or was resumed, a pair of models could be shown the "
+                        "same way round on most of its pages. They are kept as they are; "
+                        "[bold]--full-rejudge[/bold] judges them again."
+                    )
             else:
                 console.print(
                     "\nNo existing comparisons match the current model grid; "

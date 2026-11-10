@@ -736,7 +736,7 @@ class TestConvertResults:
         assert results[0].truncated_a is True
         assert results[0].truncated_b is False
 
-    @pytest.mark.parametrize(("swapped", "shown_first"), [(False, "a"), (True, "b")])
+    @pytest.mark.parametrize(("swapped", "shown_first"), [(False, "A"), (True, "B")])
     def test_display_order_recorded_for_a_judged_comparison(self, swapped, shown_first):
         comp = _make_comparison()
         comp.swapped = swapped
