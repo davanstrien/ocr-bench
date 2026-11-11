@@ -10,6 +10,7 @@ from ocr_bench.judge import (
     CRITERIA_PROFILES,
     DEFAULT_CRITERIA,
     Comparison,
+    _wide_grey_to_8bit,
     build_comparisons,
     build_messages,
     build_prompt,
@@ -67,6 +68,173 @@ class TestImageToBase64:
         decoded = base64.b64decode(b64)
         result = Image.open(io.BytesIO(decoded))
         assert result.size == (200, 100)
+
+    @staticmethod
+    def _scan_page(mode: str) -> Image.Image:
+        """A 300x200 greyscale page in ``mode``: paper at 30000, two text lines at 2000."""
+        import numpy as np
+
+        values = np.full((200, 300), 30000, dtype=np.uint16)
+        values[50:60, 20:280] = 2000
+        values[100:110, 20:280] = 2000
+        if mode in ("I", "F"):
+            return Image.fromarray(values).convert(mode)
+        byte_order = {"I;16B": ">u2", "I;16N": "=u2"}.get(mode, "<u2")
+        return Image.frombytes(mode, (300, 200), values.astype(byte_order).tobytes())
+
+    @staticmethod
+    def _judged(image: Image.Image) -> Image.Image:
+        """The greyscale image the judge receives for ``image``."""
+        import base64
+        import io
+
+        return Image.open(io.BytesIO(base64.b64decode(image_to_base64(image)))).convert("L")
+
+    @staticmethod
+    def _plain_conversion(image: Image.Image, max_dim: int = 1024) -> str:
+        """The JPEG for a mode that needs no scaling: convert, resize, encode."""
+        import base64
+        import io
+
+        image = image.convert("RGB")
+        if max(image.size) > max_dim:
+            ratio = max_dim / max(image.size)
+            new_size = (int(image.width * ratio), int(image.height * ratio))
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        image.save(buf, format="JPEG", quality=85)
+        return base64.b64encode(buf.getvalue()).decode()
+
+    @pytest.mark.parametrize("mode", ["I;16", "I;16L", "I;16B", "I;16N", "I", "F"])
+    def test_wide_grey_page_keeps_dark_text_on_light_paper(self, mode):
+        # convert("RGB") alone clips every value above 255 to white.
+        import base64
+        import io
+
+        page = self._scan_page(mode)
+        assert page.mode == mode
+
+        b64 = image_to_base64(page)
+
+        judged = Image.open(io.BytesIO(base64.b64decode(b64))).convert("L")
+        paper = judged.getpixel((10, 10))
+        text = judged.getpixel((150, 55))
+        assert paper > 200
+        assert text < 50
+        low, high = judged.getextrema()
+        assert low < high  # at least two grey levels
+
+    def test_wide_grey_values_in_8bit_range_are_not_scaled(self):
+        # A 32-bit image that holds 8-bit values: 40 must stay 40, not become 0.
+        page = Image.new("I", (64, 64), 200)
+        page.paste(40, (8, 8, 56, 16))
+        assert image_to_base64(page) == self._plain_conversion(page)
+
+    def test_wide_grey_flat_page_stays_a_light_page(self):
+        # One value everywhere, above 255: the lightest value is white.
+        page = Image.new("I;16", (64, 64), 30000)
+        assert self._judged(page).getextrema() == (255, 255)
+
+    def test_wide_grey_blank_page_with_a_faint_mark_stays_light(self):
+        # A blank page with show-through 5% darker than the paper. Stretching
+        # the darkest pixel to black would turn the faint mark into ink.
+        import numpy as np
+
+        values = np.full((200, 300), 60000, dtype=np.uint16)
+        values[80:120, 40:260] = 57000
+        judged = self._judged(Image.fromarray(values))
+        paper = judged.getpixel((10, 10))
+        mark = judged.getpixel((150, 100))
+        assert paper > 245
+        assert 230 < mark < paper
+
+    def test_wide_grey_12_bit_values_in_a_16_bit_file_are_readable(self):
+        # A fixed division by 256 would leave such a page almost black.
+        import numpy as np
+
+        values = np.full((200, 300), 3800, dtype=np.uint16)
+        values[50:60, 20:280] = 400
+        judged = self._judged(Image.fromarray(values))
+        assert judged.getpixel((10, 10)) > 245
+        assert judged.getpixel((150, 55)) < 50
+
+    def test_wide_grey_32_bit_values_are_scaled_exactly(self):
+        # 2**30 - 1 of 2**31 - 1 is just under one half: 127.4999... A 32-bit
+        # float cannot tell 2**30 - 1 from 2**30, and gives 128.
+        import numpy as np
+
+        values = np.array([[0, 2**30 - 1, 2**31 - 1]], dtype=np.int32)
+        scaled = _wide_grey_to_8bit(Image.fromarray(values))
+        assert scaled.mode == "L"
+        assert np.asarray(scaled).tolist() == [[0, 127, 255]]
+
+    def test_wide_grey_page_taller_than_one_strip_is_scaled_as_one_page(self):
+        # The page is converted in strips of rows; every strip uses the range
+        # of the whole page.
+        import numpy as np
+
+        values = np.full((700, 40), 20000, dtype=np.uint16)
+        values[650:, :] = 50000  # the lightest rows are in the last strip
+        scaled = np.asarray(_wide_grey_to_8bit(Image.fromarray(values)))
+        assert scaled.shape == (700, 40)
+        assert set(scaled[:650].ravel().tolist()) == {102}
+        assert set(scaled[650:].ravel().tolist()) == {255}
+
+    def test_wide_grey_values_below_zero_use_the_lowest_value_as_black(self):
+        import numpy as np
+
+        values = np.array([[-30000, 0, 30000]], dtype=np.int32)
+        scaled = np.asarray(_wide_grey_to_8bit(Image.fromarray(values)))
+        # Zero is half way between the lowest and the highest value.
+        assert scaled.tolist() == [[0, 128, 255]]
+
+    def test_wide_grey_values_are_rounded_to_the_nearest_level(self):
+        import numpy as np
+
+        # 40000 of 65535 is 155.64 levels; 10000 is 38.91.
+        values = np.array([[0, 10000, 40000, 65535]], dtype=np.uint16)
+        scaled = np.asarray(_wide_grey_to_8bit(Image.fromarray(values)))
+        assert scaled.tolist() == [[0, 39, 156, 255]]
+
+    def test_wide_grey_float_pixels_that_are_not_finite(self):
+        import numpy as np
+
+        values = np.array([[2000.0, np.nan, np.inf, -np.inf, 30000.0, 15000.0]], dtype=np.float32)
+        scaled = np.asarray(_wide_grey_to_8bit(Image.fromarray(values)))
+        # Not a number: black. Infinite: white or black. The range comes from
+        # the finite pixels (0 to 30000, zero stays black).
+        assert scaled.tolist() == [[17, 0, 255, 0, 255, 128]]
+
+    def test_wide_grey_float_page_takes_its_range_from_every_strip(self):
+        # The lightest value is in the first strip, the darkest in the last,
+        # and a whole strip in between has no finite pixel.
+        import numpy as np
+
+        values = np.full((800, 4), 20000.0, dtype=np.float32)
+        values[0, :] = 40000.0
+        values[256:512, :] = np.nan
+        values[799, :] = -40000.0
+        scaled = np.asarray(_wide_grey_to_8bit(Image.fromarray(values)))
+        assert scaled[0].tolist() == [255] * 4
+        assert scaled[799].tolist() == [0] * 4
+        assert scaled[100].tolist() == [191] * 4  # 60000 of 80000
+        assert scaled[300].tolist() == [0] * 4
+
+    def test_wide_grey_float_page_with_no_finite_pixel_does_not_fail(self):
+        import numpy as np
+
+        page = Image.fromarray(np.full((8, 8), np.nan, dtype=np.float32))
+        assert _wide_grey_to_8bit(page) is page
+        assert isinstance(image_to_base64(page), str)
+
+    @pytest.mark.parametrize("mode", ["L", "LA", "RGBA", "P", "1", "CMYK"])
+    def test_other_modes_are_converted_as_before(self, mode):
+        # A gradient with a dark bar, larger than max_dim so the resize runs.
+        grey = Image.linear_gradient("L").resize((1200, 800))
+        grey.paste(10, (100, 100, 1100, 140))
+        page = grey.convert(mode)
+        assert page.mode == mode
+        assert image_to_base64(page) == self._plain_conversion(page)
 
 
 class TestNormalizeForJudge:

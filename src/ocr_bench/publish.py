@@ -74,11 +74,18 @@ class EvalMetadata:
     max_comparisons: int | None = None
     budget_exhausted: bool = False
     from_prs: bool = False
-    # model → count of error-sentinel outputs excluded from judging (issue #46).
+    # model → count of error-sentinel outputs in the judged sample. They are
+    # excluded from judging (issue #46).
     failed_outputs: dict[str, int] = field(default_factory=dict)
-    # All-sentinel models. They remain visible in the published data but must
-    # not receive an ordinary ELO or leaderboard rank.
+    # Models whose every output in the judged sample is an error sentinel. They
+    # remain visible in the published data but must not receive an ordinary ELO
+    # or leaderboard rank.
     failed_models: list[str] = field(default_factory=list)
+    # Which rows ``failed_outputs`` and ``failed_models`` are counted over.
+    # ``judge`` counts over the judged sample and records "sample". A row with
+    # no value was written before this field: its counts are over every row of
+    # the source dataset.
+    failed_outputs_scope: str = "sample"
     # model → {"sampled_pages", "ranked_pages", "sentinel_pages"}: how many pages
     # of the judged sample its rating rests on (see integrity.ModelCoverage).
     # Reporting only; not part of the resume provenance.
@@ -449,6 +456,7 @@ def build_metadata_row(metadata: EvalMetadata) -> dict:
         "from_prs": metadata.from_prs,
         "failed_outputs": json.dumps(metadata.failed_outputs),
         "failed_models": json.dumps(metadata.failed_models),
+        "failed_outputs_scope": metadata.failed_outputs_scope,
         "model_coverage": json.dumps(metadata.model_coverage, sort_keys=True),
         "criteria": metadata.criteria,
         "prompt_hash": metadata.prompt_hash,
@@ -730,7 +738,8 @@ def _build_readme(
             "## ⚠ Failed outputs",
             "",
             "The models below emitted error sentinels (e.g. `[OCR ERROR]`, "
-            "`[OCR FAILED]`) instead of transcriptions on some pages — usually a "
+            "`[OCR FAILED]`) instead of transcriptions on some pages of the judged "
+            "sample — usually a "
             "crashed or misconfigured run, **not** poor OCR quality. Those outputs "
             "were **excluded from judging**, so a high count means the model did "
             "not produce comparable output on this corpus. Do not read a flagged "

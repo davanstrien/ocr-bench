@@ -850,25 +850,33 @@ def _merge_auto_ties(comparisons: list[Comparison], judged: list[dict]) -> list[
 def _trim_to_budget(
     comparisons: list[Comparison], judge_budget: int
 ) -> tuple[list[Comparison], bool]:
-    """Cap judged pairs at ``judge_budget`` while keeping every auto-tie.
+    """Cut ``comparisons`` after the last judged pair that fits ``judge_budget``.
 
-    Auto-ties cost no judge call, so they never count against the budget and
-    are always retained (they are real results that must still reach the
-    leaderboard). Returns the trimmed list and whether any judged pair was
-    dropped to fit the budget.
+    ``comparisons`` is in visiting order, and a budget stops the run at one
+    point in that order. Every comparison up to and including the last judged
+    pair that fits the budget is kept, auto-ties included. Every comparison
+    after it is dropped, auto-ties included. An auto-tie costs no judge call,
+    but one from a page the run did not reach would give its pair ties, and
+    its two models pages, from a part of the sample where no other pair was
+    judged. When no judged pair fits the budget, nothing is kept.
+
+    A list with at most ``judge_budget`` judged pairs is returned unchanged.
+    Returns the trimmed list and whether any judged pair was dropped to fit
+    the budget.
     """
     judgeable = sum(c.auto_result is None for c in comparisons)
     if judgeable <= judge_budget:
         return comparisons, False
-    kept: list[Comparison] = []
-    remaining = judge_budget
-    for comp in comparisons:
+    judged_kept = 0
+    keep_count = 0  # length of the leading part of the list that is kept
+    for position, comp in enumerate(comparisons):
         if comp.auto_result is not None:
-            kept.append(comp)
-        elif remaining > 0:
-            kept.append(comp)
-            remaining -= 1
-    return kept, True
+            continue
+        if judged_kept == judge_budget:
+            break
+        judged_kept += 1
+        keep_count = position + 1
+    return comparisons[:keep_count], True
 
 
 def _shown_first(comp: Comparison) -> ShownFirst:
@@ -984,6 +992,17 @@ def _string_list(value: object) -> list[str] | None:
     if len(strings) != len(value):
         return None
     return strings
+
+
+# Printed when a run finds that the stored comparisons need no more judging.
+_ALREADY_MEETS_STOPPING_RULE = (
+    "[green]Existing comparisons already meet the adaptive stopping criteria.[/green]"
+)
+# Added in balanced mode. Targeted mode cannot be combined with --no-adaptive.
+_HOW_TO_JUDGE_MORE = (
+    " To judge more pages anyway, run with [bold]--no-adaptive[/bold] (add "
+    "[bold]--max-comparisons N[/bold] to judge N more comparisons)."
+)
 
 
 def _previous_judge_hint(existing_meta_rows: list[dict], requested_models: list[str] | None) -> str:
@@ -1393,19 +1412,29 @@ def cmd_judge(args: argparse.Namespace) -> None:
     for col, model in ocr_columns.items():
         console.print(f"  {col} → {model}")
 
+    # The judged sample: the sentinel counts, the text-cap warning, the
+    # fingerprints and the coverage report use it in this order. judge visits
+    # it in judging_order (below).
+    judged_sample = sample_indices(len(ds), args.max_samples, args.seed)
+
     # --- Input integrity: sentinel outputs (issue #46) ---
     # Error sentinels (e.g. "[OCR ERROR]") are excluded from judging by
     # build_comparisons; here we count them per model for the metadata + card
-    # and warn loudly when a model's run largely failed on this corpus.
+    # and warn loudly when a model's run largely failed on this corpus. The
+    # counts are over the judged sample, the only rows that can be judged, so
+    # they agree with the coverage report. An output on a row outside the
+    # sample does not change a model's status.
     model_stats = compute_model_stats(
         ds,
         ocr_columns,
         max_ocr_text_len=args.max_ocr_text_len,
         normalize=normalize,
+        indices=judged_sample,
     )
     failed_outputs = failed_output_counts(model_stats)
-    # A fully sentinel-backed run has no comparable OCR output at all. Keep it
-    # visible as FAILED, but never assign it an arbitrary disconnected ELO/rank.
+    # A model whose every sampled output is a sentinel has no comparable OCR
+    # output to judge. Keep it visible as FAILED, but never assign it an
+    # arbitrary disconnected ELO/rank.
     # Partial failures remain rankable on their successful outputs with a
     # degraded warning, while the audit still blocks rates over its threshold.
     failed_models = sorted(
@@ -1418,21 +1447,18 @@ def cmd_judge(args: argparse.Namespace) -> None:
             else:
                 consequence = "its rank uses successful outputs only and is marked degraded"
             console.print(
-                f"[yellow]⚠ {stat.model}: {stat.n_sentinel}/{stat.n_rows} outputs are "
-                f"error sentinels ({stat.sentinel_rate:.0%}) — excluded from judging; "
-                f"{consequence}.[/yellow]"
+                f"[yellow]⚠ {stat.model}: {stat.n_sentinel}/{stat.n_rows} outputs in the "
+                f"judged sample are error sentinels ({stat.sentinel_rate:.0%}) — excluded "
+                f"from judging; {consequence}.[/yellow]"
             )
         elif stat.n_sentinel:
             # Under the warning rate, but its rank still rests on fewer pages.
             console.print(
-                f"Note: {stat.model}: {stat.n_sentinel}/{stat.n_rows} outputs are error "
-                f"sentinels ({stat.sentinel_rate:.1%}). They are excluded from judging, "
-                "so its rank leaves out those pages."
+                f"Note: {stat.model}: {stat.n_sentinel}/{stat.n_rows} outputs in the judged "
+                f"sample are error sentinels ({stat.sentinel_rate:.1%}). They are excluded "
+                "from judging, so its rank leaves out those pages."
             )
 
-    # The judged sample: the text-cap warning, the fingerprints and the coverage
-    # report use it in this order. judge visits it in judging_order (below).
-    judged_sample = sample_indices(len(ds), args.max_samples, args.seed)
     _warn_text_cap(ds, ocr_columns, judged_sample, args.max_ocr_text_len, normalize)
 
     # Stable ordering matters when ELOs tie: adjacency drives targeted sampling.
@@ -1678,6 +1704,24 @@ def cmd_judge(args: argparse.Namespace) -> None:
         if max_comparisons is not None:
             console.print(f"Budget: stop after {max_comparisons} comparisons")
 
+        def _stopping_decisions(
+            results: list[ComparisonResult],
+        ) -> tuple[Leaderboard, list[AdjacentPairDecision]]:
+            """Fit the board on ``results`` and classify its adjacent pairs.
+
+            The run stops when no pair is unresolved. The check before the
+            first batch and the check after each batch both call this, so they
+            apply one rule.
+            """
+            fitted_board = compute_elo(results, model_names)
+            pair_decisions = _decisions_for_board(
+                fitted_board,
+                results,
+                size_tie_ratio=args.size_tie_ratio,
+                size_tie_min_samples=args.size_tie_min_samples,
+            )
+            return fitted_board, pair_decisions
+
         new_results: list[ComparisonResult] = []
         total_comparisons = 0  # judge calls made this run (auto-ties excluded)
         last_checkpoint = 0
@@ -1703,13 +1747,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
             # records completed (pair, sample) work, not the active pair set;
             # deriving it from the current board prevents a resumed targeted run
             # from filling every pair it intentionally deprioritised previously.
-            resumed_board = compute_elo(existing_results, model_names)
-            resumed_decisions = _decisions_for_board(
-                resumed_board,
-                existing_results,
-                size_tie_ratio=args.size_tie_ratio,
-                size_tie_min_samples=args.size_tie_min_samples,
-            )
+            _, resumed_decisions = _stopping_decisions(existing_results)
             active_pairs = unresolved_pairs(resumed_decisions)
             if active_pairs:
                 console.print(
@@ -1717,10 +1755,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                     f"adjacent pair(s), not all {n_pairs} pairs.[/dim]"
                 )
             else:
-                console.print(
-                    "[green]Existing comparisons already meet the adaptive "
-                    "stopping criteria.[/green]"
-                )
+                console.print(_ALREADY_MEETS_STOPPING_RULE)
                 all_indices = []
         elif adaptive_strategy == "targeted" and existing_results and not can_resume_targeted:
             missing = sorted(current_models - existing_models)
@@ -1733,6 +1768,12 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 "  [dim]Model grid changed or its balanced warm-up is incomplete; "
                 f"continuing balanced allocation ({reason}).[/dim]"
             )
+
+        # Balanced mode looks at the stopping rule on the stored comparisons
+        # once, before it judges anything (see the loop). Targeted mode did so
+        # above, when it rebuilt its allocation.
+        stored_pages = {result.sample_idx for result in existing_results}
+        looked_at_stored_results = adaptive_strategy != "balanced"
 
         for batch_num, batch_start in enumerate(range(0, len(all_indices), batch_samples)):
             # Global budget: stop before a batch we can't afford at all.
@@ -1757,11 +1798,39 @@ def cmd_judge(args: argparse.Namespace) -> None:
             if not batch_comps:
                 continue
 
-            batch_auto = sum(c.auto_result is not None for c in batch_comps)
+            # This is the first batch with work left: every batch before it is
+            # complete. When every stored comparison is on a page of those
+            # earlier batches, the stored comparisons are exactly the first
+            # batches of the visiting order, and they end at the end of a
+            # batch: the point where a run looks at the stopping rule. Look at
+            # it now, so a rerun of a board that already meets the rule makes
+            # no judge call.
+            #
+            # In every other case the batch is judged first and the rule is
+            # checked at its end, as in a run that was never stopped:
+            # - a batch that is partly judged (a run stopped inside it at a
+            #   budget, or a model was added);
+            # - a stored comparison on a later page (an earlier batch whose
+            #   judge calls all failed, or results stored in another visiting
+            #   order).
+            # A look at the rule in the middle of a batch at every stop would
+            # be more looks than one run takes, and more looks stop more
+            # boards early.
+            if not looked_at_stored_results:
+                looked_at_stored_results = True
+                pages_of_earlier_batches = set(all_indices[:batch_start])
+                if len(existing_results) >= min_before_check and stored_pages.issubset(
+                    pages_of_earlier_batches
+                ):
+                    _, stored_decisions = _stopping_decisions(existing_results)
+                    if not unresolved_pairs(stored_decisions):
+                        console.print(_ALREADY_MEETS_STOPPING_RULE + _HOW_TO_JUDGE_MORE)
+                        break
 
-            # Trim the final batch to land exactly on the budget: cap judged
-            # pairs at the remaining budget but keep auto-ties (they cost no
-            # judge call), so the run stops cleanly without dropping real ties.
+            # Trim the final batch to land exactly on the budget: the run stops
+            # at the last judged pair that fits. The rest of the batch is
+            # dropped, auto-ties included, so no pair gets ties from pages
+            # where the other pairs were not judged.
             if max_comparisons is not None:
                 batch_comps, hit_budget = _trim_to_budget(
                     batch_comps, max_comparisons - total_comparisons
@@ -1769,6 +1838,8 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 if hit_budget:
                     budget_exhausted = True
 
+            # Counted after the trim, which can drop auto-ties.
+            batch_auto = sum(c.auto_result is not None for c in batch_comps)
             n_auto_total += batch_auto
             batch_results = _judge_batch(batch_comps)
             new_results.extend(batch_results)
@@ -1796,14 +1867,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
                 break
 
             if total >= min_before_check:
-                accumulated = existing_results + new_results
-                board = compute_elo(accumulated, model_names)
-                decisions = _decisions_for_board(
-                    board,
-                    accumulated,
-                    size_tie_ratio=args.size_tie_ratio,
-                    size_tie_min_samples=args.size_tie_min_samples,
-                )
+                board, decisions = _stopping_decisions(existing_results + new_results)
 
                 if board.elo_ci:
                     console.print("  CI gaps:")
@@ -1874,9 +1938,10 @@ def cmd_judge(args: argparse.Namespace) -> None:
             normalize=normalize,
         )
 
-        # Global budget: judge at most N pairs, keeping every auto-tie (they
-        # cost no judge call). The pairs built last are dropped; with the random
-        # visiting order above, they come from random pages.
+        # Global budget: judge at most N pairs. The run stops at the last
+        # judged pair that fits; the comparisons built after it are dropped,
+        # auto-ties included. With the random visiting order above, they come
+        # from random pages.
         if max_comparisons is not None:
             comparisons, hit_budget = _trim_to_budget(comparisons, max_comparisons)
             if hit_budget:

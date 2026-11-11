@@ -20,6 +20,7 @@ from ocr_bench.cli import build_parser
 from ocr_bench.dataset import DatasetError
 from ocr_bench.elo import ComparisonResult
 from ocr_bench.judge import CRITERIA_PROFILES, _normalize_pair, prompt_hash
+from ocr_bench.publish import build_metadata_row
 
 
 class FakeDataset:
@@ -377,6 +378,375 @@ class TestTargetedAdaptive:
             )
 
 
+class NameOrderJudge(FakeJudge):
+    """A judge that always prefers the model whose name sorts first."""
+
+    def judge(self, comparisons):
+        outputs = super().judge(comparisons)
+        for comp, output in zip(comparisons, outputs, strict=True):
+            model_a_is_better = comp.model_a < comp.model_b
+            # The verdict names the displayed position. With ``swapped``, the
+            # judge saw model_b's output as "Output A".
+            model_a_shown_as_a = not comp.swapped
+            output["winner"] = "A" if model_a_is_better == model_a_shown_as_a else "B"
+        return outputs
+
+
+class TestBalancedRerun:
+    """Balanced mode checks the stopping rule on the stored comparisons first."""
+
+    FLAGS = ("--checkpoint-every", "0")
+
+    @staticmethod
+    def _stored_results(m_publish) -> list[ComparisonResult]:
+        """The published comparisons, as a later run loads them."""
+        return [
+            ComparisonResult(
+                sample_idx=row["sample_idx"],
+                model_a=row["model_a"],
+                model_b=row["model_b"],
+                winner=row["winner"],
+            )
+            for row in m_publish.call_args.args[1].comparison_log
+        ]
+
+    def _converged_board(self) -> list[ComparisonResult]:
+        """Run three models to convergence: 2 of the 8 batches are enough."""
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        judge, m_publish, _ = _run_judge([*self.FLAGS], ds, ocr, judge=NameOrderJudge())
+        assert judge.judged == 30  # stopped by the rule, not at the end of the sample
+        return self._stored_results(m_publish)
+
+    def test_rerun_of_a_converged_board_makes_no_judge_call(self, capsys):
+        existing = self._converged_board()
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        capsys.readouterr()
+
+        judge, m_publish, _ = _run_judge(
+            [*self.FLAGS], ds, ocr, existing=existing, judge=NameOrderJudge()
+        )
+
+        assert judge.judged == 0
+        out = " ".join(capsys.readouterr().out.split())  # undo console line wrapping
+        assert "Existing comparisons already meet the adaptive stopping criteria." in out
+        assert len(m_publish.call_args.args[1].comparison_log) == 30
+        assert _published_metadata(m_publish).total_comparisons == 0
+
+    def test_the_message_says_how_to_judge_more(self, capsys):
+        existing = self._converged_board()
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        capsys.readouterr()
+        _run_judge([*self.FLAGS], ds, ocr, existing=existing, judge=NameOrderJudge())
+        out = " ".join(capsys.readouterr().out.split())
+        assert "To judge more pages anyway, run with --no-adaptive" in out
+
+    def _published_row(self, m_publish) -> dict:
+        """The metadata row a run published, as the next run loads it."""
+        return build_metadata_row(_published_metadata(m_publish))
+
+    # One batch of this board is 15 judge calls. The budgets include ones that
+    # end at the end of a batch (3, 5, 15, 30), one that ends a comparison
+    # before it (29), and 30, which is used up when the rule is met.
+    @pytest.mark.parametrize("budget", [3, 4, 5, 7, 11, 14, 15, 29, 30])
+    def test_runs_stopped_at_a_budget_stop_where_one_run_stops(self, budget):
+        # One run with no budget meets the rule at the end of its second batch
+        # (30 comparisons). Runs that each stop at a budget stop inside a
+        # batch. The next run finishes that batch before it looks at the rule,
+        # so the chain ends with the same 30 comparisons, not with fewer.
+        one_run = self._converged_board()
+        expected = sorted((r.sample_idx, r.model_a, r.model_b) for r in one_run)
+
+        existing: list[ComparisonResult] = []
+        meta_rows: list[dict] | None = None
+        calls = []
+        for _ in range(14):
+            ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+            judge, m_publish, _ = _run_judge(
+                [*self.FLAGS, "--max-comparisons", str(budget)],
+                ds,
+                ocr,
+                existing=existing,
+                judge=NameOrderJudge(),
+                existing_meta_override=meta_rows,
+            )
+            calls.append(judge.judged)
+            existing = self._stored_results(m_publish)
+            meta_rows = [*(meta_rows or []), self._published_row(m_publish)]
+            if judge.judged == 0:
+                break
+        assert calls[-1] == 0  # the last run found the rule met and judged nothing
+        assert sum(calls) == 30, calls
+        assert sorted((r.sample_idx, r.model_a, r.model_b) for r in existing) == expected
+
+    def test_a_run_stopped_inside_a_batch_is_finished_before_the_rule_is_checked(self):
+        # A Job killed after a checkpoint leaves comparisons that end inside a
+        # batch, and no metadata row for that run. One comparison of the second
+        # batch is missing: the run judges it, then stops at the end of the batch.
+        stored = self._converged_board()[:-1]
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        judge, m_publish, _ = _run_judge(
+            [*self.FLAGS],
+            ds,
+            ocr,
+            existing=stored,
+            judge=NameOrderJudge(),
+            checkpoint_resume=True,
+        )
+        assert judge.judged == 1
+        assert len(m_publish.call_args.args[1].comparison_log) == 30
+
+    @pytest.mark.parametrize("page_of_third_batch", [0, 1, 4])
+    def test_a_stop_at_the_end_of_a_page_inside_a_batch_is_not_the_end_of_a_batch(
+        self, page_of_third_batch
+    ):
+        # The board converged at the end of the second batch (30 rows). A later
+        # run then judged one whole page of the third batch and stopped. The
+        # stored comparisons end at the end of a page, inside a batch: the run
+        # judges the other four pages of that batch before it checks the rule.
+        converged = self._converged_board()
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        _, m_publish, _ = _run_judge(
+            [*self.FLAGS, "--no-adaptive"], ds, ocr, judge=NameOrderJudge()
+        )
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        extra_page = order[10 + page_of_third_batch]
+        one_more_page = [r for r in self._stored_results(m_publish) if r.sample_idx == extra_page]
+        assert len(one_more_page) == 3
+
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        judge, _, _ = _run_judge(
+            [*self.FLAGS],
+            ds,
+            ocr,
+            existing=[*converged, *one_more_page],
+            judge=NameOrderJudge(),
+        )
+        assert judge.judged == 12
+        assert {page for _, page in judge.pair_samples} == set(order[10:15]) - {extra_page}
+
+    @pytest.mark.parametrize(("stored_batches", "calls"), [(2, 10), (3, 5)])
+    def test_whole_batches_below_the_minimum_do_not_stop_a_two_model_board(
+        self, stored_batches, calls
+    ):
+        # Two models: one batch is 5 comparisons, and the rule is not checked
+        # before 20. Two or three stored batches, all won by one model, end at
+        # the end of a batch, but they are too few to stop on.
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        existing = [
+            ComparisonResult(sample_idx=page, model_a="model-a", model_b="model-b", winner="A")
+            for page in order[: 5 * stored_batches]
+        ]
+        ds, ocr = make_ds(n=40, models=("a", "b"))
+        judge, _, _ = _run_judge([*self.FLAGS], ds, ocr, existing=existing, judge=NameOrderJudge())
+        assert judge.judged == calls
+
+    def test_whole_batches_at_the_minimum_stop_a_two_model_board(self):
+        # Exactly 20 stored comparisons, all won by one model: the minimum is
+        # reached, the rule is met, and the run makes no judge call.
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        existing = [
+            ComparisonResult(sample_idx=page, model_a="model-a", model_b="model-b", winner="A")
+            for page in order[:20]
+        ]
+        ds, ocr = make_ds(n=40, models=("a", "b"))
+        judge, _, _ = _run_judge([*self.FLAGS], ds, ocr, existing=existing, judge=NameOrderJudge())
+        assert judge.judged == 0
+
+    def test_the_stored_comparisons_are_looked_at_once(self):
+        # The stored comparisons end inside the fifth batch (22 of 25 pages)
+        # and meet the rule there. The run finishes that batch. The new
+        # verdicts go the other way, so the rule is not met at the end of the
+        # batch, and the run goes on to its budget. A second look at the
+        # stored comparisons alone, at the next batch, would stop it there.
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        existing = [
+            ComparisonResult(
+                sample_idx=page,
+                model_a="model-a",
+                model_b="model-b",
+                winner="B" if position in (0, 4, 8, 12, 16) else "A",
+            )
+            for position, page in enumerate(order[:22])
+        ]
+
+        class SecondNameWins(FakeJudge):
+            """A judge that always prefers the model whose name sorts last."""
+
+            def judge(self, comparisons):
+                outputs = super().judge(comparisons)
+                for comp, output in zip(comparisons, outputs, strict=True):
+                    model_b_shown_as_a = comp.swapped
+                    output["winner"] = "A" if model_b_shown_as_a else "B"
+                return outputs
+
+        ds, ocr = make_ds(n=40, models=("a", "b"))
+        judge, m_publish, _ = _run_judge(
+            [*self.FLAGS, "--max-comparisons", "8"],
+            ds,
+            ocr,
+            existing=existing,
+            judge=SecondNameWins(),
+        )
+        assert judge.judged == 8
+        assert len(m_publish.call_args.args[1].comparison_log) == 30
+
+    def test_rows_of_a_model_outside_the_grid_do_not_block_the_check(self):
+        # A fourth model was judged earlier, on later pages, and is not in this
+        # run. Its rows are kept and take no part in the check: the three
+        # models of this run converged at the end of the second batch.
+        converged = self._converged_board()
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        out_of_grid = [
+            ComparisonResult(sample_idx=page, model_a="model-a", model_b="model-z", winner="A")
+            for page in order[20:30]
+        ]
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        judge, m_publish, _ = _run_judge(
+            [*self.FLAGS],
+            ds,
+            ocr,
+            existing=[*converged, *out_of_grid],
+            judge=NameOrderJudge(),
+        )
+        assert judge.judged == 0
+        assert len(m_publish.call_args.kwargs["preserved_comparisons"]) == 10
+
+    def test_the_targeted_message_has_no_hint_that_cannot_be_followed(self, capsys):
+        # --no-adaptive cannot be combined with --adaptive-strategy targeted.
+        existing = self._converged_board()
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        capsys.readouterr()
+        judge, _, _ = _run_judge(
+            [*self.FLAGS, "--adaptive-strategy", "targeted"],
+            ds,
+            ocr,
+            existing=existing,
+            judge=NameOrderJudge(),
+        )
+        out = " ".join(capsys.readouterr().out.split())
+        assert judge.judged == 0
+        assert "Existing comparisons already meet the adaptive stopping criteria." in out
+        assert "--no-adaptive" not in out
+
+    def test_stored_comparisons_after_an_unjudged_batch_are_not_a_finished_prefix(self):
+        # The judge calls of the first batch all failed, so nothing is stored
+        # for its pages. The second batch is stored, and the third stopped at a
+        # budget one comparison short. The first batch has no stored
+        # comparison, but the stored comparisons do not end at the end of a
+        # batch: the run judges the first batch, then checks the rule.
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        _, m_publish, _ = _run_judge(
+            [*self.FLAGS, "--no-adaptive"], ds, ocr, judge=NameOrderJudge()
+        )
+        every_page = self._stored_results(m_publish)
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        second_and_third = set(order[5:15])
+        stored = [r for r in every_page if r.sample_idx in second_and_third][:-1]
+        assert len(stored) == 29
+
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        judge, _, _ = _run_judge(
+            [*self.FLAGS],
+            ds,
+            ocr,
+            existing=stored,
+            judge=NameOrderJudge(),
+            checkpoint_resume=True,
+        )
+        assert judge.judged == 15
+        assert {page for _, page in judge.pair_samples} == set(order[:5])
+
+    def test_results_stored_in_another_visiting_order_get_no_early_check(self):
+        # Results from a version that visited the pages in another order are on
+        # pages that are not the first batches of this order. The run judges
+        # its first batch before it checks the rule, as it always did.
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        _, m_publish, _ = _run_judge(
+            [*self.FLAGS, "--no-adaptive"], ds, ocr, judge=NameOrderJudge()
+        )
+        every_page = self._stored_results(m_publish)
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        last_two_batches = set(order[30:40])
+        stored = [r for r in every_page if r.sample_idx in last_two_batches]
+        assert len(stored) == 30
+
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        judge, _, _ = _run_judge([*self.FLAGS], ds, ocr, existing=stored, judge=NameOrderJudge())
+        assert judge.judged == 15
+
+    @pytest.mark.parametrize("budget_exhausted", [True, False, None])
+    def test_the_check_reads_the_stored_comparisons_not_the_last_metadata_row(
+        self, budget_exhausted
+    ):
+        # The latest metadata row can describe an earlier run: a checkpoint
+        # writes comparisons and no metadata. Whatever that row says, a board
+        # whose comparisons end at the end of a batch and meet the rule makes
+        # no judge call.
+        ds, ocr = make_ds(n=40, models=("a", "b", "c"))
+        meta_row = {
+            "criteria": "default",
+            "prompt_hash": prompt_hash(CRITERIA_PROFILES["default"]),
+            "judge_text_mode": "normalized",
+            "max_ocr_text_len": 2500,
+            "judge_image_dim": 1024,
+            "budget_exhausted": budget_exhausted,
+        }
+        judge, _, _ = _run_judge(
+            [*self.FLAGS],
+            ds,
+            ocr,
+            existing=self._converged_board(),
+            judge=NameOrderJudge(),
+            existing_meta_override=[meta_row],
+        )
+        assert judge.judged == 0
+
+    def test_too_few_stored_comparisons_for_the_rule_still_judges(self):
+        # Two models: the rule is not checked before 20 comparisons. Twelve
+        # stored comparisons, however one-sided, do not stop the run.
+        ds, ocr = make_ds(n=40, models=("a", "b"))
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        existing = [
+            ComparisonResult(sample_idx=page, model_a="model-a", model_b="model-b", winner="A")
+            for page in order[:12]
+        ]
+        judge, _, _ = _run_judge([*self.FLAGS], ds, ocr, existing=existing, judge=NameOrderJudge())
+        assert judge.judged > 0
+
+    def test_rerun_with_an_added_model_still_judges(self, capsys):
+        # The stored board is converged for a, b and c. The new model d has no
+        # comparisons and so no interval: the stopping rule is not met.
+        existing = self._converged_board()
+        ds, ocr = make_ds(n=40, models=("a", "b", "c", "d"))
+        capsys.readouterr()
+
+        judge, _, _ = _run_judge([*self.FLAGS], ds, ocr, existing=existing, judge=NameOrderJudge())
+
+        assert judge.judged > 0
+        assert all("model-d" in pair for pair in judge.pairs_seen[:15])
+        assert "already meet the adaptive stopping criteria" not in capsys.readouterr().out
+
+    def test_rerun_of_an_unresolved_board_still_judges(self):
+        # All ties: the intervals overlap, so the rule is not met on the stored
+        # comparisons and the run judges the pages that are left.
+        ds, ocr = make_ds(n=10, models=("a", "b", "c"))
+        existing = [
+            ComparisonResult(sample_idx=page, model_a=left, model_b=right, winner="tie")
+            for page in range(8)
+            for left, right in (
+                ("model-a", "model-b"),
+                ("model-a", "model-c"),
+                ("model-b", "model-c"),
+            )
+        ]
+
+        judge, _, _ = _run_judge(
+            [*self.FLAGS], ds, ocr, existing=existing, judge=FakeJudge(winner="tie")
+        )
+
+        assert judge.judged == 6  # the 2 pages not yet judged, 3 pairs each
+
+
 class TestBudget:
     def test_budget_stops_at_n_and_publishes(self):
         # 10 samples x 3 pairs = 30 possible comparisons; cap at 12.
@@ -420,6 +790,89 @@ class TestBudget:
         assert any(page < 20 for page in pages)
         assert any(page >= 20 for page in pages)
 
+    @pytest.mark.parametrize("adaptive", [True, False])
+    def test_budget_stop_keeps_no_auto_tie_from_later_pages(self, adaptive):
+        # model-a and model-b give the same text on every second page of the
+        # visiting order, so that pair is auto-tied there with no judge call.
+        # A budget of 7 is used up on the third page visited:
+        #   page 1: 3 judged; page 2: 1 auto-tie + 2 judged; page 3: 2 judged.
+        ds, ocr = make_ds(n=40)
+        order = cli.judging_order(cli.sample_indices(40, None, 42), 42)
+        for page in order[1::2]:
+            ds._columns["col_b"][page] = ds._columns["col_a"][page]
+        flags = ["--max-comparisons", "7", "--checkpoint-every", "0"]
+        if not adaptive:
+            flags.insert(0, "--no-adaptive")
+
+        judge, m_publish, _ = _run_judge(flags, ds, ocr, judge=FakeJudge(winner="tie"))
+
+        assert judge.judged == 7
+        position = {page: n for n, page in enumerate(order)}
+        last_judged = max(position[page] for _, page in judge.pair_samples)
+        assert last_judged == 2
+        stored = m_publish.call_args.args[1].comparison_log
+        assert len(stored) == 8
+        assert all(position[row["sample_idx"]] <= last_judged for row in stored)
+        auto_tied_pages = [row["sample_idx"] for row in stored if row["agreement"] == "auto"]
+        assert auto_tied_pages == [order[1]]
+        meta = _published_metadata(m_publish)
+        assert meta.budget_exhausted is True
+        assert meta.total_comparisons == 7
+        assert meta.auto_tied == 1
+        assert meta.valid_comparisons == 7
+
+    @pytest.mark.parametrize("adaptive", [True, False])
+    def test_runs_stopped_at_a_budget_end_with_the_comparisons_of_one_run(self, adaptive):
+        # Auto-ties dropped at a budget stop are recorded by a later run: a
+        # chain of budgeted runs ends with the rows of one run with no budget.
+        def dataset():
+            ds, ocr = make_ds(n=12)
+            order = cli.judging_order(cli.sample_indices(12, None, 42), 42)
+            for page in order[1::2]:
+                ds._columns["col_b"][page] = ds._columns["col_a"][page]
+            return ds, ocr
+
+        def stored(m_publish):
+            return [
+                ComparisonResult(
+                    sample_idx=row["sample_idx"],
+                    model_a=row["model_a"],
+                    model_b=row["model_b"],
+                    winner=row["winner"],
+                    agreement=row["agreement"],
+                )
+                for row in m_publish.call_args.args[1].comparison_log
+            ]
+
+        def keys(results):
+            return sorted((r.sample_idx, r.model_a, r.model_b, r.agreement) for r in results)
+
+        mode = [] if adaptive else ["--no-adaptive"]
+        ds, ocr = dataset()
+        _, one_run, _ = _run_judge(
+            [*mode, "--checkpoint-every", "0"], ds, ocr, judge=FakeJudge(winner="tie")
+        )
+        expected = keys(stored(one_run))
+        assert sum(1 for key in expected if key[3] == "auto") == 6
+
+        existing: list[ComparisonResult] = []
+        judge_calls = 0
+        for _ in range(20):
+            ds, ocr = dataset()
+            judge, m_publish, _ = _run_judge(
+                [*mode, "--max-comparisons", "4", "--checkpoint-every", "0"],
+                ds,
+                ocr,
+                existing=existing,
+                judge=FakeJudge(winner="tie"),
+            )
+            judge_calls += judge.judged
+            existing = stored(m_publish)
+            if judge.judged == 0:
+                break
+        assert keys(existing) == expected
+        assert judge_calls == sum(1 for key in expected if key[3] != "auto")
+
     def test_no_budget_judges_everything(self):
         ds, ocr = make_ds(n=10)
         judge, m_publish, _ = _run_judge(["--no-adaptive", "--checkpoint-every", "0"], ds, ocr)
@@ -455,6 +908,79 @@ class TestFailedModelStatus:
         assert metadata.failed_models == ["model-a"]
         assert metadata.failed_outputs == {"model-a": 10}
 
+    @pytest.mark.parametrize("flags", [[], ["--max-samples", "10"], ["--max-samples", "50"]])
+    def test_whole_dataset_run_counts_every_row(self, flags):
+        # Without --max-samples below the dataset length, the judged sample is
+        # every row, so the counts are those of the whole dataset.
+        ds, ocr = make_ds(n=10)
+        ds._columns["col_a"] = ["[OCR ERROR]"] * 10
+        ds._columns["col_b"][3] = "[OCR ERROR]"
+        ds._columns["col_b"][7] = "[OCR ERROR]"
+
+        _, m_publish, _ = _run_judge(["--no-adaptive", "--checkpoint-every", "0", *flags], ds, ocr)
+
+        metadata = _published_metadata(m_publish)
+        assert metadata.failed_models == ["model-a"]
+        assert metadata.failed_outputs == {"model-a": 10, "model-b": 2}
+
+    def test_status_and_counts_follow_the_judged_sample(self, capsys):
+        # 40 rows, 10 of them judged. model-x has an error sentinel on every
+        # judged row and text on the others. model-y is the other way round.
+        from ocr_bench.publish import build_leaderboard_rows
+
+        ds, ocr = make_ds(n=40, models=("a", "b", "x", "y"))
+        sample = set(cli.sample_indices(40, 10, 42))
+        for row in range(40):
+            failing_column = "col_x" if row in sample else "col_y"
+            ds._columns[failing_column][row] = "[OCR ERROR]"
+
+        _, m_publish, _ = _run_judge(
+            ["--no-adaptive", "--checkpoint-every", "0", "--max-samples", "10"], ds, ocr
+        )
+
+        board = m_publish.call_args.args[1]
+        metadata = _published_metadata(m_publish)
+        assert metadata.failed_models == ["model-x"]
+        assert metadata.failed_outputs == {"model-x": 10}
+        assert metadata.failed_outputs_scope == "sample"
+        assert "model-x" not in board.elo
+        rows = {
+            row["model"]: row
+            for row in build_leaderboard_rows(
+                board, metadata.failed_models, metadata.failed_outputs
+            )
+        }
+        assert rows["model-x"]["status"] == "failed"
+        assert rows["model-x"]["elo"] is None
+        assert rows["model-y"]["status"] == "ranked"
+        assert rows["model-y"]["failed_outputs"] == 0
+        assert rows["model-y"]["wins"] + rows["model-y"]["losses"] + rows["model-y"]["ties"] == 20
+        # The counts agree with the coverage report, which is per sample.
+        for model, entry in metadata.model_coverage.items():
+            assert entry["sentinel_pages"] == metadata.failed_outputs.get(model, 0)
+        assert metadata.model_coverage["model-x"]["ranked_pages"] == 0
+        assert metadata.model_coverage["model-y"]["ranked_pages"] == 10
+        out = " ".join(capsys.readouterr().out.split())  # undo console line wrapping
+        assert "model-x: 10/10 outputs in the judged sample are error sentinels (100%)" in out
+        assert "this run is marked FAILED" in out
+        assert "model-y:" not in out
+
+    def test_model_failed_on_the_sample_does_not_block_adaptive_stopping(self):
+        # model-x has text only on rows outside the judged sample. In the model
+        # grid it would have no comparison and no interval, and a model with no
+        # interval keeps the adaptive stopping rule from being met.
+        ds, ocr = make_ds(n=80, models=("a", "b", "c", "x"))
+        for row in cli.sample_indices(80, 40, 42):
+            ds._columns["col_x"][row] = "[OCR ERROR]"
+
+        judge, m_publish, _ = _run_judge(
+            ["--max-samples", "40", "--checkpoint-every", "0"], ds, ocr, judge=NameOrderJudge()
+        )
+
+        assert _published_metadata(m_publish).failed_models == ["model-x"]
+        # Two batches of 5 pages x 3 pairs, then the rule is met.
+        assert judge.judged == 30
+
 
 def _prose_ds(n: int, lengths: dict[str, int]):
     """A FakeDataset whose outputs are distinct prose of a set length per model."""
@@ -488,7 +1014,7 @@ class TestCoverageReport:
             "model-c": {"sampled_pages": 10, "ranked_pages": 10, "sentinel_pages": 0},
         }
         out = " ".join(capsys.readouterr().out.split())  # undo console line wrapping
-        assert "Note: model-b: 1/10 outputs are error sentinels (10.0%)" in out
+        assert "Note: model-b: 1/10 outputs in the judged sample are error sentinels (10.0%)" in out
         assert "its rank leaves out those pages" in out
         assert "9/10" in out  # the Pages column
         assert "model-b: ranked on 9 of 10 pages; 1 error sentinel(s) left out" in out
@@ -519,7 +1045,7 @@ class TestCoverageReport:
         ds._columns["col_b"][1] = "[OCR ERROR]"  # 20%
         _run_judge(["--no-adaptive", "--checkpoint-every", "0"], ds, ocr)
         out = " ".join(capsys.readouterr().out.split())
-        assert "model-b: 2/10 outputs are error sentinels (20%)" in out
+        assert "model-b: 2/10 outputs in the judged sample are error sentinels (20%)" in out
         assert "Note: model-b" not in out
 
 

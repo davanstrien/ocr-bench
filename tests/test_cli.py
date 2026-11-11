@@ -841,7 +841,7 @@ class TestMergeAutoTies:
 
 
 class TestTrimToBudget:
-    """The budget caps judge calls; auto-ties are free and always survive."""
+    """The budget stops the run at the last judged pair that fits."""
 
     def test_under_budget_unchanged(self):
         comps = [_make_comparison(i) for i in range(3)]  # 3 judgeable
@@ -849,25 +849,47 @@ class TestTrimToBudget:
         assert out is comps
         assert hit is False
 
-    def test_caps_judged_but_keeps_every_auto_tie(self):
-        # 3 judgeable + 2 auto-ties, budget of 1 judge call.
+    def test_cuts_after_the_last_judged_pair_that_fits(self):
+        # 3 judgeable + 3 auto-ties, budget of 2 judge calls.
         comps = [
-            _make_comparison(0),  # judged
-            _auto_comparison(1),  # auto-tie
-            _make_comparison(2),  # judged
-            _auto_comparison(3),  # auto-tie
-            _make_comparison(4),  # judged
+            _auto_comparison(0),  # auto-tie before the cut: kept
+            _make_comparison(1),  # judged (1 of 2)
+            _auto_comparison(2),  # auto-tie before the cut: kept
+            _make_comparison(3),  # judged (2 of 2): the run stops here
+            _auto_comparison(4),  # auto-tie after the cut: dropped
+            _make_comparison(5),  # judged, over the budget: dropped
+            _auto_comparison(6),  # auto-tie after the cut: dropped
         ]
+        out, hit = _trim_to_budget(comps, 2)
+        assert hit is True
+        assert [c.sample_idx for c in out] == [0, 1, 2, 3]
+        assert sum(c.auto_result is None for c in out) == 2  # capped at the budget
+
+    def test_no_auto_tie_is_kept_from_pages_after_the_cut(self):
+        # One pair is identical on every page after the first. The budget is
+        # used on page 0, so none of its later auto-ties may be kept.
+        comps = [_make_comparison(0)] + [_auto_comparison(page) for page in range(1, 6)]
+        comps.append(_make_comparison(6))
         out, hit = _trim_to_budget(comps, 1)
         assert hit is True
-        judged = [c for c in out if c.auto_result is None]
-        autos = [c for c in out if c.auto_result is not None]
-        assert len(judged) == 1  # capped at the budget
-        assert len(autos) == 2  # every auto-tie kept — they cost no judge call
-        assert judged[0].sample_idx == 0  # order preserved
+        assert [c.sample_idx for c in out] == [0]
 
-    def test_all_auto_ties_never_trimmed(self):
-        # Zero judge budget, but auto-ties don't count against it.
+    def test_keeps_nothing_when_no_judged_pair_fits(self):
+        comps = [_auto_comparison(0), _make_comparison(1), _auto_comparison(2)]
+        out, hit = _trim_to_budget(comps, 0)
+        assert out == []
+        assert hit is True
+
+    def test_exactly_on_budget_unchanged(self):
+        # Every judged pair fits, so the run reaches the end of the list and
+        # the auto-tie after the last judged pair is kept.
+        comps = [_make_comparison(0), _make_comparison(1), _auto_comparison(2)]
+        out, hit = _trim_to_budget(comps, 2)
+        assert out is comps
+        assert hit is False
+
+    def test_all_auto_ties_unchanged(self):
+        # No judged pair is dropped, so the budget is not hit.
         comps = [_auto_comparison(i) for i in range(4)]
         out, hit = _trim_to_budget(comps, 0)
         assert out is comps
