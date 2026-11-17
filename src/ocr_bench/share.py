@@ -131,6 +131,7 @@ SETTINGS_KEYS = (
     "judged_with_version",
     "repo",
     "sampled_pages",
+    "failed_outputs_scope",
 )
 SHARE_FILES = ("README.md", "overall.jsonl", "slices.jsonl", "board.json")
 # The results repo folders judge writes, in the order it pushes them.
@@ -824,10 +825,17 @@ def build_card(settings: dict, overall_rows: list[dict], slice_rows: list[dict])
             "",
             "⚠ marks a model that returned an error message (such as `[OCR ERROR]`) instead "
             "of text on some pages. Those pages were skipped for it, so its rating rests on "
-            f"the pages in the Pages column. Error outputs in the source dataset: {counts}.",
+            "the pages in the Pages column. Error outputs in the "
+            f"{settings['failed_outputs_scope']}: {counts}.",
         ]
     if any(row["status"] == "failed" for row in overall_rows):
-        lines += ["", "FAILED: every output was an error message, so the model has no rating."]
+        where = (
+            " in the judged sample" if settings["failed_outputs_scope"] == "judged sample" else ""
+        )
+        lines += [
+            "",
+            f"FAILED: every output{where} was an error message, so the model has no rating.",
+        ]
     if slice_rows:
         column = _label(settings["slice_column"])
         lines += [
@@ -1245,6 +1253,18 @@ def _release_version(value: object) -> str:
     return text
 
 
+def _failed_outputs_scope(metadata: dict) -> str:
+    """The rows that the stored error-output counts cover, in the card's words.
+
+    ``judge`` records ``failed_outputs_scope`` as ``sample`` when it counts over
+    the judged sample. Results with no such value were judged before the field
+    existed, when the counts were over every row of the source dataset.
+    """
+    if metadata.get("failed_outputs_scope") == "sample":
+        return "judged sample"
+    return "source dataset"
+
+
 def _public_criteria(criteria: str) -> str:
     """A --criteria-file run is recorded as ``custom:<file name>``; publish ``custom``."""
     return "custom" if criteria.startswith("custom:") else criteria
@@ -1366,6 +1386,7 @@ def plan_share(
         "judged_with_version": _release_version(metadata.get("ocr_bench_version")),
         "repo": board_repo,
         "sampled_pages": _sampled_pages(metadata),
+        "failed_outputs_scope": _failed_outputs_scope(metadata),
     }
     allowed = frozenset(
         {

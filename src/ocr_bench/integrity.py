@@ -140,22 +140,25 @@ def compute_model_stats(
     ocr_columns: dict[str, str],
     max_ocr_text_len: int = MAX_OCR_TEXT_LENGTH,
     normalize: bool = True,
+    indices: list[int] | None = None,
 ) -> list[ColumnStats]:
     """Per-model health stats over a loaded (merged or flat) dataset.
 
-    ``ocr_columns`` maps column/config name → model label. Used by the judge to
-    derive per-model ``failed_outputs`` and the >10% sentinel-rate warning.
+    ``ocr_columns`` maps column/config name → model label. With ``indices``,
+    only those rows are counted; without, every row. The judge passes its
+    judged sample and derives per-model ``failed_outputs``, the failed models
+    and the >10% sentinel-rate warning from the result.
     """
-    return [
-        compute_column_stats(
-            col,
-            model,
-            _column_values(dataset, col),
-            max_ocr_text_len,
-            normalize=normalize,
+    stats: list[ColumnStats] = []
+    for col, model in ocr_columns.items():
+        if indices is None:
+            values = _column_values(dataset, col)
+        else:
+            values = _sampled_values(dataset, col, indices)
+        stats.append(
+            compute_column_stats(col, model, values, max_ocr_text_len, normalize=normalize)
         )
-        for col, model in ocr_columns.items()
-    ]
+    return stats
 
 
 def failed_output_counts(stats: list[ColumnStats]) -> dict[str, int]:

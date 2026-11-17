@@ -14,6 +14,7 @@ from html.parser import HTMLParser
 from itertools import combinations
 from typing import Any
 
+import numpy as np
 from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -598,10 +599,95 @@ def _apply_cap(text: str, max_len: int) -> tuple[str, bool]:
 # --- Image helpers ---
 
 
+# PIL greyscale modes that hold values above 255: 16-bit integer (in its four
+# byte-order spellings), 32-bit integer and 32-bit float.
+_WIDE_GREY_MODES = frozenset({"I;16", "I;16L", "I;16B", "I;16N", "I", "F"})
+
+
+# Rows converted at a time. The page is scaled in strips, so the extra memory
+# is the pixel array that numpy reads from the image, the 8-bit result and a
+# strip or two in float64, not several full-size float copies.
+_STRIP_ROWS = 256
+
+
+def _finite_range(values: np.ndarray) -> tuple[float, float] | None:
+    """The lowest and highest value of a pixel array, or None when it has none.
+
+    A float image can hold pixels that are not a number, or infinite. They are
+    left out of the range.
+    """
+    if values.dtype.kind != "f":
+        # Exact for every integer mode. A 32-bit float cannot hold every 32-bit
+        # integer, so the range is taken before any conversion.
+        return float(values.min()), float(values.max())
+    low: float | None = None
+    high: float | None = None
+    for first_row in range(0, values.shape[0], _STRIP_ROWS):
+        strip = values[first_row : first_row + _STRIP_ROWS]
+        finite = strip[np.isfinite(strip)]
+        if finite.size == 0:
+            continue
+        strip_low = float(finite.min())
+        strip_high = float(finite.max())
+        low = strip_low if low is None else min(low, strip_low)
+        high = strip_high if high is None else max(high, strip_high)
+    if low is None or high is None:
+        return None
+    return low, high
+
+
+def _wide_grey_to_8bit(image: Image.Image) -> Image.Image:
+    """Bring a 16-bit, 32-bit or float greyscale image into the 8-bit range.
+
+    ``Image.convert("RGB")`` clips these modes: every value above 255 becomes
+    255. A 16-bit scan with paper near 30000 and ink near 2000, converted that
+    way, is a white image with no text on it.
+
+    When the image holds a value above 255, its values are divided by its
+    largest value and spread over 0 to 255: the lightest pixel becomes white,
+    and zero stays black. The darkest pixel is not stretched down to black, so
+    a blank page stays a light page, and faint marks such as show-through
+    stay faint. An image with values below zero uses its lowest value as
+    black. The result is an ``L`` image.
+
+    An image whose values are all 255 or below is already in the 8-bit range
+    and is returned unchanged (this includes a float image with values from 0
+    to 1). So is an image in any other mode.
+    """
+    if image.mode not in _WIDE_GREY_MODES:
+        return image
+    values = np.asarray(image)
+    value_range = _finite_range(values)
+    if value_range is None:
+        return image
+    low, high = value_range
+    if high <= 255:
+        return image
+    black = min(low, 0.0)
+    scale = 255.0 / (high - black)
+    scaled = np.empty(values.shape, dtype=np.uint8)
+    for first_row in range(0, values.shape[0], _STRIP_ROWS):
+        # float64 holds every 32-bit integer exactly.
+        strip = values[first_row : first_row + _STRIP_ROWS].astype(np.float64)
+        strip -= black
+        strip *= scale
+        # A pixel that is not a number becomes black; an infinite one becomes
+        # black or white.
+        np.nan_to_num(strip, copy=False, nan=0.0, posinf=255.0, neginf=0.0)
+        np.rint(strip, out=strip)
+        np.clip(strip, 0.0, 255.0, out=strip)
+        scaled[first_row : first_row + _STRIP_ROWS] = strip
+    return Image.fromarray(scaled)
+
+
 def image_to_base64(image: Image.Image, max_dim: int = MAX_IMAGE_DIM) -> str:
-    """Convert a PIL image to a base64-encoded JPEG string, resizing if needed."""
+    """Convert a PIL image to a base64-encoded JPEG string, resizing if needed.
+
+    16-bit, 32-bit and float greyscale images are scaled into the 8-bit range
+    first (see :func:`_wide_grey_to_8bit`).
+    """
     if image.mode != "RGB":
-        image = image.convert("RGB")
+        image = _wide_grey_to_8bit(image).convert("RGB")
     if max(image.size) > max_dim:
         ratio = max_dim / max(image.size)
         new_size = (int(image.width * ratio), int(image.height * ratio))

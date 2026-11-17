@@ -327,6 +327,17 @@ class TestEvaluationProvenanceHash:
         assert row["adaptive"] is None
         assert row["ocr_bench_version"] == ""
 
+    def test_failed_outputs_scope_is_the_judged_sample(self):
+        meta = EvalMetadata(
+            source_dataset="repo/data",
+            judge_models=[],
+            seed=42,
+            max_samples=0,
+            total_comparisons=0,
+            valid_comparisons=0,
+        )
+        assert build_metadata_row(meta)["failed_outputs_scope"] == "sample"
+
     def test_run_mode_and_version_recorded(self):
         meta = EvalMetadata(
             source_dataset="repo/data",
